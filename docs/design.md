@@ -6,10 +6,11 @@ Wispr Flow is the behavior reference. Its architecture is recorded in `docs/rese
 
 ## Constraints
 
-- The phone build has no `INTERNET` permission. Model files are copied on with adb. The only way logs leave the phone is `adb exec-out run-as` against a debuggable build.
+- The phone build has no `INTERNET` permission, checked in the merged manifest, since a dependency's manifest can add it; the app manifest removes it with `tools:node="remove"`. Model files are copied on with adb. The only way logs leave the phone is `adb exec-out run-as` against a debuggable build.
+- `android:allowBackup="false"` and `dataExtractionRules` excluding all domains, because Android's system backup and device transfer would otherwise copy the edit log off the phone without any app permission.
 - Weights and libraries are free to use and ship. Parakeet is CC-BY-4.0, so the about screen credits NVIDIA. S1-mini is Apache-2.0 plus a naming clause: wherever the weights are used they stay "S1-mini" by "Superwhisper", capitalization included, with the Apache `LICENSE` and `NOTICE` retained.
-- The accessibility process stays resident and does not hold a model between takes. The recognizer is mapped while a take is open. The cleaner is mapped after the take stops. Both are unmapped once the cleaned text is inserted.
-- The recognizer and the cleaner are a library with a command-line entry on this machine. The Android app calls the same stages; it does not grow a second pipeline.
+- The accessibility process stays resident and does not hold a model between takes. The recognizer is loaded while a take is open and unloaded after the last slice. The cleaner is loaded after that and unloaded once the cleaned text is inserted.
+- The recognizer and the cleaner are a Python library with a command-line entry on this machine. The Android app runs the same stages in Kotlin over the same model files. The values both sides must agree on — the system prompt, control-line values, email package list, slice length, cleaner chunk size, and script threshold — live in one data file in this repo that the library reads and the Android build packages as an asset.
 
 ## Pipeline
 
@@ -17,11 +18,11 @@ Wispr Flow is the behavior reference. Its architecture is recorded in `docs/rese
 16 kHz mono PCM  →  Parakeet (sherpa-onnx)  →  raw text  →  S1-mini  →  cleaned text
 ```
 
-A take has no time limit. Audio is appended to a file for as long as the take is open. The recognizer runs on successive slices of that file during the take, each slice at most 30 seconds of audio, and the raw text is concatenated. A slice may end early on a silence so a word is not cut in half. That silence does not end the take. Those slices are one recognizer stage. After the take stops, S1-mini runs once on the concatenated transcript. There is no second rewrite. One-shot recognition of a long file is what runs out of memory; the slice is the recognizer's input size, and the recording itself is not capped. The cleaner context is the transcript length, up to S1-mini's 40960-token window. A transcript past that window is cleaned in order-preserving segments and concatenated.
+A take has no time limit. Audio is appended to a file for as long as the take is open. The recognizer runs on successive slices of that file during the take, each slice at most 30 seconds of audio, and the raw text is concatenated. A slice may end early on a silence so a word is not cut in half. That silence does not end the take. Those slices are one recognizer stage. After the take stops, S1-mini cleans the concatenated transcript in a single pass. There is no second rewrite. One-shot recognition of a long file is what runs out of memory; the slice is the recognizer's input size, and the recording itself is not capped. S1-mini is trained on inputs of about 1,000 tokens (roughly five minutes of speech), so a longer transcript is split at sentence boundaries into chunks under that size, each cleaned once in order, and the outputs are concatenated.
 
-Parakeet TDT 0.6B v3, int8 ONNX through sherpa-onnx, is the recognizer. On a Galaxy S10 that runtime finishes 30 seconds of audio in about 2.8 seconds. The same published run has Whisper Tiny at 2.1 seconds through sherpa-onnx and 106 seconds through one whisper.cpp build; that gap is a reason to start on sherpa-onnx, and it is one build's result rather than a limit on every whisper.cpp binary. v3's published English word-error rate on the short-form average is lower than Whisper large-v3 at a quarter of the size, and v3 already emits punctuation and capitalization. Takes start only from an English keyboard. S1-mini is skipped, and the raw transcript is inserted, when fewer than half of the Unicode letters in the transcript are in the Latin script.
+Parakeet TDT 0.6B v3, int8 ONNX through sherpa-onnx, is the recognizer. On a Galaxy S10 that runtime finishes 30 seconds of audio in about 2.8 seconds. The same published run has Whisper Tiny at 2.1 seconds through sherpa-onnx and 106 seconds through one whisper.cpp build; that gap is a reason to start on sherpa-onnx, and it is one build's result rather than a limit on every whisper.cpp binary. v3's published English word-error rate on the short-form average is lower than Whisper large-v3 at under half the size (0.6B against 1.55B), and v3 already emits punctuation and capitalization. Takes start only from an English keyboard. S1-mini is skipped, and the raw transcript is inserted, when fewer than half of the Unicode letters in the transcript are in the Latin script.
 
-S1-mini Q4_K_M (462 MB, a Qwen3-0.6B fine-tune) is the cleaner. It removes fillers, resolves a self-correction to the later phrase, and writes punctuation, numbers, dates, and addresses. Decode is greedy at temperature 0 with thinking disabled. The system prompt and the control line are the training format; changing the wording makes it hallucinate.
+S1-mini Q4_K_M (462 MB GGUF, a Qwen3-0.6B fine-tune, run with llama.cpp) is the cleaner. It removes fillers, resolves a self-correction to the later phrase, and writes punctuation, numbers, dates, currency, and email addresses. Decode is greedy at temperature 0 with thinking disabled, and `max_new_tokens` is `1.3 × input_tokens + 32`. The system prompt is copied verbatim from the `superwhisper/s1-mini` model card; it and the control line are the training format, and changing the wording makes it hallucinate.
 
 ```
 [Styling: semi-formal] [Structure: lists] [Context: general|email]
@@ -30,7 +31,7 @@ S1-mini Q4_K_M (462 MB, a Qwen3-0.6B fine-tune) is the cleaner. It removes fille
 
 `lists` is the standing structure value because the model leaves non-enumerations as prose. `email` is selected for `com.google.android.gm`, `com.samsung.android.email.provider`, and `com.microsoft.office.outlook`; every other package gets `general`. The cleaner receives the recognizer text unchanged. Both strings are kept.
 
-If the edit log shows S1-mini leaving rambles too close to the spoken wording, the replacement is one instruct call in S1-mini's place, still with no second rewrite. That model is Qwen3.5-2B with thinking disabled. Qwen has no 1.5B in the Qwen3 or Qwen3.5 lines. Qwen3's nearest size is 1.7B. Qwen3.5's nearest sizes are 0.8B and 2B, and 2B is the one in this band. Qwen2.5-1.5B is the older model of that size.
+If the edit log shows S1-mini leaving rambles too close to the spoken wording, the replacement is one instruct call in S1-mini's place, still with no second rewrite. That model is Qwen3.5-2B with thinking disabled; the Qwen3.5 line has no size between 0.8B and 2B, and Qwen3.5-0.8B is not better than S1-mini at this job.
 
 ## Host library
 
@@ -42,7 +43,7 @@ clean(raw, context) -> Cleaned(text, elapsed_ms)
 run(wav_path, context) -> Result(raw, cleaned, asr_ms, clean_ms)
 ```
 
-`python -m stt_button <wav> [--context general|email]` prints the result as one JSON object. Tests cover the control line with the models absent. Timing tests are marked slow and skip when `STT_MODEL_DIR` is unset.
+`transcribe` slices the wav exactly as the phone slices a take, and `clean` chunks exactly as the phone does, so a host run measures what the phone will produce. `python -m stt_button <wav> [--context general|email]` prints the result as one JSON object. Tests cover the control line, slicing, and chunking with the models absent. Timing tests are marked slow and skip when `STT_MODEL_DIR` is unset.
 
 ## Phone app
 
@@ -62,7 +63,7 @@ A missing match, an empty locale and tag, a value of `-1`, or any language subta
 
 The device check has to see the secure setting change across all three enabled layouts. If a language switch on this phone does not change the setting, the overlay stays off until the check names an accessibility event that does fire for that switch, and the service subscribes only to that event, filtered to the IME package.
 
-The accessibility config matches what insertion requires: `canRetrieveWindowContent`, `FLAG_RETRIEVE_INTERACTIVE_WINDOWS`, `FLAG_REPORT_VIEW_IDS`, `FLAG_INPUT_METHOD_EDITOR`. `FLAG_REQUEST_FILTER_KEY_EVENTS` is omitted until a concrete key event is needed. `canPerformGestures` is omitted. Event types stay at `TYPE_WINDOWS_CHANGED` in the static config, which is also when the window list is read; `TYPE_VIEW_TEXT_CHANGED` is enabled at runtime only for a field this app just wrote into, and cleared when that field blurs.
+The accessibility config matches what the overlay and insertion require: `canRetrieveWindowContent`, `FLAG_RETRIEVE_INTERACTIVE_WINDOWS`, `FLAG_REPORT_VIEW_IDS`, `FLAG_INPUT_METHOD_EDITOR`. `FLAG_REQUEST_FILTER_KEY_EVENTS` is omitted until a concrete key event is needed. `canPerformGestures` is omitted. The static event types are `TYPE_WINDOWS_CHANGED`, which is when the window list and the microphone bounds are read, and `TYPE_VIEW_FOCUSED`, because moving between two fields while the keyboard stays up (username to password) changes no window. `TYPE_VIEW_TEXT_CHANGED` is enabled at runtime only for a field this app just wrote into, and cleared when that field blurs.
 
 ### Where the button sits
 
@@ -72,11 +73,17 @@ While the subtype is English and the voice-typing node has bounds, the button ma
 
 When that node has no bounds, the button is placed at the top-right of the IME window, which is where Gboard's toolbar microphone usually sits. That spot is a guess. The button can be dragged whenever it is showing, and it stays where the finger releases, including off the keys. A later window change does not move it back onto the keyboard. After it has been dragged clear of the microphone, taps on the microphone reach Gboard.
 
-Tap starts a take. Tap again stops it and runs the cleaner on the transcript gathered so far. A pause in speech does not stop a take, and there is no timer. Switching the keyboard off English removes the button and discards the open take without inserting, because the microphone has to be left uncovered. While a take is open the button stays on screen so it can be tapped to stop. Audio is 16 kHz mono PCM16 from `AudioRecord`, appended to a file in the app's files dir. A microphone foreground service runs only while a take is open.
+Tap starts a take. Tap again stops it and runs the cleaner on the transcript gathered so far. A pause in speech does not stop a take, and there is no timer. Switching the keyboard off English removes the button and discards the open take without inserting, because the microphone has to be left uncovered. While a take is open the button stays on screen so it can be tapped to stop. From the stop tap until insertion the button shows it is busy and ignores taps. Audio is 16 kHz mono PCM16 from `AudioRecord`, appended to a file in the app's files dir. A microphone foreground service runs only while a take is open.
 
 ### Insertion
 
-The utterance is inserted at the caret. Characters already in the field stay. A selection is collapsed to its end before the insert, so highlighted text is kept. `AccessibilityService.getInputMethod()` does this with `commitText`. If that connection is null, the service saves the clipboard, pastes at the caret, and restores the previous clip. `ACTION_SET_TEXT` writes the whole field, so it is used only to store the previous text with the utterance added at the caret. Each path is tried once. A read-back that does not contain the utterance is logged; the field is left as it stands rather than written again.
+The utterance is inserted at the caret. Characters already in the field stay. A selection is collapsed to its end before the insert, so highlighted text is kept. The paths, in order:
+
+1. `commitText` on `AccessibilityService.getInputMethod()`'s current connection.
+2. Clipboard: save the current clip, paste at the caret, restore the saved clip. If the service cannot read the current clip, this path is skipped rather than overwriting the user's clipboard.
+3. `ACTION_SET_TEXT` with the previous text and the utterance added at the caret. It rewrites the whole field, which is why it is last.
+
+A path is skipped when it is unavailable (a null connection, an unreadable clip) and abandoned when its call returns failure; each is tried once. A read-back that does not contain the utterance is logged, and the field is left as it stands rather than written again.
 
 ### Edit log
 
@@ -87,7 +94,7 @@ Append-only JSONL under the app's files dir, `logs/edits.jsonl`. One dictation, 
 {"event":"edit","id":"<same uuid>","ts":"<iso8601>","text_after":"..."}
 ```
 
-`text_before` is the field contents at insert time. `text_after` is written when that field loses focus or the focused window's package changes, whichever comes first. Send buttons are not reliably visible, and some apps destroy the field on send without a focus event. Each line is one JSON object with escaped strings. Lines are written for fields this app inserted into. Other typing is not recorded. Password, numeric, and phone fields never reach this path because the button never appears there.
+`text_before` is the field contents at insert time. While the field is tracked, the service keeps its latest non-empty text from `TYPE_VIEW_TEXT_CHANGED`. `text_after` is that snapshot, written when the field loses focus or the focused window's package changes, whichever comes first, so a field that clears on send still records what was sent. Send buttons are not reliably visible, and some apps destroy the field on send without a focus event. Each line is one JSON object with escaped strings. Lines are written for fields this app inserted into. Other typing is not recorded. Password, numeric, and phone fields never reach this path because the button never appears there.
 
 Pull with:
 
@@ -99,7 +106,7 @@ adb exec-out run-as com.ezhou.sttbutton cat files/logs/edits.jsonl
 
 - No boot-time model load, no analytics, no wake lock held across takes.
 - Accessibility work is event-driven. There is no polling watchdog.
-- The recognizer stays mapped for the length of a take, because slices run while the take is open. The cleaner is mapped after the stop tap, then both are unmapped. Peak extra RAM is one model at a time: Parakeet (~700 MB) during the take, then S1-mini (~500 MB) after it.
+- The recognizer stays loaded for the length of a take, because slices run while the take is open, and is unloaded after the last slice. The cleaner is loaded next and unloaded after insertion. Peak extra RAM is one model at a time: Parakeet (~700 MB) during the take, then S1-mini (~500 MB) after it.
 - Samsung unrestricted battery is requested once so the accessibility process survives Doze. That is a setting, not a second monitor service.
 
 ## v1
@@ -115,5 +122,7 @@ Before the recognizer is packaged into the APK, confirm on the SM-S938U:
 - With Gboard on English (US), the voice-typing control has usable bounds in the accessibility tree, and a `TYPE_ACCESSIBILITY_OVERLAY` of that size receives the tap without moving the cursor. If the control has no bounds, the button appears at the top-right of the keyboard and can be dragged off it, after which the microphone receives taps.
 - Switching to 拼音 and to 手写 changes `selected_input_method_subtype`, the overlay is gone on both, and a tap on the microphone starts Gboard voice typing. A switch that does not change the setting fails this check.
 - With the model files absent, the overlay is absent on the English layout too.
+- A tap on the overlay, with another app in the foreground, starts the microphone foreground service from the accessibility service and `AudioRecord` captures non-silent audio. Android silences background capture without a while-in-use exemption, and this app does not hold `SYSTEM_ALERT_WINDOW`.
+- The service can read the current clipboard clip while another app is focused. If it cannot, the clipboard insertion path is skipped on this phone.
 
 The library does not depend on this check.
