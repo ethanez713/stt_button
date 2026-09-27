@@ -13,3 +13,6 @@ __pycache__/
 .venv/
 venv/
 *.wav
+
+# Host recordings and experiment outputs are personal audio/text
+data/
