@@ -1,0 +1,15 @@
+# Model weights live under STT_MODEL_DIR, never in the repo
+*.onnx
+*.gguf
+*.bin
+
+.env*
+.secrets
+.secrets/
+*secret*.json
+token.json
+
+__pycache__/
+.venv/
+venv/
+*.wav
