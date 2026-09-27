@@ -1,6 +1,6 @@
 # Local dictation
 
-A personal Android dictation tool: while Gboard is in English, a button sits on Gboard's microphone, runs local speech recognition, then a small cleanup model, and types the result into whatever field is focused. On any other keyboard language the microphone is left uncovered, so Gboard's own voice typing still receives the tap. The host can run the same two stages on a wav file so model choices are tested here before anything is installed on the phone.
+A personal Android dictation tool: while Gboard is in English, a button sits on Gboard's microphone, runs local speech recognition, then a small cleanup model, and types the result into whatever field is focused. On any other keyboard language the microphone is left uncovered, so Gboard's own voice typing still receives the tap. The host can record from this machine's microphone and run the same two stages on the recording, so model choices are tested here before anything is installed on the phone.
 
 Wispr Flow is the behavior reference. Its architecture is recorded in `docs/research/wispr-flow.md`. Nothing in that build is reused: no code, no endpoints, no account, no analytics SDK.
 
@@ -8,30 +8,30 @@ Wispr Flow is the behavior reference. Its architecture is recorded in `docs/rese
 
 - The phone build has no `INTERNET` permission, checked in the merged manifest, since a dependency's manifest can add it; the app manifest removes it with `tools:node="remove"`. Model files are copied on with adb. The only way logs leave the phone is `adb exec-out run-as` against a debuggable build.
 - `android:allowBackup="false"` and `dataExtractionRules` excluding all domains, because Android's system backup and device transfer would otherwise copy the edit log off the phone without any app permission.
-- Weights and libraries are free to use and ship. Parakeet is CC-BY-4.0, so the about screen credits NVIDIA. S1-mini is Apache-2.0 plus a naming clause: wherever the weights are used they stay "S1-mini" by "Superwhisper", capitalization included, with the Apache `LICENSE` and `NOTICE` retained.
+- Weights and libraries are free to use and ship. Parakeet Unified is under the NVIDIA Open Model License, which permits use and redistribution with the license and its attribution notice kept; the about screen carries both. S1-mini is Apache-2.0 plus a naming clause: wherever the weights are used they stay "S1-mini" by "Superwhisper", capitalization included, with the Apache `LICENSE` and `NOTICE` retained.
 - The accessibility process stays resident and does not hold a model between takes. The recognizer is loaded while a take is open and unloaded after the last slice. The cleaner is loaded after that and unloaded once the cleaned text is inserted.
-- The recognizer and the cleaner are a Python library with a command-line entry on this machine. The Android app runs the same stages in Kotlin over the same model files. The values both sides must agree on — the system prompt, control-line values, email package list, slice length, cleaner chunk size, and script threshold — live in one data file in this repo that the library reads and the Android build packages as an asset.
+- The recognizer and the cleaner are a Python library with a command-line entry on this machine. The Android app runs the same stages in Kotlin over the same model files. The values both sides must agree on — the system prompt, the control line, the take cap, slice length, and cleaner chunk size — live in `config/pipeline.json`, which the library reads and the Android build packages as an asset.
 
 ## Pipeline
 
 ```
-16 kHz mono PCM  →  Parakeet (sherpa-onnx)  →  raw text  →  S1-mini  →  cleaned text
+16 kHz mono PCM  →  Parakeet Unified EN (sherpa-onnx)  →  raw text  →  S1-mini  →  cleaned text
 ```
 
-A take has no time limit. Audio is appended to a file for as long as the take is open. The recognizer runs on successive slices of that file during the take, each slice at most 30 seconds of audio, and the raw text is concatenated. A slice may end early on a silence so a word is not cut in half. That silence does not end the take. Those slices are one recognizer stage. After the take stops, S1-mini cleans the concatenated transcript in a single pass. There is no second rewrite. One-shot recognition of a long file is what runs out of memory; the slice is the recognizer's input size, and the recording itself is not capped. S1-mini is trained on inputs of about 1,000 tokens (roughly five minutes of speech), so a longer transcript is split at sentence boundaries into chunks under that size, each cleaned once in order, and the outputs are concatenated.
+A take lasts at most 5 minutes. Audio is appended to a file while the take is open. The recognizer runs on successive slices of that file during the take, each slice at most 30 seconds of audio, and the raw text is concatenated. A slice may end early on a silence so a word is not cut in half. That silence does not end the take. Those slices are one recognizer stage. After the take stops, S1-mini cleans the concatenated transcript in a single pass. There is no second rewrite. Slicing keeps the recognizer's input small and leaves only the last slice to run after the stop tap. S1-mini is trained on inputs of about 1,000 tokens, which a fast speaker can pass inside 5 minutes, so a longer transcript is split at sentence boundaries into chunks under that size, each cleaned once in order, and the outputs are concatenated.
 
-Parakeet TDT 0.6B v3, int8 ONNX through sherpa-onnx, is the recognizer. On a Galaxy S10 that runtime finishes 30 seconds of audio in about 2.8 seconds. The same published run has Whisper Tiny at 2.1 seconds through sherpa-onnx and 106 seconds through one whisper.cpp build; that gap is a reason to start on sherpa-onnx, and it is one build's result rather than a limit on every whisper.cpp binary. v3's published English word-error rate on the short-form average is lower than Whisper large-v3 at under half the size (0.6B against 1.55B), and v3 already emits punctuation and capitalization. Takes start only from an English keyboard. S1-mini is skipped, and the raw transcript is inserted, when fewer than half of the Unicode letters in the transcript are in the Latin script.
+Parakeet Unified EN 0.6B (`nvidia/parakeet-unified-en-0.6b`), int8 through sherpa-onnx's prebuilt non-streaming package (about 500 MB), is the recognizer. It is English-only and emits English letters with punctuation and capitalization. Its published Open ASR Leaderboard average is 5.91% WER, against 6.05% for Parakeet TDT 0.6B v2 and 6.34% for v3. sherpa-onnx is the runtime because a published Galaxy S10 run finishes 30 seconds of audio in about 2.8 seconds with a 0.6B Parakeet, and the same run put one whisper.cpp build 50 times behind sherpa-onnx on Whisper Tiny. The models that lead the leaderboard, Cohere Transcribe (2B) and Canary-Qwen (2.5B), decode autoregressively at three to four times this size, which is the wrong trade for a phone.
 
 S1-mini Q4_K_M (462 MB GGUF, a Qwen3-0.6B fine-tune, run with llama.cpp) is the cleaner. It removes fillers, resolves a self-correction to the later phrase, and writes punctuation, numbers, dates, currency, and email addresses. Decode is greedy at temperature 0 with thinking disabled, and `max_new_tokens` is `1.3 × input_tokens + 32`. The system prompt is copied verbatim from the `superwhisper/s1-mini` model card; it and the control line are the training format, and changing the wording makes it hallucinate.
 
 ```
-[Styling: semi-formal] [Structure: lists] [Context: general|email]
+[Styling: semi-formal] [Structure: lists] [Context: general]
 <raw transcript>
 ```
 
-`lists` is the standing structure value because the model leaves non-enumerations as prose. `email` is selected for `com.google.android.gm`, `com.samsung.android.email.provider`, and `com.microsoft.office.outlook`; every other package gets `general`. The cleaner receives the recognizer text unchanged. Both strings are kept.
+The control line is the same for every app. `lists` is the standing structure value because the model leaves non-enumerations as prose. `general` is the context everywhere, because `email` reshapes every output into a greeting, body, and sign-off. The cleaner receives the recognizer text unchanged. Both strings are kept.
 
-If the edit log shows S1-mini leaving rambles too close to the spoken wording, the replacement is one instruct call in S1-mini's place, still with no second rewrite. That model is Qwen3.5-2B with thinking disabled; the Qwen3.5 line has no size between 0.8B and 2B, and Qwen3.5-0.8B is not better than S1-mini at this job.
+The one replacement candidate is Qwen3.5-2B with thinking disabled, as a single instruct call in S1-mini's place, still with no second rewrite. The host comparison in `docs/plans/` chooses between them before the phone build, and the edit log checks the choice afterwards; the Qwen3.5 line has no size between 0.8B and 2B, and Qwen3.5-0.8B is not better than S1-mini at this job.
 
 ## Host library
 
@@ -39,17 +39,17 @@ Python, run with `pyrun`, in this repo. Models live outside the repo in a direct
 
 ```
 transcribe(wav_path) -> RawTranscript(text, elapsed_ms)
-clean(raw, context) -> Cleaned(text, elapsed_ms)
-run(wav_path, context) -> Result(raw, cleaned, asr_ms, clean_ms)
+clean(raw) -> Cleaned(text, elapsed_ms)
+run(wav_path) -> Result(raw, cleaned, asr_ms, clean_ms)
 ```
 
-`transcribe` slices the wav exactly as the phone slices a take, and `clean` chunks exactly as the phone does, so a host run measures what the phone will produce. `python -m stt_button <wav> [--context general|email]` prints the result as one JSON object. Tests cover the control line, slicing, and chunking with the models absent. Timing tests are marked slow and skip when `STT_MODEL_DIR` is unset.
+`transcribe` slices the wav exactly as the phone slices a take, and `clean` chunks exactly as the phone does, so a host run measures what the phone will produce. `python -m stt_button <wav>` prints the result as one JSON object. `python -m stt_button.record` records a take from this machine's microphone through WSLg's PulseAudio server into `data/recordings/`, which is gitignored. Tests cover the control line, slicing, and chunking with the models absent. Timing tests are marked slow and skip when `STT_MODEL_DIR` is unset.
 
 ## Phone app
 
 Package `com.ezhou.sttbutton`, minSdk 33, targetSdk 36, `android:isAccessibilityTool="true"`. The test device is the SM-S938U. Its enabled Gboard layouts are English (US), 简体中文拼音, and 简体中文手写.
 
-The accessibility service, the overlay, the recorder, and both model runtimes live in one process. Audio stays in a file. A 16 kHz mono PCM16 stream is 32 KB per second, about 115 MB per hour, which is a disk cost, not a duration cap. Passing that audio across a binder transaction would fail near 30 seconds, which is why recognition reads the file in-process. The microphone foreground service is held for the whole take, which is also what keeps the process from being cached while the recognizer is mapped. A native crash drops the service and the system restarts it.
+The accessibility service, the overlay, the recorder, and both model runtimes live in one process. Audio stays in a file: 16 kHz mono PCM16 is 32 KB per second, so a 5-minute take is about 9.6 MB. Passing that audio across a binder transaction would fail near 30 seconds, which is why recognition reads the file in-process. The microphone foreground service is held for the whole take, which is also what keeps the process from being cached while the recognizer is loaded. A native crash drops the service and the system restarts it.
 
 Sideloaded apps on Android 13 and later cannot enable an accessibility service until the user opens the app's system page and allows restricted settings. The first run on this phone includes that step, plus the Samsung unrestricted-battery setting. Until both model files are present in the app's files dir, the overlay stays off, so a missing model cannot block Gboard's microphone.
 
@@ -73,7 +73,11 @@ While the subtype is English and the voice-typing node has bounds, the button ma
 
 When that node has no bounds, the button is placed at the top-right of the IME window, which is where Gboard's toolbar microphone usually sits. That spot is a guess. The button can be dragged whenever it is showing, and it stays where the finger releases, including off the keys. A later window change does not move it back onto the keyboard. After it has been dragged clear of the microphone, taps on the microphone reach Gboard.
 
-Tap starts a take. Tap again stops it and runs the cleaner on the transcript gathered so far. A pause in speech does not stop a take, and there is no timer. Switching the keyboard off English removes the button and discards the open take without inserting, because the microphone has to be left uncovered. While a take is open the button stays on screen so it can be tapped to stop. From the stop tap until insertion the button shows it is busy and ignores taps. Audio is 16 kHz mono PCM16 from `AudioRecord`, appended to a file in the app's files dir. A microphone foreground service runs only while a take is open.
+Tap starts a take. Tap again stops it and runs the cleaner on the transcript gathered so far. A pause in speech does not stop a take. At 5 minutes the take stops as if tapped. If the focused window's package changes during a take, or no editable field is focused when the cleaned text is ready, the take is discarded without insertion. Switching the keyboard off English removes the button and discards the open take without inserting, because the microphone has to be left uncovered. While a take is open the button stays on screen so it can be tapped to stop. From the stop tap until insertion the button shows it is busy and ignores taps. Audio is 16 kHz mono PCM16 from `AudioRecord`, appended to a file in the app's files dir. A microphone foreground service runs only while a take is open.
+
+### Recordings
+
+Each inserted take is kept as `files/recordings/<id>.wav`, named by its edit-log id. After each take is written, the oldest recordings are deleted until the directory holds at most 100 MB, about 50 minutes of audio. A discarded take's audio is deleted at once. Pull with `adb exec-out run-as com.ezhou.sttbutton tar -cf - files/recordings > recordings.tar`.
 
 ### Insertion
 
@@ -90,7 +94,7 @@ A path is skipped when it is unavailable (a null connection, an unreadable clip)
 Append-only JSONL under the app's files dir, `logs/edits.jsonl`. One dictation, two lines:
 
 ```
-{"event":"insert","id":"<uuid>","ts":"<iso8601>","pkg":"<package>","context":"general|email","raw":"...","cleaned":"...","text_before":"...","asr_ms":0,"clean_ms":0}
+{"event":"insert","id":"<uuid>","ts":"<iso8601>","pkg":"<package>","raw":"...","cleaned":"...","text_before":"...","asr_ms":0,"clean_ms":0}
 {"event":"edit","id":"<same uuid>","ts":"<iso8601>","text_after":"..."}
 ```
 
@@ -111,7 +115,7 @@ adb exec-out run-as com.ezhou.sttbutton cat files/logs/edits.jsonl
 
 ## v1
 
-Host library and CLI. Then the Android service that shows the button on an English keyboard, records, recognizes, cleans once with S1-mini, inserts, and writes the edit log. Other keyboard languages keep Gboard's microphone.
+Host recorder, library, and CLI, and the recognizer and cleaner comparisons run on recordings of the user's own speech; the phases are in `docs/plans/README.md`. Then the Android service that shows the button on an English keyboard, records, recognizes, cleans once with S1-mini, inserts, and writes the edit log. Other keyboard languages keep Gboard's microphone.
 
 Dictionary, snippets, per-app style editors, and a cleanup model for languages other than English wait until the edit log shows they are worth it.
 
