@@ -2,11 +2,12 @@
 <resources>
     <string name="app_name">STT Button</string>
     <string name="service_description">Places a dictation button over Gboard\'s microphone while the keyboard is in English. Everything runs on this phone.</string>
-    <string name="noop_tap">STT Button: tap received (no-op)</string>
     <string name="open_accessibility">Open accessibility settings</string>
     <string name="restricted_settings_hint">If the STT Button toggle is greyed out: Settings → Apps → STT Button → ⋮ → Allow restricted settings, then try again.</string>
-    <string name="reset_position">Reset button position</string>
-    <string name="position_reset">The button returns to the microphone on the next keyboard change.</string>
+    <string name="drag_hint">Drag the button to move it. Drop it on Hide at the bottom-left to turn it off until you press the button below, or on Reset at the bottom-right to put it back on the microphone.</string>
+    <string name="unhide">Show the button again</string>
+    <string name="zone_reset">Reset</string>
+    <string name="zone_hide">Hide</string>
     <string name="service_on">Accessibility service: on</string>
     <string name="service_off">Accessibility service: off</string>
 </resources>

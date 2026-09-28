@@ -8,15 +8,22 @@ import android.provider.Settings
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.TextView
-import android.widget.Toast
 
 class MainActivity : Activity() {
     private lateinit var status: TextView
+    private lateinit var unhide: Button
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val pad = (16 * resources.displayMetrics.density).toInt()
         status = TextView(this)
+        unhide = Button(this).apply {
+            setText(R.string.unhide)
+            setOnClickListener {
+                Overlay.unhide(context)
+                isEnabled = false
+            }
+        }
         setContentView(LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(pad, pad * 3, pad, pad)
@@ -26,19 +33,15 @@ class MainActivity : Activity() {
                 setOnClickListener { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
             })
             addView(TextView(context).apply { setText(R.string.restricted_settings_hint) })
-            addView(Button(context).apply {
-                setText(R.string.reset_position)
-                setOnClickListener {
-                    Overlay.resetPosition(context)
-                    Toast.makeText(context, R.string.position_reset, Toast.LENGTH_SHORT).show()
-                }
-            })
+            addView(TextView(context).apply { setText(R.string.drag_hint) })
+            addView(unhide)
         })
     }
 
     override fun onResume() {
         super.onResume()
         status.setText(if (serviceEnabled()) R.string.service_on else R.string.service_off)
+        unhide.isEnabled = Overlay.isHidden(this)
     }
 
     private fun serviceEnabled(): Boolean {

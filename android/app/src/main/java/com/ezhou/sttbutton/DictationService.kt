@@ -11,11 +11,15 @@ import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
 import android.view.inputmethod.InputMethodManager
-import android.widget.Toast
 
+/**
+ * Shows the button unless something positively rules it out; an unresolved keyboard language or
+ * an unreadable field is not a reason to hide it.
+ */
 class DictationService : AccessibilityService() {
     private lateinit var overlay: Overlay
-    private var english = false
+    /** true English, false another language, null unresolved. */
+    private var english: Boolean? = null
     private var lastState: String? = null
     private var imeTreeLoggedFor: Int? = null
 
@@ -28,9 +32,11 @@ class DictationService : AccessibilityService() {
     }
 
     override fun onServiceConnected() {
-        overlay = Overlay(this) {
-            Toast.makeText(this, R.string.noop_tap, Toast.LENGTH_SHORT).show()
-        }
+        overlay = Overlay(
+            this,
+            onTap = { Log.i(TAG, "tap (no-op)") },
+            onPlacementChanged = ::reconcile,
+        )
         for (key in listOf(Settings.Secure.SELECTED_INPUT_METHOD_SUBTYPE, Settings.Secure.DEFAULT_INPUT_METHOD)) {
             contentResolver.registerContentObserver(Settings.Secure.getUriFor(key), false, imeObserver)
         }
@@ -48,14 +54,14 @@ class DictationService : AccessibilityService() {
         super.onDestroy()
     }
 
-    private fun resolveEnglish(): Boolean {
+    private fun resolveEnglish(): Boolean? {
         val value = Settings.Secure.getString(contentResolver, Settings.Secure.SELECTED_INPUT_METHOD_SUBTYPE)?.toIntOrNull()
         val imeId = Settings.Secure.getString(contentResolver, Settings.Secure.DEFAULT_INPUT_METHOD)
         val imm = getSystemService(InputMethodManager::class.java)
         val info = imm.inputMethodList.firstOrNull { it.id == imeId }
         if (value == null || value == -1 || info == null) {
             Log.i(TAG, "subtype unresolved: value=$value ime=$imeId imeVisible=${info != null}")
-            return false
+            return null
         }
         val subtypes = (0 until info.subtypeCount).map(info::getSubtypeAt) +
             imm.getEnabledInputMethodSubtypeList(info, true)
@@ -63,10 +69,11 @@ class DictationService : AccessibilityService() {
         val subtype = subtypes.firstOrNull { it.hashCode() == value }
         if (subtype == null) {
             Log.i(TAG, "subtype $value not among ${subtypes.size} subtypes of $imeId")
-            return false
+            return null
         }
         @Suppress("DEPRECATION")
-        return ImeLanguage.isEnglish(subtype.languageTag, subtype.locale)
+        val subtag = ImeLanguage.subtag(subtype.languageTag, subtype.locale) ?: return null
+        return subtag == "en"
     }
 
     private fun reconcile() {
@@ -79,13 +86,14 @@ class DictationService : AccessibilityService() {
     }
 
     private fun place(): String {
-        if (!english) return removed("keyboard not English")
+        if (overlay.isHidden) return removed("hidden from the drop zone")
+        if (english == false) return removed("keyboard not English")
         val ime = windows.firstOrNull { it.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD }
             ?: return removed("no keyboard window")
-        val field = findFocus(AccessibilityNodeInfo.FOCUS_INPUT) ?: return removed("no focused field")
-        if (field.packageName == packageName) return removed("own app")
-        if (!FieldPolicy.isDictatable(field.isEditable, field.isPassword, field.inputType)) {
-            return removed("ineligible field")
+        val field = findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
+        if (field != null) {
+            if (field.packageName == packageName) return removed("own app")
+            FieldPolicy.exclusion(field.isPassword, field.inputType)?.let { return removed(it) }
         }
         val root = ime.root
         val mic = root?.let(MicLocator::find)
@@ -94,11 +102,14 @@ class DictationService : AccessibilityService() {
             Log.i(TAG, "voice key not found; IME descriptions: ${MicLocator.descriptions(root)}")
         }
         overlay.show(mic ?: fallbackBounds(ime))
-        return when {
+        val placement = when {
             overlay.isDragged -> "shown-dragged"
             mic != null -> "shown-on-node $mic"
             else -> "shown-fallback"
         }
+        val fieldShape = field?.let { "pkg=${it.packageName} editable=${it.isEditable} inputType=0x${it.inputType.toString(16)}" }
+            ?: "no focused node"
+        return "$placement language=${english ?: "unresolved"} $fieldShape"
     }
 
     private fun removed(reason: String): String {

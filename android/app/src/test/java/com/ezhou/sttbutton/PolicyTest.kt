@@ -26,10 +26,8 @@ class ImeLanguageTest {
         assertFalse(ImeLanguage.isEnglish("", "zh_CN"))
 
     @Test
-    fun given_emptyTagAndLocale_when_resolved_then_unknownAndNotEnglish() {
+    fun given_emptyTagAndLocale_when_resolved_then_unknown() =
         assertNull(ImeLanguage.subtag("", ""))
-        assertFalse(ImeLanguage.isEnglish(null, null))
-    }
 
     @Test
     fun given_britishLayout_when_resolved_then_english() =
@@ -48,52 +46,44 @@ class FieldPolicyTest {
     private val text = InputType.TYPE_CLASS_TEXT
 
     @Test
-    fun given_plainText_when_checked_then_dictatable() =
-        assertTrue(FieldPolicy.isDictatable(true, false, text))
+    fun given_plainText_when_checked_then_nothingExcludesIt() =
+        assertNull(FieldPolicy.exclusion(false, text))
 
     @Test
-    fun given_multilineMessage_when_checked_then_dictatable() =
-        assertTrue(FieldPolicy.isDictatable(true, false, text or InputType.TYPE_TEXT_FLAG_MULTI_LINE))
+    fun given_searchFieldVariation_when_checked_then_nothingExcludesIt() =
+        assertNull(FieldPolicy.exclusion(false, text or InputType.TYPE_TEXT_VARIATION_URI))
 
     @Test
-    fun given_webFieldWithNoInputType_when_checked_then_dictatable() =
-        assertTrue(FieldPolicy.isDictatable(true, false, 0))
+    fun given_webFieldWithNoInputType_when_checked_then_nothingExcludesIt() =
+        assertNull(FieldPolicy.exclusion(false, 0))
 
     @Test
-    fun given_nodeFlaggedPassword_when_checked_then_not() =
-        assertFalse(FieldPolicy.isDictatable(true, true, text))
+    fun given_nodeFlaggedPassword_when_checked_then_excluded() =
+        assertEquals("password field", FieldPolicy.exclusion(true, text))
 
     @Test
-    fun given_passwordVariation_when_checked_then_not() =
-        assertFalse(FieldPolicy.isDictatable(true, false, text or InputType.TYPE_TEXT_VARIATION_PASSWORD))
+    fun given_passwordVariation_when_checked_then_excluded() =
+        assertEquals("password field", FieldPolicy.exclusion(false, text or InputType.TYPE_TEXT_VARIATION_PASSWORD))
 
     @Test
-    fun given_visiblePasswordVariation_when_checked_then_not() =
-        assertFalse(FieldPolicy.isDictatable(true, false, text or InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD))
+    fun given_visiblePasswordVariation_when_checked_then_excluded() =
+        assertEquals("password field", FieldPolicy.exclusion(false, text or InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD))
 
     @Test
-    fun given_webPasswordVariation_when_checked_then_not() =
-        assertFalse(FieldPolicy.isDictatable(true, false, text or InputType.TYPE_TEXT_VARIATION_WEB_PASSWORD))
+    fun given_webPasswordVariation_when_checked_then_excluded() =
+        assertEquals("password field", FieldPolicy.exclusion(false, text or InputType.TYPE_TEXT_VARIATION_WEB_PASSWORD))
 
     @Test
-    fun given_numericPin_when_checked_then_not() =
-        assertFalse(FieldPolicy.isDictatable(true, false, InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD))
+    fun given_numericPin_when_checked_then_excludedAsNumber() =
+        assertEquals("number field", FieldPolicy.exclusion(false, InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD))
 
     @Test
-    fun given_numberField_when_checked_then_not() =
-        assertFalse(FieldPolicy.isDictatable(true, false, InputType.TYPE_CLASS_NUMBER))
+    fun given_phoneField_when_checked_then_excluded() =
+        assertEquals("phone field", FieldPolicy.exclusion(false, InputType.TYPE_CLASS_PHONE))
 
     @Test
-    fun given_phoneField_when_checked_then_not() =
-        assertFalse(FieldPolicy.isDictatable(true, false, InputType.TYPE_CLASS_PHONE))
-
-    @Test
-    fun given_dateField_when_checked_then_not() =
-        assertFalse(FieldPolicy.isDictatable(true, false, InputType.TYPE_CLASS_DATETIME))
-
-    @Test
-    fun given_readOnlyNode_when_checked_then_not() =
-        assertFalse(FieldPolicy.isDictatable(false, false, text))
+    fun given_dateField_when_checked_then_excluded() =
+        assertEquals("date field", FieldPolicy.exclusion(false, InputType.TYPE_CLASS_DATETIME))
 }
 
 class MicLocatorTest {
@@ -109,4 +99,26 @@ class MicLocatorTest {
 
     @Test
     fun given_noDescription_when_matched_then_not() = assertFalse(MicLocator.isVoiceKey(null))
+}
+
+class DropZoneTest {
+    private val width = 1080
+    private val height = 2340
+    private val zone = 300
+
+    @Test
+    fun given_dropAboveTheStrip_when_resolved_then_noZone() =
+        assertNull(DropZone.at(100f, height - zone - 1f, width, height, zone))
+
+    @Test
+    fun given_dropBottomLeft_when_resolved_then_hide() =
+        assertEquals(DropZone.HIDE, DropZone.at(100f, height - 10f, width, height, zone))
+
+    @Test
+    fun given_dropBottomRight_when_resolved_then_reset() =
+        assertEquals(DropZone.RESET, DropZone.at(width - 100f, height - 10f, width, height, zone))
+
+    @Test
+    fun given_dropOnTheStripTopEdge_when_resolved_then_inZone() =
+        assertEquals(DropZone.HIDE, DropZone.at(0f, (height - zone).toFloat(), width, height, zone))
 }
