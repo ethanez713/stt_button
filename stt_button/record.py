@@ -121,7 +121,14 @@ def main(argv: list[str] | None = None) -> int:
 
     ts = datetime.now(timezone.utc)
     wav = RECORDINGS / f"{prompt['id']}-{ts:%Y%m%dT%H%M%S}.wav"
-    capture(wav, config.load()["take_cap_s"])
+    try:
+        capture(wav, config.load()["take_cap_s"])
+    except KeyboardInterrupt:
+        # The terminal's Ctrl-C reaches parecord too; let it finish writing before deleting.
+        time.sleep(0.5)
+        wav.unlink(missing_ok=True)
+        print(f"\nDiscarded the partial take. [{prompt['id']}] is still unrecorded.")
+        return 130
     meta = write_sidecar(wav, prompt, args.mode, ts)
 
     done = len(recorded_prompt_ids(RECORDINGS) & {p["id"] for p in prompts[args.mode]})
