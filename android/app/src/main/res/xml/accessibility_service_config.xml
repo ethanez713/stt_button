@@ -6,5 +6,5 @@
     android:canRetrieveWindowContent="true"
     android:description="@string/service_description"
     android:isAccessibilityTool="true"
-    android:notificationTimeout="100"
+    android:notificationTimeout="0"
     android:settingsActivity="com.ezhou.sttbutton.MainActivity" />

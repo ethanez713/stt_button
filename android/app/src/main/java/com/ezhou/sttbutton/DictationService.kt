@@ -22,6 +22,9 @@ class DictationService : AccessibilityService() {
     private var english: Boolean? = null
     private var lastState: String? = null
     private var imeTreeLoggedFor: Int? = null
+    private val imePrefs by lazy { getSharedPreferences("ime", MODE_PRIVATE) }
+    /** Whether this install has ever found Gboard's voice key; until then its absence proves nothing. */
+    private var voiceKeySeen = false
 
     // TYPE_WINDOWS_CHANGED does not fire for a globe or space-bar language switch; this does.
     private val imeObserver = object : ContentObserver(Handler(Looper.getMainLooper())) {
@@ -40,6 +43,7 @@ class DictationService : AccessibilityService() {
         for (key in listOf(Settings.Secure.SELECTED_INPUT_METHOD_SUBTYPE, Settings.Secure.DEFAULT_INPUT_METHOD)) {
             contentResolver.registerContentObserver(Settings.Secure.getUriFor(key), false, imeObserver)
         }
+        voiceKeySeen = imePrefs.getBoolean(KEY_VOICE_KEY_SEEN, false)
         english = resolveEnglish()
         reconcile()
     }
@@ -97,6 +101,12 @@ class DictationService : AccessibilityService() {
         }
         val root = ime.root
         val mic = root?.let(MicLocator::find)
+        if (mic != null && !voiceKeySeen) {
+            voiceKeySeen = true
+            imePrefs.edit().putBoolean(KEY_VOICE_KEY_SEEN, true).apply()
+        }
+        // A readable keyboard without the voice key it has shown before is on another panel.
+        if (mic == null && root != null && voiceKeySeen) return removed("keyboard panel without a voice key")
         if (mic == null && root != null && imeTreeLoggedFor != ime.id) {
             imeTreeLoggedFor = ime.id
             Log.i(TAG, "voice key not found; IME descriptions: ${MicLocator.descriptions(root)}")
@@ -128,5 +138,6 @@ class DictationService : AccessibilityService() {
     companion object {
         const val TAG = "SttButton"
         private const val FALLBACK_DP = 48
+        private const val KEY_VOICE_KEY_SEEN = "voice_key_seen"
     }
 }

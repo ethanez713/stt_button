@@ -42,14 +42,20 @@ class Overlay(
         params.y = dragged?.y ?: bounds.top
         val current = view
         if (current == null) {
+            // Zones first, so they sit under the button. Adding or re-adding a window during a drag
+            // cancels the touch stream, so the zones exist before any drag and only change visibility.
+            zones = DropZonesView(context).apply { visibility = View.INVISIBLE }
+                .also { windowManager.addView(it, zoneParams()) }
             view = createView().also { windowManager.addView(it, params) }
         } else {
+            zones?.let { windowManager.updateViewLayout(it, zoneParams()) }
             windowManager.updateViewLayout(current, params)
         }
     }
 
     fun remove() {
-        hideZones()
+        zones?.let(windowManager::removeView)
+        zones = null
         view?.let(windowManager::removeView)
         view = null
     }
@@ -66,28 +72,27 @@ class Overlay(
         return DropZone.at(event.rawX, event.rawY, screen.width(), screen.height(), zoneHeight())
     }
 
-    private fun showZones() {
-        if (zones != null) return
+    // Not touchable: the drag's touch stream stays with the button that received ACTION_DOWN.
+    private fun zoneParams(): WindowManager.LayoutParams {
         val screen = screen()
-        // Not touchable: the drag's touch stream stays with the button that received ACTION_DOWN.
-        val zoneParams = overlayParams(WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+        return overlayParams(WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
             WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE).apply {
             width = screen.width()
             height = zoneHeight()
             x = 0
             y = screen.height() - zoneHeight()
         }
-        zones = DropZonesView(context).also { windowManager.addView(it, zoneParams) }
-        // Re-add the button so it stays above the zones it is being dragged over.
-        view?.let {
-            windowManager.removeView(it)
-            windowManager.addView(it, params)
-        }
+    }
+
+    private fun showZones() {
+        zones?.visibility = View.VISIBLE
     }
 
     private fun hideZones() {
-        zones?.let(windowManager::removeView)
-        zones = null
+        zones?.apply {
+            highlighted = null
+            visibility = View.INVISIBLE
+        }
     }
 
     private fun drop(zone: DropZone?) {
