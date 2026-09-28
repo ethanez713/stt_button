@@ -45,6 +45,10 @@ run(wav_path) -> Result(raw, cleaned, asr_ms, clean_ms)
 
 `transcribe` slices the wav exactly as the phone slices a take, and `clean` chunks exactly as the phone does, so a host run measures what the phone will produce. `python -m stt_button <wav>` prints the result as one JSON object. `python -m stt_button.record` records a take from this machine's microphone through WSLg's PulseAudio server into `data/recordings/`, which is gitignored. Tests cover the control line, slicing, and chunking with the models absent. Timing tests are marked slow and skip when `STT_MODEL_DIR` is unset.
 
+## Desktop dictation
+
+The same two stages serve dictation on this Windows machine: Ctrl+Alt+Space starts a take from the microphone, a second press pastes the cleaned text into the focused app, and Ctrl+Alt+Shift+Space cancels. The WSL side (`stt_button/dictate.py`) runs one worker per take with the phone's model lifetime; the Windows side (`desktop/SttHotkey.cs`, built by `desktop/install.sh` with the `csc.exe` that ships with Windows) owns the hotkeys, a focus-neutral indicator, and the paste, and restores the previous clipboard afterwards. Takes and a per-take log line stay in `data/dictation/`, gitignored, with audio kept to 10 minutes as on the phone. It is where the pipeline gets daily use before the phone has it.
+
 ## Phone app
 
 Package `com.ezhou.sttbutton`, minSdk 33, targetSdk 36, `android:isAccessibilityTool="true"`. The test device is the SM-S938U. Its enabled Gboard layouts are English (US), 简体中文拼音, and 简体中文手写.

@@ -26,29 +26,45 @@ def read_wav(path: str | Path) -> np.ndarray:
     return pcm.astype(np.float32) / 32768
 
 
-def slice_bounds(samples: np.ndarray, slice_max_s: float, search_s: float) -> list[tuple[int, int]]:
-    """Cut points for recognizer slices of at most slice_max_s.
+class Slicer:
+    """Cuts recognizer slices of at most slice_max_s from audio that may still be growing.
 
     Each cut but the last lands at the centre of the quietest CUT_WINDOW_S window within the
-    final search_s of its slice, so a word is not split when a pause is available.
+    final search_s of its slice, so a word is not split when a pause is available. A cut needs
+    only the audio up to its slice's hard end, so feeding audio in pieces gives the same cuts as
+    feeding it whole.
     """
-    n = len(samples)
-    max_len = int(slice_max_s * SAMPLE_RATE)
-    search = int(search_s * SAMPLE_RATE)
-    win = int(CUT_WINDOW_S * SAMPLE_RATE)
-    energy = np.concatenate([[0.0], np.cumsum(samples.astype(np.float64) ** 2)])
-    bounds = []
-    start = 0
-    while n - start > max_len:
-        hard_end = start + max_len
-        lo = hard_end - search
-        window_energy = energy[lo + win:hard_end + 1] - energy[lo:hard_end + 1 - win]
-        cut = lo + int(np.argmin(window_energy)) + win // 2
-        bounds.append((start, cut))
-        start = cut
-    if n > start:
-        bounds.append((start, n))
-    return bounds
+
+    def __init__(self, slice_max_s: float, search_s: float):
+        self.max_len = int(slice_max_s * SAMPLE_RATE)
+        self.search = int(search_s * SAMPLE_RATE)
+        self.win = int(CUT_WINDOW_S * SAMPLE_RATE)
+        self.samples = np.zeros(0, dtype=np.float32)
+        self.start = 0
+
+    def feed(self, chunk: np.ndarray) -> list[tuple[int, int]]:
+        """Append audio; return the slices it completed, as (start, end) sample offsets."""
+        self.samples = np.concatenate([self.samples, chunk.astype(np.float32)])
+        done = []
+        while len(self.samples) - self.start > self.max_len:
+            hard_end = self.start + self.max_len
+            lo = hard_end - self.search
+            region = self.samples[lo:hard_end].astype(np.float64) ** 2
+            energy = np.concatenate([[0.0], np.cumsum(region)])
+            window_energy = energy[self.win:] - energy[:-self.win]
+            cut = lo + int(np.argmin(window_energy)) + self.win // 2
+            done.append((self.start, cut))
+            self.start = cut
+        return done
+
+    def finish(self) -> list[tuple[int, int]]:
+        """The final slice, once no more audio will arrive."""
+        return [(self.start, len(self.samples))] if len(self.samples) > self.start else []
+
+
+def slice_bounds(samples: np.ndarray, slice_max_s: float, search_s: float) -> list[tuple[int, int]]:
+    slicer = Slicer(slice_max_s, search_s)
+    return slicer.feed(samples) + slicer.finish()
 
 
 class Recognizer:
@@ -70,17 +86,22 @@ class Recognizer:
             decoding_method="greedy_search",
         )
 
+    def recognize(self, samples: np.ndarray) -> str:
+        stream = self._recognizer.create_stream()
+        stream.accept_waveform(SAMPLE_RATE, samples)
+        self._recognizer.decode_stream(stream)
+        return stream.result.text.strip()
+
     def transcribe(self, wav_path: str | Path) -> RawTranscript:
         started = time.monotonic()
         samples = read_wav(wav_path)
-        texts = []
-        for start, end in slice_bounds(samples, self.slice_max_s, self.slice_search_s):
-            stream = self._recognizer.create_stream()
-            stream.accept_waveform(SAMPLE_RATE, samples[start:end])
-            self._recognizer.decode_stream(stream)
-            texts.append(stream.result.text.strip())
-        text = " ".join(t for t in texts if t)
-        return RawTranscript(text, int((time.monotonic() - started) * 1000))
+        texts = [self.recognize(samples[start:end])
+                 for start, end in slice_bounds(samples, self.slice_max_s, self.slice_search_s)]
+        return RawTranscript(join_slices(texts), int((time.monotonic() - started) * 1000))
+
+
+def join_slices(texts: list[str]) -> str:
+    return " ".join(t for t in texts if t)
 
 
 def _one(model: Path, pattern: str) -> Path:
