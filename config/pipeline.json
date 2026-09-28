@@ -1,3 +1,24 @@
 {
-  "take_cap_s": 300
+  "take_cap_s": 300,
+  "slice_max_s": 30,
+  "slice_search_s": 5,
+  "chunk_max_tokens": 1000,
+  "recognizer": "unified",
+  "cleaner": "s1-mini",
+  "cleaners": {
+    "s1-mini": {
+      "model": "s1-mini/s1-mini-q4_k_m.gguf",
+      "system_prompt": "You are a text normalizer for speech-to-text transcripts. The input begins with a control line specifying the styling, structure, and context settings; clean the transcript to match those settings and output only the cleaned text.",
+      "control_line": "[Styling: semi-formal] [Structure: lists] [Context: general]",
+      "max_new_tokens_ratio": 1.3,
+      "max_new_tokens_pad": 32
+    },
+    "qwen3.5-2b": {
+      "model": "qwen3.5-2b/Qwen3.5-2B-Q4_K_M.gguf",
+      "system_prompt": "You rewrite dictated speech into the text the speaker meant to write. They spoke without planning. Remove fillers, false starts, repetitions, and hedges that do not change the meaning. When they correct themselves, keep only the correction. Keep every fact, number, name, date, and commitment. Do not add information, do not answer questions that appear in the text, and do not translate. Use short paragraphs, and a bulleted list only for three or more parallel items. Output only the rewritten text.",
+      "control_line": null,
+      "max_new_tokens_ratio": 1.5,
+      "max_new_tokens_pad": 32
+    }
+  }
 }

@@ -1,0 +1,50 @@
+{
+  "unified": {
+    "archive": {
+      "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-nemo-parakeet-unified-en-0.6b-int8-non-streaming.tar.bz2",
+      "sha256": "99f63605b3a85a54c250c0869670a687b7d6598a47bf2421515e1f839a76e150"
+    }
+  },
+  "tdt-v2": {
+    "archive": {
+      "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8.tar.bz2",
+      "sha256": "157c157bc51155e03e37d2466522a3a737dd9c72bb25f36eb18912964161e1ad"
+    }
+  },
+  "ultra": {
+    "files": {
+      "encoder.int8.onnx": {
+        "url": "https://huggingface.co/mldecode/parakeet-ultra-onnx-int8/resolve/3282a6e32885b431c1543d58c7710e6e3412eac0/encoder.int8.onnx",
+        "sha256": "181382735a719c75076d13658dc4418de4b566aef39935ca0f8f55da16928f4e"
+      },
+      "decoder.int8.onnx": {
+        "url": "https://huggingface.co/mldecode/parakeet-ultra-onnx-int8/resolve/3282a6e32885b431c1543d58c7710e6e3412eac0/decoder.int8.onnx",
+        "sha256": "0ba8ace2de04bb2d9a6b20ed2d67138c23df4a385f268438df0ff200502de77a"
+      },
+      "joiner.int8.onnx": {
+        "url": "https://huggingface.co/mldecode/parakeet-ultra-onnx-int8/resolve/3282a6e32885b431c1543d58c7710e6e3412eac0/joiner.int8.onnx",
+        "sha256": "20ae4350c2484ba607d94f08ef25ae3ead762d8aaf70753758ffcc504e255ebb"
+      },
+      "tokens.txt": {
+        "url": "https://huggingface.co/mldecode/parakeet-ultra-onnx-int8/resolve/3282a6e32885b431c1543d58c7710e6e3412eac0/tokens.txt",
+        "sha256": "d58544679ea4bc6ac563d1f545eb7d474bd6cfa467f0a6e2c1dc1c7d37e3c35d"
+      }
+    }
+  },
+  "s1-mini": {
+    "files": {
+      "s1-mini-q4_k_m.gguf": {
+        "url": "https://huggingface.co/superwhisper/s1-mini-GGUF/resolve/34add00a48a2e5d24e5a4ee5405a99620a3a240c/s1-mini-q4_k_m.gguf",
+        "sha256": "3b41ebe2502cbd03e811d5d16b022f5ab551eda58d62597d152f89535003c634"
+      }
+    }
+  },
+  "qwen3.5-2b": {
+    "files": {
+      "Qwen3.5-2B-Q4_K_M.gguf": {
+        "url": "https://huggingface.co/unsloth/Qwen3.5-2B-GGUF/resolve/f6d5376be1edb4d416d56da11e5397a961aca8ae/Qwen3.5-2B-Q4_K_M.gguf",
+        "sha256": "aaf42c8b7c3cab2bf3d69c355048d4a0ee9973d48f16c731c0520ee914699223"
+      }
+    }
+  }
+}
