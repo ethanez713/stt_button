@@ -1,0 +1,357 @@
+diff --git a/examples/qualcomm/oss_scripts/llama/__init__.py b/examples/qualcomm/oss_scripts/llama/__init__.py
+index 4e2b051..e774f49 100644
+--- a/examples/qualcomm/oss_scripts/llama/__init__.py
++++ b/examples/qualcomm/oss_scripts/llama/__init__.py
+@@ -513,6 +513,13 @@ class Qwen3_0_6B(LLMModelConfig):
+     quant_recipe = Qwen3_0_6BQuantRecipe
+ 
+ 
++@register_llm_model("s1-mini")
++@dataclass(init=False, frozen=True)
++class S1Mini(type(Qwen3_0_6B)):
++    # superwhisper/s1-mini is a Qwen3-0.6B fine-tune; a local snapshot pins its revision.
++    repo_id: str = os.path.expanduser("~/tools/s1-mini-88f6b15")
++
++
+ @register_llm_model("qwen3-1_7b")
+ @dataclass(init=False, frozen=True)
+ class Qwen3_1_7B(LLMModelConfig):
+diff --git a/examples/qualcomm/oss_scripts/llama/dataset/config.py b/examples/qualcomm/oss_scripts/llama/dataset/config.py
+index 31378a8..44ad0c7 100644
+--- a/examples/qualcomm/oss_scripts/llama/dataset/config.py
++++ b/examples/qualcomm/oss_scripts/llama/dataset/config.py
+@@ -5,6 +5,7 @@
+ # LICENSE file in the root directory of this source tree.
+ 
+ import argparse
++import os
+ from dataclasses import dataclass, field
+ from typing import List, Optional
+ 
+@@ -40,7 +41,8 @@ class DataConfig:
+     @classmethod
+     def from_args(cls, args: argparse.Namespace) -> "DataConfig":
+         return cls(
+-            max_context_len=args.max_context_len,
++            max_context_len=int(os.environ.get("ET_QNN_CALIB_CONTEXT_LEN", "0"))
++            or args.max_context_len,
+             token_dtype=(
+                 torch.int64
+                 if getattr(args, "embedding_quantize", None)
+diff --git a/examples/qualcomm/oss_scripts/llama/decoder_constants.py b/examples/qualcomm/oss_scripts/llama/decoder_constants.py
+index 26e5aee..40b1b76 100644
+--- a/examples/qualcomm/oss_scripts/llama/decoder_constants.py
++++ b/examples/qualcomm/oss_scripts/llama/decoder_constants.py
+@@ -58,6 +58,7 @@ DECODER_MODEL_VERSION = {
+     "qwen2_5-1_5b": "qwen2_5",
+     "qwen3-0_6b": "qwen3",
+     "qwen3-1_7b": "qwen3",
++    "s1-mini": "qwen3",
+     "smollm2_135m": "smollm2_135m",
+     "smollm3-3b": "smollm3",
+     "glm-1_5b": "glm",
+diff --git a/examples/qualcomm/oss_scripts/llama/wrappers/llm_wrappers.py b/examples/qualcomm/oss_scripts/llama/wrappers/llm_wrappers.py
+index 264f8b7..cd3b60c 100644
+--- a/examples/qualcomm/oss_scripts/llama/wrappers/llm_wrappers.py
++++ b/examples/qualcomm/oss_scripts/llama/wrappers/llm_wrappers.py
+@@ -6,6 +6,7 @@
+ import argparse
+ import copy
+ import gc
++import os
+ import inspect
+ import json
+ import logging
+@@ -152,6 +153,69 @@ def is_node_src_start_with_name(node: torch.fx.Node, kv_cache_prefix: str) -> bo
+     )
+ 
+ 
++def _release_export_leftovers() -> None:
++    """Free the weights still pinned by dead intermediates of export, prepare/convert and SeqMSE.
++
++    Strict torch.export, prepare_pt2e and convert_pt2e each leave an earlier GraphModule of the whole
++    model reachable through bound methods and closures, and SeqMSE leaves its per-op modules behind;
++    each holds full fp32 copies of the weights. Only modules outside every live TextDecoder's graphs are
++    cleared, so a submodule shared with a live graph is never touched.
++    """
++    from executorch.backends.qualcomm._passes.seq_mse import SeqMseModule
++
++    torch._dynamo.reset()
++    gc.collect()
++    live = set()
++    for obj in gc.get_objects():
++        if isinstance(obj, TextDecoder):
++            for graph in (obj.decoder, obj.tok_embedding):
++                if isinstance(graph, torch.nn.Module):
++                    live.update(id(m) for m in graph.modules())
++    freed = 0
++    for obj in gc.get_objects():
++        if isinstance(obj, torch.fx.GraphModule) and id(obj) not in live:
++            for m in obj.modules():
++                if id(m) in live:
++                    continue
++                for t in list(m._parameters.values()) + list(m._buffers.values()):
++                    if t is not None:
++                        freed += t.numel() * t.element_size()
++                m._parameters.clear()
++                m._buffers.clear()
++        elif isinstance(obj, SeqMseModule) and obj.nominal_weight is not None:
++            freed += obj.nominal_weight.numel() * obj.nominal_weight.element_size()
++            obj.nominal_weight = None
++            obj.nominal_bias = None
++            obj.operator = None
++    gc.collect()
++    # glibc keeps freed small allocations in its arenas; hand them back so RSS reflects live data.
++    import ctypes
++
++    ctypes.CDLL("libc.so.6").malloc_trim(0)
++    logging.info(f"released {freed // 2**20} MB held by dead export intermediates and SeqMSE modules")
++
++
++def _drop_unreferenced_tensors(graph_module: torch.fx.GraphModule) -> None:
++    """convert_pt2e folds each quantized weight into a new constant but leaves the fp32 original attached."""
++    referenced = {n.target for n in graph_module.graph.nodes if n.op == "get_attr"}
++    dropped = 0
++    for name, tensor in list(graph_module.named_parameters()) + list(graph_module.named_buffers()):
++        if name in referenced:
++            continue
++        owner_path, _, leaf = name.rpartition(".")
++        owner = graph_module.get_submodule(owner_path) if owner_path else graph_module
++        owner._parameters.pop(leaf, None)
++        owner._buffers.pop(leaf, None)
++        dropped += tensor.numel() * tensor.element_size()
++    _release_export_leftovers()
++    logging.info(f"dropped {dropped // 2**20} MB of tensors no longer referenced after convert_pt2e")
++
++
++def calibration_context_len() -> int:
++    """Context length of the CALIBRATE graph when ET_QNN_CALIB_CONTEXT_LEN is set; 0 means max_context_len."""
++    return int(os.environ.get("ET_QNN_CALIB_CONTEXT_LEN", "0"))
++
++
+ class TextDecoder(Component):
+ 
+     def __init__(
+@@ -161,6 +225,11 @@ class TextDecoder(Component):
+         mode: Mode,
+         apply_embedding: bool = False,
+     ):
++        calib_context_len = calibration_context_len()
++        if mode == Mode.CALIBRATE and calib_context_len:
++            control_args = copy.copy(control_args)
++            control_args.max_context_len = calib_context_len
++            control_args.max_seq_len = min(control_args.max_seq_len, calib_context_len)
+         self.control_args = control_args
+         self.config = config
+         self.mode = mode
+@@ -466,7 +535,10 @@ class TextDecoder(Component):
+         self.meta = decoder.get_metadata()
+         # get example input
+         self.example_input = decoder.get_example_inputs()
+-        self.get_example_inputs = decoder.get_example_inputs
++        # A bound method would keep the eager model, and every fp32 weight it shares with the
++        # quantized graph, alive for this wrapper's lifetime.
++        example_input = self.example_input
++        self.get_example_inputs = lambda: copy.deepcopy(example_input)
+         self.export_input = (
+             self.example_input[0],  # tokens or hidden_states
+             *self.example_input[1],  # attn_mask
+@@ -807,6 +879,7 @@ class TextDecoder(Component):
+                 self.decoder(*self.export_input)
+ 
+             self.decoder = convert_pt2e(self.decoder)
++            _drop_unreferenced_tensors(self.decoder)
+ 
+             if (
+                 self.mode == Mode.CALIBRATE
+@@ -866,18 +939,8 @@ class HybridTextDecoder(Component):
+         config: LLMModelConfig,
+         apply_embedding: bool = False,
+     ):
+-        self.decode = TextDecoder(
+-            control_args,
+-            config,
+-            Mode.DECODE,
+-            apply_embedding=apply_embedding,
+-        )
+-        self.prefill = TextDecoder(
+-            control_args,
+-            config,
+-            Mode.PREFILL,
+-            apply_embedding=apply_embedding,
+-        )
++        self.decode = None
++        self.prefill = None
+         # Full AR sequence with KV cache; used only for quantization.
+         # Scales/zp collected here are propagated to decode and prefill graphs via _encoding_override.
+         self.calibration_prefill = TextDecoder(
+@@ -889,10 +952,18 @@ class HybridTextDecoder(Component):
+ 
+         self.control_args = control_args
+         self.config = config
+-        self.set_next(self.decode).set_next(self.prefill)
+-
+         self.apply_embedding = apply_embedding
+ 
++    def _build(self, mode: Mode, request: Request) -> "TextDecoder":
++        decoder = TextDecoder(
++            self.control_args,
++            self.config,
++            mode,
++            apply_embedding=self.apply_embedding,
++        )
++        decoder.quantize(request)
++        return decoder
++
+     def _encoding_override(  # noqa: C901
+         self,
+         quantized_model,
+@@ -966,11 +1037,16 @@ class HybridTextDecoder(Component):
+                     attr = getattr(attr, target_atom)
+                 setattr(attr, target_list[-1], replacement)
+ 
+-            _set_attr(
+-                unquantized_model,
+-                unquantized_node.target,
+-                _get_attr(quantized_model, quantized_node.target),
+-            )
++            # A CALIBRATE graph shorter than max_context_len has shorter RoPE tables; keep the
++            # target's own tensor and copy only its quantization parameters.
++            source = _get_attr(quantized_model, quantized_node.target)
++            target = _get_attr(unquantized_model, unquantized_node.target)
++            if not (
++                isinstance(source, torch.Tensor)
++                and isinstance(target, torch.Tensor)
++                and source.shape != target.shape
++            ):
++                _set_attr(unquantized_model, unquantized_node.target, source)
+             # scale / zero point are part of op's attributes
+             if list(quantized_node.users)[0].target in ptq_target:
+                 activation_override(quantized_node, unquantized_node)
+@@ -1064,80 +1140,59 @@ class HybridTextDecoder(Component):
+ 
+     def quantize(self, request: Request):
+         if request.method_data[TEXT_DECODER].skip_quantize:
++            self.decode = self._build(Mode.DECODE, request)
++            self.prefill = self._build(Mode.PREFILL, request)
+             return
+         self.calibration_prefill.quantize(request)
+-
+-    @log_info
+-    def compile(self, request: Request):  # noqa: C901
+-        # perform encoding override for models to compile
+-        # ---
+-        # theoretically decode & prefill model should share the same encoding
+-        # given that they are using the identical calibration dataset.
+-        #
+-        #
+-        # here we use a mechanism to make sure the encoding align correctly and
+-        # save AoT quantization time as well.
+-        # ---
+-        if not request.method_data[TEXT_DECODER].skip_quantize:
++        self.decode = self._build(Mode.DECODE, request)
++        self._transfer_to_decode()
++        del self.calibration_prefill
++        gc.collect()
++        self.prefill = self._build(Mode.PREFILL, request)
++        self._transfer_to_prefill()
++
++    def _transfer_to_decode(self):
++        self._encoding_override(
++            quantized_model=self.calibration_prefill.decoder,
++            unquantized_model=self.decode.decoder,
++            override_kv_cache=True,
++        )
++        self.decode._save_logits_quant_attrs()
++        self.decode._save_output_kv_cache_quant_attrs()
++        if self.apply_embedding:
+             self._encoding_override(
+-                quantized_model=self.calibration_prefill.decoder,
+-                unquantized_model=self.decode.decoder,
+-                override_kv_cache=True,
++                quantized_model=self.calibration_prefill.tok_embedding,
++                unquantized_model=self.decode.tok_embedding,
++                override_kv_cache=False,
+             )
++        # QDQ EP for SQNR evaluation
++        qdq_ep = torch.export.export(
++            self.calibration_prefill.decoder,
++            self.calibration_prefill.export_input,
++            strict=True,
++        )
++        qdq_ep_path = f"{self.decode.control_args.artifact}/{DECODE_QDQ_FILENAME}"
++        torch.export.save(qdq_ep, qdq_ep_path)
++        logging.info(f"QDQ EP saved to {qdq_ep_path}")
++        del qdq_ep
+ 
+-            # save logit's quantization attributes to meta
+-            self.decode._save_logits_quant_attrs()
+-
+-            # save output KV cache's quantization attributes to meta for attention sink
+-            self.decode._save_output_kv_cache_quant_attrs()
+-
+-            if self.apply_embedding:
+-                self._encoding_override(
+-                    quantized_model=self.calibration_prefill.tok_embedding,
+-                    unquantized_model=self.decode.tok_embedding,
+-                    override_kv_cache=False,
+-                )
+-
+-            # Saving Decode QDQ Model EP for SQNR evaluation
+-            qdq_ep = torch.export.export(
+-                self.calibration_prefill.decoder,
+-                self.calibration_prefill.export_input,
+-                strict=True,
++    def _transfer_to_prefill(self):
++        if self.prefill.decoder is None or not self.prefill.meta["get_use_kv_cache"]:
++            return
++        self._encoding_override(
++            quantized_model=self.decode.decoder,
++            unquantized_model=self.prefill.decoder,
++            override_kv_cache=True,
++        )
++        if self.apply_embedding:
++            self._encoding_override(
++                quantized_model=self.decode.tok_embedding,
++                unquantized_model=self.prefill.tok_embedding,
++                override_kv_cache=False,
+             )
+-            qdq_ep_path = f"{self.decode.control_args.artifact}/{DECODE_QDQ_FILENAME}"
+-            torch.export.save(qdq_ep, qdq_ep_path)
+-            logging.info(f"QDQ EP saved to {qdq_ep_path}")
+-
+-            if self.apply_embedding:
+-                self._encoding_override(
+-                    quantized_model=self.calibration_prefill.tok_embedding,
+-                    unquantized_model=self.decode.tok_embedding,
+-                    override_kv_cache=False,
+-                )
+-
+-            # For hybrid mode, override encoding of prefill model.
+-            if (
+-                self.prefill.decoder is not None
+-                and self.prefill.meta["get_use_kv_cache"]
+-            ):
+-                self._encoding_override(
+-                    quantized_model=self.decode.decoder,
+-                    unquantized_model=self.prefill.decoder,
+-                    override_kv_cache=True,
+-                )
+-
+-                if self.apply_embedding:
+-                    self._encoding_override(
+-                        quantized_model=self.decode.tok_embedding,
+-                        unquantized_model=self.prefill.tok_embedding,
+-                        override_kv_cache=False,
+-                    )
+-
+-        # calibration_prefill is only used for encoding override
+-        # free it once encoding override is complete.
+-        del self.calibration_prefill
+-        gc.collect()
+ 
++    @log_info
++    def compile(self, request: Request):  # noqa: C901
+         # prepare lowering tok_embedding if applicable
+         if self.apply_embedding:
+             tok_embedding_data = request.method_data[TOK_EMBEDDING]
