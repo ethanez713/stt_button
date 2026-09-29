@@ -115,6 +115,11 @@ def work(take_id: str) -> None:
         ["parec", "--device=RDPSource", f"--rate={SAMPLE_RATE}", "--channels=1", "--format=s16le", str(pcm)],
     )
     started = time.monotonic()
+    # Unlike the phone, the desktop has RAM to spare, so the cleaner loads alongside the recognizer
+    # while the user talks instead of after the stop; that load was ~2 s of every stop's wait.
+    cleaner: dict = {}
+    cleaner_loading = threading.Thread(target=lambda: cleaner.update(model=Cleaner()), daemon=True)
+    cleaner_loading.start()
     try:
         # Loads while the user is already talking; parec has been capturing since before this line.
         recognizer = Recognizer()
@@ -124,6 +129,7 @@ def work(take_id: str) -> None:
         while not stop.is_set() and time.monotonic() - started < cfg["take_cap_s"]:
             texts += [recognizer.recognize(slicer.samples[a:b]) for a, b in slicer.feed(tail.read())]
             stop.wait(POLL_S)
+        stopped = time.monotonic()
         recorder.send_signal(signal.SIGINT)
         recorder.wait()
         if cancelled.is_set():
@@ -139,7 +145,8 @@ def work(take_id: str) -> None:
 
         cleaned, clean_ms = "", 0
         if raw:
-            result = Cleaner().clean(raw)
+            cleaner_loading.join()
+            result = cleaner["model"].clean(raw)
             cleaned, clean_ms = result.text, result.elapsed_ms
         audio_s = pcm_to_wav(pcm, DICTATION / f"{take_id}.wav")
         pcm.unlink()
@@ -148,6 +155,7 @@ def work(take_id: str) -> None:
             log.write(json.dumps({
                 "id": take_id, "ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
                 "audio_s": round(audio_s, 2), "asr_ms_after_stop": asr_ms, "clean_ms": clean_ms,
+                "stop_to_result_ms": int((time.monotonic() - stopped) * 1000),
                 "raw": raw, "cleaned": cleaned,
             }, ensure_ascii=False) + "\n")
         write_result({"status": "text", "text": cleaned})

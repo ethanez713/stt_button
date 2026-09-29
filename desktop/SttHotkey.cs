@@ -8,6 +8,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
+using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
@@ -31,6 +32,22 @@ static class Program {
 class HotkeyWindow : Form {
     [DllImport("user32.dll")] static extern bool RegisterHotKey(IntPtr hWnd, int id, uint modifiers, uint vk);
     [DllImport("user32.dll")] static extern short GetAsyncKeyState(int vk);
+    [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr hWnd);
+    [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+    [DllImport("user32.dll", SetLastError = true)] static extern uint SendInput(uint count, INPUT[] inputs, int size);
+
+    [StructLayout(LayoutKind.Sequential)]
+    struct INPUT { public uint type; public InputUnion u; }
+    // The union must be as large as its largest member, MOUSEINPUT, or SendInput rejects cbSize.
+    [StructLayout(LayoutKind.Explicit)]
+    struct InputUnion { [FieldOffset(0)] public MOUSEINPUT mi; [FieldOffset(0)] public KEYBDINPUT ki; }
+    [StructLayout(LayoutKind.Sequential)]
+    struct MOUSEINPUT { public int dx, dy; public uint mouseData, dwFlags, time; public IntPtr dwExtraInfo; }
+    [StructLayout(LayoutKind.Sequential)]
+    struct KEYBDINPUT { public ushort wVk, wScan; public uint dwFlags, time; public IntPtr dwExtraInfo; }
+    const uint INPUT_KEYBOARD = 1, KEYEVENTF_KEYUP = 2;
+    const ushort VK_CONTROL = 0x11, VK_MENU = 0x12, VK_SHIFT = 0x10, VK_V = 0x56;
 
     const int WM_HOTKEY = 0x0312;
     const uint MOD_ALT = 0x1, MOD_CONTROL = 0x2, MOD_SHIFT = 0x4, MOD_NOREPEAT = 0x4000;
@@ -39,7 +56,10 @@ class HotkeyWindow : Form {
 
     readonly string repo, models;
     readonly Indicator indicator = new Indicator();
+    readonly string logPath = Path.Combine(Application.StartupPath, "helper.log");
     bool recording, busy;
+    IntPtr target;
+    DateTime pressedAt;
 
     public HotkeyWindow(string repo, string models) {
         this.repo = repo;
@@ -61,6 +81,8 @@ class HotkeyWindow : Form {
     void Toggle() {
         if (busy) return;
         busy = true;
+        target = GetForegroundWindow();
+        pressedAt = DateTime.Now;
         indicator.ShowText(recording ? "… Transcribing" : "… Starting mic");
         RunAsync("toggle", result => {
             busy = false;
@@ -71,9 +93,19 @@ class HotkeyWindow : Form {
                 return;
             }
             recording = false;
-            if (status == "text") {
+            string text = Field(result, "text");
+            Log(string.Format("result status={0} chars={1} wait_ms={2:0}", status, text == null ? 0 : text.Length,
+                (DateTime.Now - pressedAt).TotalMilliseconds));
+            if (status == "text" && string.IsNullOrEmpty(text)) {
+                indicator.Flash("No speech heard");
+            } else if (status == "text") {
                 indicator.Hide();
-                Paste(Field(result, "text"));
+                try {
+                    Paste(text);
+                } catch (Exception e) {
+                    Log("paste failed: " + e);
+                    indicator.Flash("\u26A0 paste failed: " + e.Message);
+                }
             } else {
                 indicator.Flash("⚠ " + (Field(result, "error") ?? status));
             }
@@ -124,10 +156,18 @@ class HotkeyWindow : Form {
         if (string.IsNullOrEmpty(text)) return;
         IDataObject saved = CopyClipboard();
         Clipboard.SetText(text);
-        // Sending Ctrl+V while the hotkey's Ctrl/Alt are still held would type Ctrl+Alt+V.
-        while ((GetAsyncKeyState(0x11) & 0x8000) != 0 || (GetAsyncKeyState(0x12) & 0x8000) != 0) Thread.Sleep(20);
-        SendKeys.SendWait("^v");
-        var restore = new System.Windows.Forms.Timer { Interval = 500 };
+        // Sending Ctrl+V while the hotkey's Ctrl/Alt/Shift are still held would type Ctrl+Alt+V.
+        while (Held(VK_CONTROL) || Held(VK_MENU) || Held(VK_SHIFT)) Thread.Sleep(20);
+        bool refocused = false;
+        if (target != IntPtr.Zero && GetForegroundWindow() != target) refocused = SetForegroundWindow(target);
+        // SendInput rather than SendKeys: SendKeys' journal-hook path can drop input on current Windows.
+        INPUT[] keys = { Key(VK_CONTROL, 0), Key(VK_V, 0), Key(VK_V, KEYEVENTF_KEYUP), Key(VK_CONTROL, KEYEVENTF_KEYUP) };
+        uint sent = SendInput((uint)keys.Length, keys, Marshal.SizeOf(typeof(INPUT)));
+        Log(string.Format("paste target={0} refocused={1} foreground={2} sent={3}/4 err={4}",
+            ProcessName(target), refocused, ProcessName(GetForegroundWindow()), sent, Marshal.GetLastWin32Error()));
+        if (sent != keys.Length) indicator.Flash("\u26A0 Ctrl+V was blocked; the text is on the clipboard");
+        // Long enough for slow apps (terminals, Electron) to read the clipboard before it is restored.
+        var restore = new System.Windows.Forms.Timer { Interval = 1500 };
         restore.Tick += (s, e) => {
             restore.Stop();
             try {
@@ -135,6 +175,28 @@ class HotkeyWindow : Form {
             } catch (ExternalException) { }
         };
         restore.Start();
+    }
+
+    static bool Held(ushort vk) { return (GetAsyncKeyState(vk) & 0x8000) != 0; }
+
+    static INPUT Key(ushort vk, uint flags) {
+        return new INPUT { type = INPUT_KEYBOARD, u = new InputUnion { ki = new KEYBDINPUT { wVk = vk, dwFlags = flags } } };
+    }
+
+    static string ProcessName(IntPtr window) {
+        try {
+            uint pid;
+            GetWindowThreadProcessId(window, out pid);
+            return Process.GetProcessById((int)pid).ProcessName;
+        } catch (Exception) {
+            return "?";
+        }
+    }
+
+    void Log(string line) {
+        try {
+            File.AppendAllText(logPath, DateTime.Now.ToString("s") + " " + line + Environment.NewLine);
+        } catch (IOException) { }
     }
 
     // The live clipboard object goes stale once replaced, so copy each format out first.
