@@ -71,3 +71,43 @@ def test_given_pcm_bytes_when_wrapped_then_wav_duration_matches(tmp_path):
     assert dictate.pcm_to_wav(pcm, tmp_path / "t.wav") == 3.0
     with wave.open(str(tmp_path / "t.wav")) as w:
         assert (w.getframerate(), w.getnchannels(), w.getnframes()) == (SR, 1, SR * 3)
+
+
+def test_given_a_newer_take_owns_the_pidfile_when_an_old_worker_releases_then_it_is_kept(tmp_path):
+    pidfile = tmp_path / "worker.pid"
+    pidfile.write_text("222")
+    stop_flag = tmp_path / "stop"
+    stop_flag.touch()
+
+    dictate.release_take(111, pidfile, (stop_flag,))
+
+    assert pidfile.read_text() == "222" and stop_flag.exists()
+
+
+def test_given_its_own_pidfile_when_a_worker_releases_then_it_is_removed(tmp_path):
+    pidfile = tmp_path / "worker.pid"
+    pidfile.write_text("111")
+    stop_flag = tmp_path / "stop"
+    stop_flag.touch()
+
+    dictate.release_take(111, pidfile, (stop_flag,))
+
+    assert not pidfile.exists() and not stop_flag.exists()
+
+
+def test_given_a_write_that_ends_mid_sample_when_tailed_then_the_half_sample_waits_for_the_rest(tmp_path):
+    pcm = tmp_path / "t.pcm"
+    samples = np.array([1000, -2000, 3000], dtype="<i2").tobytes()
+    tail = dictate.PcmTail(pcm)
+    pcm.write_bytes(samples[:3])
+
+    first = tail.read()
+    with pcm.open("ab") as f:
+        f.write(samples[3:])
+    second = tail.read()
+
+    assert (np.concatenate([first, second]) * 32768).round().astype(int).tolist() == [1000, -2000, 3000]
+
+
+def test_given_no_file_yet_when_tailed_then_empty(tmp_path):
+    assert dictate.PcmTail(tmp_path / "missing.pcm").read().size == 0

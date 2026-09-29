@@ -1,10 +1,11 @@
-// Windows half of desktop dictation: global hotkeys, an indicator, and pasting the result.
-// Compiled by desktop/install.sh with the .NET Framework csc.exe (C# 5); everything else runs in WSL.
+// Windows half of desktop dictation: global hotkeys, the microphone, an indicator, and pasting.
+// Compiled by desktop/install.sh with the .NET Framework csc.exe (C# 5); recognition and cleaning run in WSL.
 //
 //   SttHotkey.exe <repo dir in WSL> <model dir in WSL>
 //
 // Ctrl+Alt+Space toggles a take; Ctrl+Alt+Shift+Space cancels it.
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
@@ -18,6 +19,15 @@ using System.Windows.Forms;
 static class Program {
     [STAThread]
     static void Main(string[] args) {
+        // SttHotkey.exe --mic-check <seconds> <out.pcm>: record through the same Mic, for diagnosis.
+        if (args.Length == 3 && args[0] == "--mic-check") {
+            var mic = new Mic();
+            mic.Open();
+            mic.BeginTake(args[2]);
+            Thread.Sleep(int.Parse(args[1]) * 1000);
+            mic.Close();
+            return;
+        }
         bool created;
         using (new Mutex(true, "stt_button.SttHotkey", out created)) {
             if (!created) return;
@@ -53,49 +63,87 @@ class HotkeyWindow : Form {
     const uint MOD_ALT = 0x1, MOD_CONTROL = 0x2, MOD_SHIFT = 0x4, MOD_NOREPEAT = 0x4000;
     const uint VK_SPACE = 0x20;
     const int TOGGLE = 1, CANCEL = 2;
+    const int TAKE_CAP_MS = 300 * 1000;
+    // After a take the mic stays open this long, so the next take starts without opening the device.
+    const int MIC_WARM_MS = 5 * 60 * 1000;
 
     readonly string repo, models;
-    readonly Indicator indicator = new Indicator();
+    readonly string takesDir = Path.Combine(Application.StartupPath, "takes");
     readonly string logPath = Path.Combine(Application.StartupPath, "helper.log");
-    bool recording, busy;
+    readonly Indicator indicator = new Indicator();
+    readonly Mic mic = new Mic();
+    // Commands to WSL run one at a time, in order, so a quick stop can never overtake its start.
+    readonly BlockingCollection<Action> wslQueue = new BlockingCollection<Action>();
+    readonly System.Windows.Forms.Timer capTimer = new System.Windows.Forms.Timer { Interval = TAKE_CAP_MS };
+    readonly System.Windows.Forms.Timer micIdleTimer = new System.Windows.Forms.Timer { Interval = MIC_WARM_MS };
+    string takePath;
+    bool busy;
     IntPtr target;
-    DateTime pressedAt;
+    DateTime stoppedAt;
 
     public HotkeyWindow(string repo, string models) {
         this.repo = repo;
         this.models = models;
+        Directory.CreateDirectory(takesDir);
         CreateHandle();
         RegisterHotKey(Handle, TOGGLE, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, VK_SPACE);
         RegisterHotKey(Handle, CANCEL, MOD_CONTROL | MOD_ALT | MOD_SHIFT | MOD_NOREPEAT, VK_SPACE);
+        new Thread(() => { foreach (Action command in wslQueue.GetConsumingEnumerable()) command(); }) { IsBackground = true }.Start();
+        capTimer.Tick += (s, e) => { if (takePath != null) Stop(); };
+        micIdleTimer.Tick += (s, e) => { micIdleTimer.Stop(); mic.Close(); Log("mic closed after idle"); };
     }
 
     protected override void SetVisibleCore(bool value) { base.SetVisibleCore(false); }
 
     protected override void WndProc(ref Message m) {
         if (m.Msg == WM_HOTKEY) {
-            if (m.WParam.ToInt32() == TOGGLE) Toggle(); else Cancel();
+            if (m.WParam.ToInt32() == TOGGLE) {
+                if (takePath == null) Start(); else Stop();
+            } else {
+                Cancel();
+            }
         }
         base.WndProc(ref m);
     }
 
-    void Toggle() {
+    void Start() {
         if (busy) return;
-        busy = true;
         target = GetForegroundWindow();
-        pressedAt = DateTime.Now;
-        indicator.ShowText(recording ? "… Transcribing" : "… Starting mic");
-        RunAsync("toggle", result => {
+        micIdleTimer.Stop();
+        string id = DateTime.Now.ToString("yyyyMMdd'T'HHmmss") + "-" + Guid.NewGuid().ToString("N").Substring(0, 6);
+        string path = Path.Combine(takesDir, id + ".pcm");
+        try {
+            bool warm = mic.IsOpen;
+            mic.Open();
+            mic.BeginTake(path);
+            Log("take started warm=" + warm);
+        } catch (Exception e) {
+            Log("mic failed: " + e);
+            indicator.Flash("⚠ microphone: " + e.Message);
+            return;
+        }
+        takePath = path;
+        indicator.ShowText("● Recording");
+        capTimer.Start();
+        RunWsl("start '" + WslPath(path) + "'", result => {
+            if (Field(result, "status") != "started") Abort("⚠ " + (Field(result, "error") ?? "WSL did not start"));
+        });
+    }
+
+    void Stop() {
+        capTimer.Stop();
+        mic.EndTake();
+        takePath = null;
+        busy = true;
+        stoppedAt = DateTime.Now;
+        micIdleTimer.Start();
+        indicator.ShowText("… Transcribing");
+        RunWsl("stop", result => {
             busy = false;
             string status = Field(result, "status");
-            if (status == "recording") {
-                recording = true;
-                indicator.ShowText("● Recording");
-                return;
-            }
-            recording = false;
             string text = Field(result, "text");
-            Log(string.Format("result status={0} chars={1} wait_ms={2:0}", status, text == null ? 0 : text.Length,
-                (DateTime.Now - pressedAt).TotalMilliseconds));
+            Log(string.Format("result status={0} chars={1} stop_to_text_ms={2:0}", status, text == null ? 0 : text.Length,
+                (DateTime.Now - stoppedAt).TotalMilliseconds));
             if (status == "text" && string.IsNullOrEmpty(text)) {
                 indicator.Flash("No speech heard");
             } else if (status == "text") {
@@ -104,7 +152,7 @@ class HotkeyWindow : Form {
                     Paste(text);
                 } catch (Exception e) {
                     Log("paste failed: " + e);
-                    indicator.Flash("\u26A0 paste failed: " + e.Message);
+                    indicator.Flash("⚠ paste failed: " + e.Message);
                 }
             } else {
                 indicator.Flash("⚠ " + (Field(result, "error") ?? status));
@@ -113,17 +161,27 @@ class HotkeyWindow : Form {
     }
 
     void Cancel() {
-        RunAsync("cancel", result => {
-            recording = false;
-            busy = false;
-            indicator.Flash("Cancelled");
-        });
+        if (takePath == null) return;
+        Abort("Cancelled");
     }
 
-    void RunAsync(string command, Action<Dictionary<string, object>> done) {
-        string script = "cd '" + repo + "' && PULSE_SERVER=${PULSE_SERVER:-unix:/mnt/wslg/PulseServer} " +
-            "STT_MODEL_DIR='" + models + "' .venv/bin/python -m stt_button.dictate " + command;
-        new Thread(() => {
+    void Abort(string message) {
+        capTimer.Stop();
+        mic.EndTake();
+        if (takePath != null) File.Delete(takePath);
+        takePath = null;
+        micIdleTimer.Start();
+        indicator.Flash(message);
+        RunWsl("cancel", result => { });
+    }
+
+    static string WslPath(string windowsPath) {
+        return "/mnt/" + char.ToLowerInvariant(windowsPath[0]) + windowsPath.Substring(2).Replace('\\', '/');
+    }
+
+    void RunWsl(string command, Action<Dictionary<string, object>> done) {
+        string script = "cd '" + repo + "' && STT_MODEL_DIR='" + models + "' .venv/bin/python -m stt_button.dictate " + command;
+        wslQueue.Add(() => {
             Dictionary<string, object> result;
             try {
                 var info = new ProcessStartInfo("wsl.exe", "-e bash -c \"" + script + "\"") {
@@ -144,7 +202,7 @@ class HotkeyWindow : Form {
                 result = new Dictionary<string, object> { { "status", "error" }, { "error", e.Message } };
             }
             BeginInvoke(new Action(() => done(result)));
-        }) { IsBackground = true }.Start();
+        });
     }
 
     static string Field(Dictionary<string, object> result, string key) {
@@ -261,5 +319,127 @@ class Indicator : Form {
     public void Flash(string text) {
         ShowText(text);
         hideTimer.Start();
+    }
+}
+
+// The microphone through the waveIn API, which delivers 16 kHz mono PCM16 through Windows' own
+// resampler. It stays open between takes while warm; audio outside a take only feeds the pre-roll.
+class Mic {
+    [DllImport("winmm.dll")] static extern int waveInOpen(out IntPtr handle, uint device, ref WAVEFORMATEX format, IntPtr callback, IntPtr instance, uint flags);
+    [DllImport("winmm.dll")] static extern int waveInPrepareHeader(IntPtr handle, IntPtr header, int size);
+    [DllImport("winmm.dll")] static extern int waveInUnprepareHeader(IntPtr handle, IntPtr header, int size);
+    [DllImport("winmm.dll")] static extern int waveInAddBuffer(IntPtr handle, IntPtr header, int size);
+    [DllImport("winmm.dll")] static extern int waveInStart(IntPtr handle);
+    [DllImport("winmm.dll")] static extern int waveInReset(IntPtr handle);
+    [DllImport("winmm.dll")] static extern int waveInClose(IntPtr handle);
+
+    [StructLayout(LayoutKind.Sequential)]
+    struct WAVEFORMATEX { public ushort wFormatTag, nChannels; public uint nSamplesPerSec, nAvgBytesPerSec; public ushort nBlockAlign, wBitsPerSample, cbSize; }
+    [StructLayout(LayoutKind.Sequential)]
+    struct WAVEHDR { public IntPtr lpData; public uint dwBufferLength, dwBytesRecorded; public IntPtr dwUser; public uint dwFlags, dwLoops; public IntPtr lpNext, reserved; }
+
+    const uint WAVE_MAPPER = 0xFFFFFFFF, WHDR_DONE = 1;
+    const int BYTES_PER_SECOND = 32000, BUFFER_BYTES = 1600, BUFFERS = 16;
+    // Audio kept from just before the hotkey, so a first word spoken with the keypress is not clipped.
+    const int PRE_ROLL_BYTES = BYTES_PER_SECOND * 3 / 10;
+
+    readonly object sync = new object();
+    readonly Queue<byte[]> preRoll = new Queue<byte[]>();
+    int preRollBytes;
+    IntPtr handle = IntPtr.Zero;
+    IntPtr[] headers;
+    Thread poller;
+    volatile bool running;
+    FileStream take;
+
+    public bool IsOpen { get { return handle != IntPtr.Zero; } }
+
+    public void Open() {
+        if (IsOpen) return;
+        var format = new WAVEFORMATEX { wFormatTag = 1, nChannels = 1, nSamplesPerSec = 16000, nAvgBytesPerSec = BYTES_PER_SECOND, nBlockAlign = 2, wBitsPerSample = 16 };
+        int error = waveInOpen(out handle, WAVE_MAPPER, ref format, IntPtr.Zero, IntPtr.Zero, 0);
+        if (error != 0) { handle = IntPtr.Zero; throw new IOException("waveInOpen failed with MMRESULT " + error); }
+        headers = new IntPtr[BUFFERS];
+        int size = Marshal.SizeOf(typeof(WAVEHDR));
+        for (int i = 0; i < BUFFERS; i++) {
+            var header = new WAVEHDR { lpData = Marshal.AllocHGlobal(BUFFER_BYTES), dwBufferLength = BUFFER_BYTES };
+            headers[i] = Marshal.AllocHGlobal(size);
+            Marshal.StructureToPtr(header, headers[i], false);
+            waveInPrepareHeader(handle, headers[i], size);
+            waveInAddBuffer(handle, headers[i], size);
+        }
+        waveInStart(handle);
+        running = true;
+        poller = new Thread(Poll) { IsBackground = true };
+        poller.Start();
+    }
+
+    public void BeginTake(string path) {
+        lock (sync) {
+            take = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete);
+            foreach (byte[] chunk in preRoll) take.Write(chunk, 0, chunk.Length);
+            take.Flush();
+        }
+    }
+
+    public void EndTake() {
+        lock (sync) {
+            if (take == null) return;
+            take.Dispose();
+            take = null;
+        }
+    }
+
+    public void Close() {
+        if (!IsOpen) return;
+        EndTake();
+        running = false;
+        poller.Join();
+        waveInReset(handle);
+        int size = Marshal.SizeOf(typeof(WAVEHDR));
+        foreach (IntPtr header in headers) {
+            waveInUnprepareHeader(handle, header, size);
+            Marshal.FreeHGlobal(((WAVEHDR)Marshal.PtrToStructure(header, typeof(WAVEHDR))).lpData);
+            Marshal.FreeHGlobal(header);
+        }
+        waveInClose(handle);
+        handle = IntPtr.Zero;
+        lock (sync) { preRoll.Clear(); preRollBytes = 0; }
+    }
+
+    // Buffers fill in the order they were queued, so they are drained in that same order.
+    void Poll() {
+        int size = Marshal.SizeOf(typeof(WAVEHDR));
+        int next = 0;
+        while (running) {
+            IntPtr header = headers[next];
+            var h = (WAVEHDR)Marshal.PtrToStructure(header, typeof(WAVEHDR));
+            if ((h.dwFlags & WHDR_DONE) == 0) {
+                Thread.Sleep(10);
+                continue;
+            }
+            var chunk = new byte[h.dwBytesRecorded];
+            Marshal.Copy(h.lpData, chunk, 0, chunk.Length);
+            Consume(chunk);
+            waveInUnprepareHeader(handle, header, size);
+            h.dwFlags = 0;
+            h.dwBytesRecorded = 0;
+            Marshal.StructureToPtr(h, header, false);
+            waveInPrepareHeader(handle, header, size);
+            waveInAddBuffer(handle, header, size);
+            next = (next + 1) % BUFFERS;
+        }
+    }
+
+    void Consume(byte[] chunk) {
+        lock (sync) {
+            if (take != null) {
+                take.Write(chunk, 0, chunk.Length);
+                take.Flush();
+            }
+            preRoll.Enqueue(chunk);
+            preRollBytes += chunk.Length;
+            while (preRollBytes - preRoll.Peek().Length >= PRE_ROLL_BYTES) preRollBytes -= preRoll.Dequeue().Length;
+        }
     }
 }
