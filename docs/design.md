@@ -31,7 +31,7 @@ S1-mini Q4_K_M (462 MB GGUF, a Qwen3-0.6B fine-tune, run with llama.cpp) is the 
 
 The control line is the same for every app. `lists` is the standing structure value because the model leaves non-enumerations as prose. `general` is the context everywhere, because `email` reshapes every output into a greeting, body, and sign-off. The cleaner receives the recognizer text unchanged. Both strings are kept.
 
-The one replacement candidate is Qwen3.5-2B with thinking disabled, as a single instruct call in S1-mini's place, still with no second rewrite. The host comparison in `docs/plans/` chooses between them before the phone build, and the edit log checks the choice afterwards; the Qwen3.5 line has no size between 0.8B and 2B, and Qwen3.5-0.8B is not better than S1-mini at this job.
+Qwen3.5-2B, run as a single instruct call in S1-mini's place with thinking disabled, lost all ten blind comparisons on the user's own rambles and took twice as long; it invented facts (a correction became a destination) and bulleted prose. Qwen3.5-0.8B is not better than S1-mini at this job either. A replacement cleaner has to beat S1-mini in the same blind vote over the same recordings, with the edit log as the check once the phone is in use.
 
 ## Host library
 
