@@ -100,11 +100,11 @@ A path is skipped when it is unavailable (a null connection, an unreadable clip)
 Append-only JSONL under the app's files dir, `logs/edits.jsonl`. One dictation, two lines:
 
 ```
-{"event":"insert","id":"<uuid>","ts":"<iso8601>","pkg":"<package>","raw":"...","cleaned":"...","text_before":"...","asr_ms":0,"clean_ms":0}
+{"event":"insert","id":"<uuid>","ts":"<iso8601>","pkg":"<package>","raw":"...","cleaned":"...","text_before":"...","asr_ms":0,"clean_ms":0,"asr_backend":"cpu","clean_backend":"cpu","audio_ms":0,"in_tokens":0,"out_tokens":0,"charge_uah":0,"plugged":false,"battery_pct":0}
 {"event":"edit","id":"<same uuid>","ts":"<iso8601>","text_after":"..."}
 ```
 
-`text_before` is the field contents at insert time. While the field is tracked, the service keeps its latest non-empty text from `TYPE_VIEW_TEXT_CHANGED`. `text_after` is that snapshot, written when the field loses focus or the focused window's package changes, whichever comes first, so a field that clears on send still records what was sent. Send buttons are not reliably visible, and some apps destroy the field on send without a focus event. Each line is one JSON object with escaped strings. Lines are written for fields this app inserted into. Other typing is not recorded. Password, numeric, and phone fields never reach this path because the button never appears there.
+The latency, backend and battery fields are per take; `docs/plans/07-usage-monitoring.md` specifies how they are measured. `text_before` is the field contents at insert time. While the field is tracked, the service keeps its latest non-empty text from `TYPE_VIEW_TEXT_CHANGED`. `text_after` is that snapshot, written when the field loses focus or the focused window's package changes, whichever comes first, so a field that clears on send still records what was sent. Send buttons are not reliably visible, and some apps destroy the field on send without a focus event. Each line is one JSON object with escaped strings. Lines are written for fields this app inserted into. Other typing is not recorded. Password, numeric, and phone fields never reach this path because the button never appears there.
 
 Pull with:
 
