@@ -129,7 +129,17 @@ def work(pcm: Path) -> None:
     # Unlike the phone, the desktop has RAM to spare, so the cleaner loads alongside the recognizer
     # while the user talks instead of after the stop; that load was ~2 s of every stop's wait.
     cleaner: dict = {}
-    loading = threading.Thread(target=lambda: cleaner.update(model=Cleaner()), daemon=True)
+
+    def load_cleaner():
+        # The GPU through Ollama is ~4x the CPU here when the laptop is in its performance mode;
+        # the in-process CPU backend covers Ollama being down.
+        try:
+            cleaner["model"] = Cleaner(backend="ollama")
+        except OSError as err:
+            print(f"Ollama unavailable ({err}); cleaning on the CPU", file=sys.stderr)
+            cleaner["model"] = Cleaner()
+
+    loading = threading.Thread(target=load_cleaner, daemon=True)
     loading.start()
     try:
         recognizer = Recognizer()
@@ -157,6 +167,7 @@ def work(pcm: Path) -> None:
             loading.join()
             result = cleaner["model"].clean(raw)
             cleaned, clean_ms = result.text, result.elapsed_ms
+            cleaner["model"].release()
         write_result({"status": "text", "text": cleaned})
         stop_to_result_ms = int((time.monotonic() - stopped) * 1000)
         # Released before the bookkeeping below, so the next take can start at once.
@@ -169,7 +180,9 @@ def work(pcm: Path) -> None:
             log.write(json.dumps({
                 "id": take_id, "ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
                 "audio_s": round(audio_s, 2), "asr_ms_after_stop": asr_ms, "clean_ms": clean_ms,
-                "stop_to_result_ms": stop_to_result_ms, "raw": raw, "cleaned": cleaned,
+                "stop_to_result_ms": stop_to_result_ms,
+                "cleaner_backend": cleaner["model"].backend if "model" in cleaner else None,
+                "raw": raw, "cleaned": cleaned,
             }, ensure_ascii=False) + "\n")
     except Exception as err:
         write_result({"status": "error", "error": f"{type(err).__name__}: {err}"})
