@@ -8,6 +8,7 @@
   "cleaners": {
     "s1-mini": {
       "model": "s1-mini/s1-mini-q4_k_m.gguf",
+      "ollama_model": "s1-mini-stt",
       "system_prompt": "You are a text normalizer for speech-to-text transcripts. The input begins with a control line specifying the styling, structure, and context settings; clean the transcript to match those settings and output only the cleaned text.",
       "control_line": "[Styling: semi-formal] [Structure: lists] [Context: general]",
       "max_new_tokens_ratio": 1.3,
