@@ -24,5 +24,31 @@
     {"id": "m08", "text": "Summarize a meeting or conversation you had recently and what came out of it."},
     {"id": "m09", "text": "Explain how to cook something you make often, as if texting instructions to someone."},
     {"id": "m10", "text": "Give your opinion on a book, show, or game you finished recently, and who should try it."}
+  ],
+  "short": [
+    {"id": "s01", "text": "Reply yes."},
+    {"id": "s02", "text": "Say you're on your way."},
+    {"id": "s03", "text": "Thank someone."},
+    {"id": "s04", "text": "Say sounds good."},
+    {"id": "s05", "text": "Say you'll call back later."},
+    {"id": "s06", "text": "Say okay, see you then."},
+    {"id": "s07", "text": "Say you're running late."},
+    {"id": "s08", "text": "Say goodnight."},
+    {"id": "s09", "text": "Tell someone you're ten minutes late and why."},
+    {"id": "s10", "text": "Ask what time dinner is."},
+    {"id": "s11", "text": "Say you'll send the file tonight."},
+    {"id": "s12", "text": "Ask someone to pick up milk on the way home."},
+    {"id": "s13", "text": "Confirm tomorrow's 3 pm meeting."},
+    {"id": "s14", "text": "Say you can't make it and suggest another day."},
+    {"id": "s15", "text": "Ask for the wifi password."},
+    {"id": "s16", "text": "Tell someone their package arrived."},
+    {"id": "s17", "text": "Ask a coworker to review your pull request and say what changed."},
+    {"id": "s18", "text": "Reschedule a haircut, giving two times that work."},
+    {"id": "s19", "text": "Recommend a restaurant you liked and what to order."},
+    {"id": "s20", "text": "Ask your landlord when the plumber is coming."},
+    {"id": "s21", "text": "Explain why you'll miss standup tomorrow."},
+    {"id": "s22", "text": "Give someone directions to your place from the station."},
+    {"id": "s23", "text": "Summarize your day in two or three sentences."},
+    {"id": "s24", "text": "Ask a friend for a book recommendation and say what you liked last."}
   ]
 }

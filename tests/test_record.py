@@ -23,6 +23,7 @@ def tone(seconds, amplitude=0.1, rate=16000):
 PROMPTS = {
     "read": [{"id": "r01", "text": "one"}, {"id": "r02", "text": "two"}],
     "ramble": [{"id": "m01", "text": "topic"}],
+    "short": [{"id": "s01", "text": "Reply yes."}],
 }
 
 
@@ -71,6 +72,13 @@ def test_sidecar_carries_reference_only_for_read(tmp_path):
     assert "reference" not in ramble_meta
     assert json.loads(read_wav.with_suffix(".json").read_text()) == read_meta
     assert read_meta["id"] == "r01-x" and read_meta["prompt_id"] == "r01"
+
+
+def test_short_takes_have_no_reference(tmp_path):
+    wav = tmp_path / "s01-x.wav"
+    write_wav(wav, tone(0.5))
+    meta = record.write_sidecar(wav, PROMPTS["short"][0], "short", datetime.now(timezone.utc))
+    assert meta["mode"] == "short" and "reference" not in meta
 
 
 def test_next_prompt_skips_recorded_and_ends(tmp_path):

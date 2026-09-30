@@ -1,6 +1,6 @@
 """Record one dictation take from this machine's microphone for the host experiments.
 
-    pyrun python -m stt_button.record --mode read|ramble [--prompt ID]
+    pyrun python -m stt_button.record --mode read|ramble|short [--prompt ID]
 """
 
 import argparse
@@ -25,6 +25,11 @@ SILENT_DBFS = -50.0
 # A blocked or muted mic delivers digital zeros; this stands in for -inf so the sidecar stays valid JSON.
 DBFS_FLOOR = -120.0
 WAV_HEADER_BYTES = 44
+LABELS = {
+    "read": "Read this aloud",
+    "ramble": "Talk about this, unplanned, 1-5 minutes",
+    "short": "Say this the way you'd dictate it",
+}
 
 
 def load_prompts(path: Path = PROMPTS) -> dict:
@@ -99,7 +104,7 @@ def capture(wav: Path, cap_s: int) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--mode", choices=["read", "ramble"], required=True)
+    parser.add_argument("--mode", choices=list(LABELS), required=True)
     parser.add_argument("--prompt", help="prompt id to (re)record; default is the next unrecorded one")
     args = parser.parse_args(argv)
 
@@ -115,8 +120,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Every {args.mode} prompt is recorded. Pass --prompt ID to record one again.")
             return 0
 
-    label = "Read this aloud" if args.mode == "read" else "Talk about this, unplanned, 1-5 minutes"
-    print(f"\n[{prompt['id']}] {label}:\n\n{prompt['text']}\n")
+    print(f"\n[{prompt['id']}] {LABELS[args.mode]}:\n\n{prompt['text']}\n")
     input("Press Enter to start.")
 
     ts = datetime.now(timezone.utc)
