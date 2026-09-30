@@ -11,6 +11,7 @@ CLEAN = EXPERIMENTS / "clean"
 CLEAN_RESULTS = CLEAN / "results.jsonl"
 BLIND_KEY = CLEAN / "blind_key.json"
 VOTES = CLEAN / "votes.jsonl"
+LIVE = EXPERIMENTS / "live"
 
 
 def sidecars(recordings: Path = RECORDINGS) -> list[dict]:

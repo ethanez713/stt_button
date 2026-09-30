@@ -1,6 +1,8 @@
 import json
 
-from experiments import report_asr, report_clean, vote
+import pytest
+
+from experiments import chunk_clean, paths, report_asr, report_clean, vote
 
 
 def arm(wer_nonum, rtf):
@@ -84,3 +86,60 @@ class TestCleanVerdict:
     def test_votes_for_unknown_ramble_are_counted_as_unjoined(self):
         t = report_clean.tally([{"id": "zz", "choice": "a", "usable": True}], self.KEY)
         assert t["unjoined"] == 1 and sum(t["wins"].values()) == 0
+
+
+def word_tokens(text: str) -> int:
+    return len(text.split())
+
+
+class TestCutChunks:
+    def test_chunk_closes_exactly_at_k(self):
+        text = "one two three four. five six seven eight. nine ten."
+        assert chunk_clean.cut_chunks(text, word_tokens, 8) == [
+            "one two three four. five six seven eight.",
+            "nine ten.",
+        ]
+
+    def test_small_remainder_is_its_own_chunk(self):
+        text = "one two three four five. six seven. eight."
+        assert chunk_clean.cut_chunks(text, word_tokens, 6) == [
+            "one two three four five. six seven.",
+            "eight.",
+        ]
+
+    def test_sentence_longer_than_k_stays_whole(self):
+        text = "one two three four five six. seven eight."
+        assert chunk_clean.cut_chunks(text, word_tokens, 3) == [
+            "one two three four five six.",
+            "seven eight.",
+        ]
+
+
+class TestVotePaths:
+    def test_no_args_use_the_bakeoff_files(self):
+        args = vote.argument_parser().parse_args([])
+        assert (args.a, args.b, args.votes) == (None, None, None)
+        outputs, votes, key = vote.resolve_vote(args.a, args.b, args.votes)
+        assert outputs == {arm: paths.CLEAN / arm for arm in vote.ARMS}
+        assert votes == paths.VOTES
+        assert key == paths.BLIND_KEY
+
+    def test_each_votes_file_has_its_own_resumable_key(self, tmp_path):
+        a, b = tmp_path / "whole", tmp_path / "chunk64"
+        votes = tmp_path / "chunk64.jsonl"
+        outputs, votes_path, key_path = vote.resolve_vote(a, b, votes)
+        assert votes_path == votes.resolve()
+        assert key_path == votes.resolve().with_name("chunk64_key.json")
+
+        arms = tuple(outputs)
+        made = vote.load_or_create_key(["m01", "m02"], key_path, arms=arms)
+        assert vote.load_or_create_key(["m01", "m02"], key_path, arms=arms) == made
+        assert set(made["labels"]["m01"].values()) == set(arms)
+
+        _, _, other = vote.resolve_vote(a, tmp_path / "chunk128", tmp_path / "chunk128.jsonl")
+        assert other == (tmp_path / "chunk128_key.json").resolve()
+        assert not other.exists()
+
+    def test_a_b_and_votes_must_be_given_together(self, tmp_path):
+        with pytest.raises(SystemExit, match="together"):
+            vote.resolve_vote(tmp_path / "a", None, None)
