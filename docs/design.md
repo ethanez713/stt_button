@@ -100,11 +100,11 @@ A path is skipped when it is unavailable (a null connection, an unreadable clip)
 Append-only JSONL under the app's files dir, `logs/edits.jsonl`. One dictation, two lines:
 
 ```
-{"event":"insert","id":"<uuid>","ts":"<iso8601>","pkg":"<package>","raw":"...","cleaned":"...","text_before":"...","asr_ms":0,"clean_ms":0,"asr_backend":"cpu","clean_backend":"cpu","audio_ms":0,"in_tokens":0,"out_tokens":0,"charge_uah":0,"plugged":false,"battery_pct":0}
+{"event":"insert","id":"<uuid>","ts":"<iso8601>","pkg":"<package>","raw":"...","cleaned":"...","text_before":"...","asr_ms":0,"clean_ms":0,"asr_backend":"cpu","clean_backend":"cpu","audio_ms":0,"in_tokens":0,"out_tokens":0,"charge_uah":0,"plugged":false,"battery_pct":0,"clean_mode":"chunks","chunks":0,"stop_to_insert_ms":0,"peak_pss_kb":0,"avail_mem_min_kb":0,"low_memory":false,"trim_level_max":0,"cpu_ms":0,"thermal_max":0}
 {"event":"edit","id":"<same uuid>","ts":"<iso8601>","text_after":"..."}
 ```
 
-The latency, backend and battery fields are per take; `docs/plans/07-usage-monitoring.md` specifies how they are measured. `text_before` is the field contents at insert time. While the field is tracked, the service keeps its latest non-empty text from `TYPE_VIEW_TEXT_CHANGED`. `text_after` is that snapshot, written when the field loses focus or the focused window's package changes, whichever comes first, so a field that clears on send still records what was sent. Send buttons are not reliably visible, and some apps destroy the field on send without a focus event. Each line is one JSON object with escaped strings. Lines are written for fields this app inserted into. Other typing is not recorded. Password, numeric, and phone fields never reach this path because the button never appears there.
+The latency, backend, battery, memory, CPU and thermal fields are per take. An `exit` line records each death of the app's process. `docs/plans/07-usage-monitoring.md` specifies how all of these are measured. `text_before` is the field contents at insert time. While the field is tracked, the service keeps its latest non-empty text from `TYPE_VIEW_TEXT_CHANGED`. `text_after` is that snapshot, written when the field loses focus or the focused window's package changes, whichever comes first, so a field that clears on send still records what was sent. Send buttons are not reliably visible, and some apps destroy the field on send without a focus event. Each line is one JSON object with escaped strings. Lines are written for fields this app inserted into. Other typing is not recorded. Password, numeric, and phone fields never reach this path because the button never appears there.
 
 Pull with:
 
