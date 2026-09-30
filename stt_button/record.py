@@ -28,7 +28,7 @@ WAV_HEADER_BYTES = 44
 LABELS = {
     "read": "Read this aloud",
     "ramble": "Talk about this, unplanned, 1-5 minutes",
-    "short": "Say this the way you'd dictate it",
+    "short": "Don't read this out. In your own words, dictate a message that does this",
 }
 
 
