@@ -1,15 +1,16 @@
-"""Clean every transcript on the phone with both cleaner backends and compare outputs and latency.
+"""Clean every transcript on the phone's CPU and compare outputs and latency across decoding modes.
 
-    STT_MODEL_DIR=~/models/stt_button pyrun python -m experiments.phone_cleaner [--reps 3] [--threads 4]
+    STT_MODEL_DIR=~/models/stt_button pyrun python -m experiments.phone_cleaner \
+        [--backends cpu lookup] [--reps 3] [--threads 6] [--lookup-n 3 --lookup-m 16] [--only NAME...]
 
-"npu" is ExecuTorch's qnn_llama_runner with the hybrid QNN export; "cpu" is llama.cpp's
-llama-completion with the Q4_K_M GGUF. Both are staged on the phone beforehand (plan 09, step 5).
-Prompts are rendered here by stt_button.cleaner.render_prompt. The NPU runner receives them
-pre-tokenized because its built-in Qwen3 template differs from the cleaner's.
+"cpu" is llama.cpp's llama-completion with the Q4_K_M GGUF. "lookup" is the same model under
+prompt-lookup decoding: llama-speculative-simple with --spec-type ngram-simple, which drafts the
+tokens that followed the last n tokens' previous occurrence in the prompt, and keeps the prefix the
+model agrees with. The binaries and GGUF are staged in /data/local/tmp/llamacpp beforehand
+(plan 09 records the build). Prompts are rendered here by stt_button.cleaner.render_prompt.
 """
 
 import argparse
-import json
 import re
 import statistics
 import subprocess
@@ -23,69 +24,66 @@ from stt_button import config
 from stt_button.cleaner import END_OF_TURN, max_new_tokens, render_prompt, user_turn
 
 ADB = Path.home() / "Android/Sdk/platform-tools/adb"
-NPU_DIR = "/data/local/tmp/s1mini"
-CPU_DIR = "/data/local/tmp/llamacpp"
-NPU_PTE = "hybrid_llama_qnn.pte"
-CPU_GGUF = "s1-mini-q4_k_m.gguf"
-OUT = paths.EXPERIMENTS / "npu" / "phone"
+PHONE_DIR = "/data/local/tmp/llamacpp"
+GGUF = "s1-mini-q4_k_m.gguf"
+OUT = paths.EXPERIMENTS / "phone_clean"
 RUNS = OUT / "runs.jsonl"
+# Both binaries print the whole rendered prompt first when they echo it; the generation follows
+# the empty think block that ends every cleaner prompt.
+ASSISTANT_START = "</think>\n\n"
 
 
 def adb(serial: str, *args: str) -> str:
     return subprocess.run([str(ADB), "-s", serial, *args], check=True, capture_output=True, text=True).stdout
 
 
-def timed_shell(serial: str, directory: str, command: str) -> int:
-    """Run command on the phone and return its on-device wall time in ms, which includes process
-    start and model load, as a cold take would."""
-    out = adb(serial, "shell", f"cd {directory} && s=$(date +%s%N); {command}; e=$(date +%s%N); "
-                                f"echo $(( (e - s) / 1000000 ))")
-    return int(out.split()[-1])
+def run_on_phone(serial: str, command: str) -> tuple[str, str]:
+    """Run command in the phone's llama.cpp directory; return its stdout and stderr."""
+    adb(serial, "shell", f"cd {PHONE_DIR} && {command} < /dev/null > out.txt 2> run.log")
+    return adb(serial, "shell", f"cat {PHONE_DIR}/out.txt"), adb(serial, "shell", f"cat {PHONE_DIR}/run.log")
 
 
-def run_npu(serial: str, name: str, prompt_tokens: int, limit: int) -> dict:
-    wall = timed_shell(serial, NPU_DIR,
-        f"LD_LIBRARY_PATH=. ADSP_LIBRARY_PATH=. ./qnn_llama_runner --model_path {NPU_PTE} "
-        f"--tokenizer_path tokenizer.json --decoder_model_version qwen3 --eval_mode 1 --temperature 0 "
-        f"--seq_len {prompt_tokens + limit} --tokenized_prompt prompts/{name}.bin --output_path out.txt --shared_buffer "
-        f"> run.log 2>&1")
-    log = adb(serial, "shell", f"cat {NPU_DIR}/run.log")
-    stats = json.loads(re.search(r"PyTorchObserver (\{.*\})", log).group(1))
-    return {
-        "text": runner_text(adb(serial, "shell", f"cat {NPU_DIR}/out.txt"), f"prompts/{name}.bin"),
-        "wall_ms": wall, "out_tokens": stats["generated_tokens"],
-        "load_ms": stats["model_load_end_ms"] - stats["model_load_start_ms"],
-        "prefill_ms": stats["prompt_eval_end_ms"] - stats["inference_start_ms"],
-        "decode_ms": stats["inference_end_ms"] - stats["prompt_eval_end_ms"],
-    }
-
-
-def runner_text(output: str, prompt_arg: str) -> str:
-    """qnn_llama_runner writes its prompt argument, then the generation up to and including <|im_end|>."""
-    return output.removeprefix(prompt_arg).split(END_OF_TURN)[0].strip()
-
-
-def run_cpu(serial: str, name: str, limit: int, threads: int) -> dict:
-    wall = timed_shell(serial, CPU_DIR,
-        f"./llama-completion -m {CPU_GGUF} -f prompts/{name}.txt -n {limit} --temp 0 --repeat-penalty 1.0 "
-        f"-c 2048 -t {threads} -no-cnv --no-display-prompt < /dev/null > out.txt 2> run.log")
-    log = adb(serial, "shell", f"cat {CPU_DIR}/run.log")
+def run_cpu(serial: str, name: str, limit: int, args) -> dict:
+    out, log = run_on_phone(serial,
+        f"./llama-completion -m {GGUF} -f prompts/{name}.txt -n {limit} --temp 0 --repeat-penalty 1.0 "
+        f"-c 2048 -t {args.threads} -no-cnv --no-display-prompt")
     ms = lambda pattern: round(float(re.search(pattern, log).group(1)))
     return {
-        "text": adb(serial, "shell", f"cat {CPU_DIR}/out.txt").replace("[end of text]", "").strip(),
-        "wall_ms": wall,
+        "text": out.replace("[end of text]", "").strip(),
         "out_tokens": int(re.search(r"common_perf_print: +eval time = +[\d.]+ ms / +(\d+) runs", log).group(1)),
-        "load_ms": ms(r"common_perf_print: +load time = +([\d.]+)"),
         "prefill_ms": ms(r"common_perf_print: prompt eval time = +([\d.]+)"),
         "decode_ms": ms(r"common_perf_print: +eval time = +([\d.]+)"),
     }
 
 
+def run_lookup(serial: str, name: str, limit: int, args) -> dict:
+    out, log = run_on_phone(serial,
+        f"./llama-speculative-simple -m {GGUF} -f prompts/{name}.txt -n {limit} --temp 0 --repeat-penalty 1.0 "
+        f"-c 2048 -t {args.threads} --spec-type ngram-simple "
+        f"--spec-ngram-simple-size-n {args.lookup_n} --spec-ngram-simple-size-m {args.lookup_m}")
+    seconds = lambda label: re.search(rf"{label} +(\d+) tokens in +([\d.]+) seconds", log).groups()
+    _, encode_s = seconds("encoded")
+    out_tokens, decode_s = seconds("decoded")
+    drafted, accepted = (int(re.search(rf"{k} *= (\d+)", log).group(1)) for k in ("n_drafted", "n_accept"))
+    return {
+        "text": out.rsplit(ASSISTANT_START, 1)[1].split(END_OF_TURN)[0].strip(),
+        "out_tokens": int(out_tokens), "prefill_ms": round(1000 * float(encode_s)),
+        "decode_ms": round(1000 * float(decode_s)), "drafted": drafted, "accepted": accepted,
+        "lookup_n": args.lookup_n, "lookup_m": args.lookup_m,
+    }
+
+
+BACKENDS = {"cpu": run_cpu, "lookup": run_lookup}
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
+    parser.add_argument("--backends", nargs="+", default=["cpu", "lookup"], choices=BACKENDS)
     parser.add_argument("--reps", type=int, default=3)
-    parser.add_argument("--threads", type=int, default=4)
-    parser.add_argument("--backends", nargs="+", default=["npu", "cpu"])
+    parser.add_argument("--threads", type=int, default=6)
+    parser.add_argument("--lookup-n", type=int, default=3)
+    parser.add_argument("--lookup-m", type=int, default=16)
+    parser.add_argument("--only", nargs="+", help="transcript names to run, default all")
     args = parser.parse_args()
 
     from llama_cpp import Llama
@@ -93,68 +91,61 @@ def main() -> int:
     pipeline = config.load()
     spec = pipeline["cleaners"]["s1-mini"]
     vocab = Llama(model_path=str(config.model_dir() / spec["model"]), vocab_only=True, verbose=False)
-    tokenize = lambda text, special: vocab.tokenize(text.encode(), add_bos=False, special=special)
+    count_tokens = lambda text: len(vocab.tokenize(text.encode(), add_bos=False, special=False))
     source = paths.ASR / pipeline["recognizer"]
-    transcripts = {p.stem: p.read_text().strip() for p in sorted(source.glob("*.txt"))}
+    transcripts = {p.stem: p.read_text().strip() for p in sorted(source.glob("*.txt"))
+                   if not args.only or p.stem in args.only}
     if not transcripts:
         sys.exit(f"no transcripts in {source}")
-    if max(len(tokenize(t, False)) for t in transcripts.values()) > pipeline["chunk_max_tokens"]:
+    if max(count_tokens(t) for t in transcripts.values()) > pipeline["chunk_max_tokens"]:
         sys.exit("a transcript needs chunking; this script sends each transcript as one prompt")
 
     serial = subprocess.run(["aconnect", "serial"], check=True, capture_output=True, text=True).stdout.strip()
-    prompts, limits = {}, {}
+    limits = {}
     with tempfile.TemporaryDirectory() as tmp:
         staged = Path(tmp) / "prompts"
         staged.mkdir()
         for name, text in transcripts.items():
             prompt = render_prompt(spec["system_prompt"], user_turn(spec["control_line"], text))
-            prompts[name] = tokenize(prompt, True)
-            limits[name] = max_new_tokens(len(tokenize(text, False)), spec["max_new_tokens_ratio"],
+            limits[name] = max_new_tokens(count_tokens(text), spec["max_new_tokens_ratio"],
                                           spec["max_new_tokens_pad"])
-            (staged / f"{name}.bin").write_bytes(b"".join(t.to_bytes(8, "little") for t in prompts[name]))
-            # llama-completion drops one trailing newline from -f files; the prompt must keep its own.
+            # llama.cpp drops one trailing newline from -f files; the prompt must keep its own.
             (staged / f"{name}.txt").write_text(prompt + "\n")
-        for directory in (NPU_DIR, CPU_DIR):
-            adb(serial, "push", str(staged), directory)
+        adb(serial, "push", str(staged), PHONE_DIR)
 
     outputs = {b: {} for b in args.backends}
     for rep in range(args.reps):
         for backend in args.backends:
             for name in transcripts:
-                if backend == "npu":
-                    run = run_npu(serial, name, len(prompts[name]), limits[name])
-                else:
-                    run = run_cpu(serial, name, limits[name], args.threads)
+                run = BACKENDS[backend](serial, name, limits[name], args)
                 outputs[backend][name] = run.pop("text")
-                record = {"backend": backend, "transcript": name, "rep": rep,
-                          "prompt_tokens": len(prompts[name]), **run}
-                if backend == "cpu":
-                    record["threads"] = args.threads
+                (OUT / backend).mkdir(parents=True, exist_ok=True)
+                (OUT / backend / f"{name}.txt").write_text(outputs[backend][name] + "\n")
+                record = {"backend": backend, "transcript": name, "rep": rep, "threads": args.threads, **run}
                 paths.append_jsonl(RUNS, record)
-                print(json.dumps(record), flush=True)
+                print(record, flush=True)
 
-    for backend, texts in outputs.items():
-        (OUT / backend).mkdir(parents=True, exist_ok=True)
-        for name, text in texts.items():
-            (OUT / backend / f"{name}.txt").write_text(text + "\n")
-    summarize(transcripts, outputs)
+    summarize(args, transcripts, outputs)
     return 0
 
 
-def summarize(transcripts: dict, outputs: dict) -> None:
-    runs = paths.read_jsonl(RUNS)
+def summarize(args, transcripts: dict, outputs: dict) -> None:
+    runs = [r for r in paths.read_jsonl(RUNS) if r["transcript"] in transcripts]
     for backend in outputs:
-        rows = [r for r in runs if r["backend"] == backend]
-        med = lambda key: statistics.median(r[key] for r in rows)
-        prefill = statistics.median(1000 * r["prompt_tokens"] / r["prefill_ms"] for r in rows)
+        rows = [r for r in runs if r["backend"] == backend
+                and (backend != "lookup" or (r["lookup_n"], r["lookup_m"]) == (args.lookup_n, args.lookup_m))]
+        latency = sorted(r["prefill_ms"] + r["decode_ms"] for r in rows)
         decode = statistics.median(1000 * r["out_tokens"] / max(1, r["decode_ms"]) for r in rows)
-        print(f"{backend}: median wall {med('wall_ms'):.0f} ms, load {med('load_ms'):.0f} ms, "
-              f"prefill {prefill:.0f} tok/s, decode {decode:.1f} tok/s")
-    if {"npu", "cpu"} <= outputs.keys():
-        differing = [n for n in transcripts if outputs["npu"][n] != outputs["cpu"][n]]
+        line = (f"{backend}: median {statistics.median(latency):.0f} ms, p90 {latency[int(0.9 * len(latency))]} ms, "
+                f"max {latency[-1]} ms, decode {decode:.0f} tok/s")
+        if backend == "lookup":
+            line += f", accepted {sum(r['accepted'] for r in rows) / max(1, sum(r['drafted'] for r in rows)):.0%} of drafts"
+        print(line)
+    if {"cpu", "lookup"} <= outputs.keys():
+        differing = [n for n in transcripts if outputs["cpu"][n] != outputs["lookup"][n]]
         print(f"identical outputs: {len(transcripts) - len(differing)} of {len(transcripts)}")
         for name in differing:
-            print(f"  {name}: {word_changes(outputs['cpu'][name], outputs['npu'][name])[:300]}")
+            print(f"  {name}: {word_changes(outputs['cpu'][name], outputs['lookup'][name])[:300]}")
 
 
 if __name__ == "__main__":
