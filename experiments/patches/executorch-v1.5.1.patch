@@ -1,3 +1,29 @@
+diff --git a/backends/qualcomm/utils/utils.py b/backends/qualcomm/utils/utils.py
+index 75ef9c1..9e3e1cd 100644
+--- a/backends/qualcomm/utils/utils.py
++++ b/backends/qualcomm/utils/utils.py
+@@ -471,11 +471,16 @@ def to_edge_transform_and_lower_to_qnn(
+     }
+ 
+     for graph_name, m in module.items():
+-        ep = torch.export.export(
+-            m,
+-            inputs[graph_name],
+-            dynamic_shapes=dynamic_shapes[graph_name],
+-            strict=True,
++        # A staged export hands over the program this call would have exported.
++        ep = (
++            m
++            if isinstance(m, torch.export.ExportedProgram)
++            else torch.export.export(
++                m,
++                inputs[graph_name],
++                dynamic_shapes=dynamic_shapes[graph_name],
++                strict=True,
++            )
+         )
+         option = generate_qnn_executorch_option(compiler_specs[graph_name])
+         python_options = flatbuffer_to_option(option)
 diff --git a/examples/qualcomm/oss_scripts/llama/__init__.py b/examples/qualcomm/oss_scripts/llama/__init__.py
 index 4e2b051..e774f49 100644
 --- a/examples/qualcomm/oss_scripts/llama/__init__.py
@@ -51,10 +77,10 @@ index 26e5aee..40b1b76 100644
      "smollm3-3b": "smollm3",
      "glm-1_5b": "glm",
 diff --git a/examples/qualcomm/oss_scripts/llama/wrappers/llm_wrappers.py b/examples/qualcomm/oss_scripts/llama/wrappers/llm_wrappers.py
-index 264f8b7..cd3b60c 100644
+index 264f8b7..4b462f3 100644
 --- a/examples/qualcomm/oss_scripts/llama/wrappers/llm_wrappers.py
 +++ b/examples/qualcomm/oss_scripts/llama/wrappers/llm_wrappers.py
-@@ -6,6 +6,7 @@
+@@ -6,10 +6,12 @@
  import argparse
  import copy
  import gc
@@ -62,10 +88,200 @@ index 264f8b7..cd3b60c 100644
  import inspect
  import json
  import logging
-@@ -152,6 +153,69 @@ def is_node_src_start_with_name(node: torch.fx.Node, kv_cache_prefix: str) -> bo
+ import re
++import sys
+ 
+ from functools import partial
+ from typing import Any, Dict, List
+@@ -152,6 +154,326 @@ def is_node_src_start_with_name(node: torch.fx.Node, kv_cache_prefix: str) -> bo
      )
  
  
++_PBQ_TARGET = {
++    torch.ops.torchao.dequantize_affine,
++    torch.ops.torchao.quantize_affine,
++}
++_PCQ_TARGET = {
++    torch.ops.quantized_decomposed.dequantize_per_channel.default,
++    torch.ops.quantized_decomposed.quantize_per_channel.default,
++}
++_PTQ_TARGET = {
++    torch.ops.quantized_decomposed.dequantize_per_tensor.default,
++    torch.ops.quantized_decomposed.quantize_per_tensor.default,
++}
++_QDQ_TARGET = _PBQ_TARGET | _PCQ_TARGET | _PTQ_TARGET
++
++
++def _node_info(node):
++    return node.name + (
++        str(node.meta["nn_module_stack"].values())
++        if node.op == "call_function"
++        else ""
++    )
++
++
++def _resolve_param_target(node):
++    return (
++        node
++        if node.op == "call_function" and node.target not in _QDQ_TARGET
++        else _resolve_param_target(list(node.users)[0])
++    )
++
++
++def _encoding_nodes(model):
++    """Activation and parameter nodes in the order both halves of the encoding transfer pair them."""
++    parameters = {
++        n: _resolve_param_target(n) for n in model.graph.nodes if n.op == "get_attr"
++    }
++    activations = [
++        n
++        for n in model.graph.nodes
++        if n.target not in _QDQ_TARGET and n.op in {"call_function", "placeholder"}
++    ]
++    return activations, parameters
++
++
++def _target_key(target):
++    """A process-independent name for a node target, so encodings can be compared after pickling."""
++    if isinstance(target, (str, torch._ops.OpOverload, torch._ops.OpOverloadPacket)):
++        return str(target)
++    return f"{getattr(target, '__module__', None)}.{getattr(target, '__qualname__', target)}"
++
++
++def _qdq_chain(node):
++    """The q/dq arguments hanging off node's users, recursively, as the transfer copies them."""
++    chain = []
++    for user in node.users:
++        if user.name == "output":
++            chain.append(None)
++            continue
++        qdq_args = children = None
++        if user.target in _QDQ_TARGET:
++            qdq_args = tuple(user.args[1:])
++            assert not any(
++                isinstance(a, torch.fx.Node) for a in qdq_args
++            ), f"q/dq {user} takes graph nodes as encodings"
++            children = _qdq_chain(user)
++        chain.append((_target_key(user.target), qdq_args, children))
++    return chain
++
++
++def _apply_qdq_chain(chain, node):
++    for entry, user in zip(chain, list(node.users)):
++        if entry is None:
++            continue
++        target, qdq_args, children = entry
++        assert target == _target_key(user.target), f"found unmatched targets: {target} vs {user.target}"
++        if qdq_args is not None:
++            user.args = (user.args[0], *qdq_args)
++            _apply_qdq_chain(children, user)
++
++
++def _get_attr(module, target):
++    for atom in target.split("."):
++        module = getattr(module, atom)
++    return module
++
++
++def _set_attr(module, target, value):
++    *path, last = target.split(".")
++    for atom in path:
++        module = getattr(module, atom)
++    setattr(module, last, value)
++
++
++def _extract_encodings(quantized_model, override_kv_cache):
++    """Everything the encoding transfer reads from the calibrated graph, keyed by node order.
++
++    Picklable, so a staged export can hand a graph's encodings to the next process.
++    """
++    activations, parameters = _encoding_nodes(quantized_model)
++    table = {
++        "activations": [(_node_info(n), _qdq_chain(n)) for n in activations],
++        "parameters": [
++            (
++                _node_info(resolved),
++                _get_attr(quantized_model, node.target),
++                _qdq_chain(node) if list(node.users)[0].target in _PTQ_TARGET else None,
++            )
++            for node, resolved in parameters.items()
++        ],
++        "kv_cache": None,
++    }
++    if override_kv_cache:
++        k_chains, v_chains = [], []
++        for node in quantized_model.graph.nodes:
++            if not is_graph_output(node):
++                continue
++            cache_output_node = node.args[0].args[0]
++            if is_node_src_start_with_name(cache_output_node, kv_cache_prefix="k_"):
++                k_chains.append(_qdq_chain(cache_output_node))
++            elif is_node_src_start_with_name(cache_output_node, kv_cache_prefix="v_"):
++                v_chains.append(_qdq_chain(cache_output_node))
++        if not k_chains or not v_chains:
++            raise RuntimeError(
++                "KV cache detection failed. This likely means the model naming "
++                "does not match expected prefixes."
++            )
++        table["kv_cache"] = (k_chains, v_chains)
++    return table
++
++
++def _save_encodings(table, path):
++    import pickle
++
++    for section in ("activations", "parameters"):
++        for entry in table[section]:
++            try:
++                pickle.dumps(entry)
++            except Exception as e:
++                raise RuntimeError(f"{section} entry for {entry[0]} is not picklable: {entry}") from e
++    torch.save(table, path)
++
++
++def _apply_encodings(table, unquantized_model, n_cache_layers):
++    activations, parameters = _encoding_nodes(unquantized_model)
++    # check topology order by node name & nn_module_stack
++    for (info, _), node in zip(table["activations"], activations):
++        assert info == _node_info(node), f"found unmatched order for ops: {info} vs {node}"
++    for (info, _, _), resolved in zip(table["parameters"], parameters.values()):
++        assert info == _node_info(resolved), f"found unmatched order for ops: {info} vs {resolved}"
++
++    for (_, chain), node in zip(table["activations"], activations):
++        _apply_qdq_chain(chain, node)
++    for (_, source, chain), node in zip(table["parameters"], parameters.keys()):
++        # A CALIBRATE graph shorter than max_context_len has shorter RoPE tables; keep the
++        # target's own tensor and copy only its quantization parameters.
++        target = _get_attr(unquantized_model, node.target)
++        if not (
++            isinstance(source, torch.Tensor)
++            and isinstance(target, torch.Tensor)
++            and source.shape != target.shape
++        ):
++            _set_attr(unquantized_model, node.target, source)
++        if chain is not None:
++            _apply_qdq_chain(chain, node)
++
++    if table["kv_cache"] is not None:
++        k_inputs, v_inputs = [], []
++        for node in unquantized_model.graph.nodes:
++            if node.op == "placeholder" and "args_" in node.name:
++                is_v = int(node.name.split("_")[-1]) >= n_cache_layers
++                (v_inputs if is_v else k_inputs).append(node)
++        if not k_inputs or not v_inputs:
++            raise RuntimeError(
++                "KV cache input detection failed. This likely means the model naming "
++                "does not match expected prefixes."
++            )
++        k_chains, v_chains = table["kv_cache"]
++        for chain, node in zip(k_chains, k_inputs):
++            _apply_qdq_chain(chain, node)
++        for chain, node in zip(v_chains, v_inputs):
++            _apply_qdq_chain(chain, node)
++
++    unquantized_model.recompile()
++
++
 +def _release_export_leftovers() -> None:
 +    """Free the weights still pinned by dead intermediates of export, prepare/convert and SeqMSE.
 +
@@ -108,6 +324,59 @@ index 264f8b7..cd3b60c 100644
 +    logging.info(f"released {freed // 2**20} MB held by dead export intermediates and SeqMSE modules")
 +
 +
++def _save_lowering_input(decoder: "TextDecoder", path: str) -> None:
++    """Save what compile() needs from a quantized TextDecoder: the program the QNN lowering would
++    export from it, and the attributes its passes read. Round-tripping the program through disk must
++    not change it, so the reload is compared node by node before the stage reports done."""
++    ep = torch.export.export(decoder.decoder, decoder.export_input, strict=True)
++    torch.export.save(ep, f"{path}.pt2")
++    state = {
++        "meta": decoder.meta,
++        "io_shape": decoder.io_shape,
++        "kv_cache_shape": decoder.kv_cache_shape,
++        "fixed_point_type": decoder.passes_job[TagQuantIO][
++            QCOM_PASS_ARGS_KWARGS_DEFAULTS_KEY
++        ]["get_quant_io_dtype_fn"].keywords["fixed_point_type"],
++    }
++    torch.save(state, f"{path}_state.pt")
++    reloaded = torch.export.load(f"{path}.pt2")
++    saved_nodes = [(n.name, n.op, str(n.target)) for n in ep.graph.nodes]
++    loaded_nodes = [(n.name, n.op, str(n.target)) for n in reloaded.graph.nodes]
++    assert saved_nodes == loaded_nodes, f"{path}.pt2 does not round-trip"
++    for a, b in zip(ep.graph.nodes, reloaded.graph.nodes):
++        if "val" in a.meta:
++            assert getattr(a.meta["val"], "shape", None) == getattr(
++                b.meta["val"], "shape", None
++            ), f"{path}.pt2: shape of {a.name} changed on reload"
++    saved = {**ep.state_dict, **ep.constants}
++    loaded = {**reloaded.state_dict, **reloaded.constants}
++    assert saved.keys() == loaded.keys(), f"{path}.pt2: tensors changed on reload"
++    for key, tensor in saved.items():
++        if isinstance(tensor, torch.Tensor):
++            assert torch.equal(tensor, loaded[key]), f"{path}.pt2: {key} changed on reload"
++
++
++def _load_lowering_input(path: str, control_args) -> "TextDecoder":
++    """A TextDecoder shell holding a staged program and the attributes compile() and _tag_ios read."""
++    state = torch.load(f"{path}_state.pt", weights_only=False)
++    decoder = TextDecoder.__new__(TextDecoder)
++    decoder.control_args = control_args
++    decoder.meta = state["meta"]
++    decoder.io_shape = state["io_shape"]
++    decoder.kv_cache_shape = state["kv_cache_shape"]
++    decoder.decoder = torch.export.load(f"{path}.pt2")
++    decoder.tok_embedding = None
++    decoder.export_input = None
++    decoder.pass_manager_cls = get_qnn_pass_manager_cls()
++    decoder.passes_job = decoder.pass_manager_cls.get_capture_program_passes()
++    decoder.dep_table = decoder.pass_manager_cls.get_passes_dependency_for_capture_program()
++    decoder.passes_job[TagQuantIO][QCOM_PASS_ACTIVATE_KEY] = True
++    decoder.passes_job[TagQuantIO][QCOM_PASS_ARGS_KWARGS_DEFAULTS_KEY][
++        "get_quant_io_dtype_fn"
++    ] = partial(decoder._tag_ios, fixed_point_type=state["fixed_point_type"])
++    return decoder
++
++
 +def _drop_unreferenced_tensors(graph_module: torch.fx.GraphModule) -> None:
 +    """convert_pt2e folds each quantized weight into a new constant but leaves the fp32 original attached."""
 +    referenced = {n.target for n in graph_module.graph.nodes if n.op == "get_attr"}
@@ -124,6 +393,25 @@ index 264f8b7..cd3b60c 100644
 +    logging.info(f"dropped {dropped // 2**20} MB of tensors no longer referenced after convert_pt2e")
 +
 +
++def export_stage():
++    """ET_QNN_STAGE runs one stage of the hybrid export per process: calibrate, decode, prefill or
++    compile. Each stage saves what the next one loads into the artifact directory, so no process
++    carries another stage's graphs. Unset, the whole export runs in one process."""
++    stage = os.environ.get("ET_QNN_STAGE")
++    assert stage in (None, "calibrate", "decode", "prefill", "compile"), stage
++    return stage
++
++
++def _stage_path(control_args, name):
++    return os.path.join(control_args.artifact, f"stage_{name}")
++
++
++def _finish_stage(control_args, stage):
++    open(_stage_path(control_args, f"{stage}.done"), "w").close()
++    logging.info(f"export stage {stage} done")
++    sys.exit(0)
++
++
 +def calibration_context_len() -> int:
 +    """Context length of the CALIBRATE graph when ET_QNN_CALIB_CONTEXT_LEN is set; 0 means max_context_len."""
 +    return int(os.environ.get("ET_QNN_CALIB_CONTEXT_LEN", "0"))
@@ -132,7 +420,7 @@ index 264f8b7..cd3b60c 100644
  class TextDecoder(Component):
  
      def __init__(
-@@ -161,6 +225,11 @@ class TextDecoder(Component):
+@@ -161,6 +483,11 @@ class TextDecoder(Component):
          mode: Mode,
          apply_embedding: bool = False,
      ):
@@ -144,7 +432,7 @@ index 264f8b7..cd3b60c 100644
          self.control_args = control_args
          self.config = config
          self.mode = mode
-@@ -466,7 +535,10 @@ class TextDecoder(Component):
+@@ -466,7 +793,10 @@ class TextDecoder(Component):
          self.meta = decoder.get_metadata()
          # get example input
          self.example_input = decoder.get_example_inputs()
@@ -156,7 +444,7 @@ index 264f8b7..cd3b60c 100644
          self.export_input = (
              self.example_input[0],  # tokens or hidden_states
              *self.example_input[1],  # attn_mask
-@@ -807,6 +879,7 @@ class TextDecoder(Component):
+@@ -807,6 +1137,7 @@ class TextDecoder(Component):
                  self.decoder(*self.export_input)
  
              self.decoder = convert_pt2e(self.decoder)
@@ -164,7 +452,7 @@ index 264f8b7..cd3b60c 100644
  
              if (
                  self.mode == Mode.CALIBRATE
-@@ -866,18 +939,8 @@ class HybridTextDecoder(Component):
+@@ -866,278 +1197,147 @@ class HybridTextDecoder(Component):
          config: LLMModelConfig,
          apply_embedding: bool = False,
      ):
@@ -184,8 +472,22 @@ index 264f8b7..cd3b60c 100644
 +        self.prefill = None
          # Full AR sequence with KV cache; used only for quantization.
          # Scales/zp collected here are propagated to decode and prefill graphs via _encoding_override.
-         self.calibration_prefill = TextDecoder(
-@@ -889,10 +952,18 @@ class HybridTextDecoder(Component):
+-        self.calibration_prefill = TextDecoder(
+-            control_args,
+-            config,
+-            Mode.CALIBRATE,
+-            apply_embedding=apply_embedding,
++        self.calibration_prefill = (
++            TextDecoder(
++                control_args,
++                config,
++                Mode.CALIBRATE,
++                apply_embedding=apply_embedding,
++            )
++            if export_stage() in (None, "calibrate")
++            else None
+         )
++        assert not (export_stage() and apply_embedding), "staged export is text-only"
  
          self.control_args = control_args
          self.config = config
@@ -193,6 +495,172 @@ index 264f8b7..cd3b60c 100644
 -
          self.apply_embedding = apply_embedding
  
+-    def _encoding_override(  # noqa: C901
+-        self,
+-        quantized_model,
+-        unquantized_model,
+-        override_kv_cache,
+-    ):
+-        pbq_target = {
+-            torch.ops.torchao.dequantize_affine,
+-            torch.ops.torchao.quantize_affine,
+-        }
+-        pcq_target = {
+-            torch.ops.quantized_decomposed.dequantize_per_channel.default,
+-            torch.ops.quantized_decomposed.quantize_per_channel.default,
+-        }
+-        ptq_target = {
+-            torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+-            torch.ops.quantized_decomposed.quantize_per_tensor.default,
+-        }
+-        qdq_target = pbq_target | pcq_target | ptq_target
+-
+-        def compare_nodes(quantized_node, unquantized_node):
+-            def info(node):
+-                return node.name + (
+-                    str(node.meta["nn_module_stack"].values())
+-                    if node.op == "call_function"
+-                    else ""
+-                )
+-
+-            assert info(quantized_node) == info(
+-                unquantized_node
+-            ), f"found unmatched order for ops: {quantized_node} vs {unquantized_node}"
+-
+-        def resolve_param_target(node):
+-            return (
+-                node
+-                if node.op == "call_function" and node.target not in qdq_target
+-                else resolve_param_target(list(node.users)[0])
+-            )
+-
+-        def activation_override(quantized_node, unquantized_node):
+-            for quantized_user, unquantized_user in zip(
+-                list(quantized_node.users), list(unquantized_node.users)
+-            ):
+-                if "output" == quantized_user.name:
+-                    continue
+-                assert quantized_user.target == unquantized_user.target, (
+-                    "found unmatched targets: "
+-                    f"{quantized_user.target} vs {unquantized_user.target}"
+-                )
+-                if quantized_user.target in qdq_target:
+-                    unquantized_user.args = (
+-                        unquantized_user.args[0],
+-                        *quantized_user.args[1:],
+-                    )
+-                    activation_override(quantized_user, unquantized_user)
+-
+-        def parameter_override(quantized_node, unquantized_node):
+-            # Some parameters need to be iterated over to retrieve attributes such as static_llama.tok_embedding.weight
+-            def _get_attr(graph_module: torch.fx.GraphModule, target: str) -> Any:
+-                attr: Any = graph_module
+-                for target_atom in target.split("."):
+-                    attr = getattr(attr, target_atom)
+-                return attr
+-
+-            def _set_attr(
+-                graph_module: torch.fx.GraphModule, target: str, replacement: Any
+-            ) -> Any:
+-                attr: Any = graph_module
+-                target_list = target.split(".")
+-                for target_atom in target_list[:-1]:
+-                    attr = getattr(attr, target_atom)
+-                setattr(attr, target_list[-1], replacement)
+-
+-            _set_attr(
+-                unquantized_model,
+-                unquantized_node.target,
+-                _get_attr(quantized_model, quantized_node.target),
+-            )
+-            # scale / zero point are part of op's attributes
+-            if list(quantized_node.users)[0].target in ptq_target:
+-                activation_override(quantized_node, unquantized_node)
+-
+-        # copy encoding for hybrid mode
+-        parameters = [
+-            {
+-                n: resolve_param_target(n)
+-                for n in model.graph.nodes
+-                if n.op == "get_attr"
+-            }
+-            for model in (quantized_model, unquantized_model)
+-        ]
+-        activations = [
+-            [
+-                n
+-                for n in model.graph.nodes
+-                if n.target not in qdq_target
+-                and n.op in {"call_function", "placeholder"}
+-            ]
+-            for model in (quantized_model, unquantized_model)
+-        ]
+-        # check topology order by node name & nn_module_stack
+-        for act_quantized, act_unquantized in zip(*activations):
+-            compare_nodes(act_quantized, act_unquantized)
+-
+-        for op_quantized, op_unquantized in zip(*[p.values() for p in parameters]):
+-            compare_nodes(op_quantized, op_unquantized)
+-        # perform encoding override
+-        for act_quantized, act_unquantized in zip(*activations):
+-            activation_override(act_quantized, act_unquantized)
+-
+-        for param_quantized, param_unquantized in zip(*[p.keys() for p in parameters]):
+-            parameter_override(param_quantized, param_unquantized)
+-
+-        if override_kv_cache:
+-            k_input_cache_nodes = []
+-            v_input_cache_nodes = []
+-            for node in unquantized_model.graph.nodes:
+-                if node.op != "placeholder":
+-                    continue
+-
+-                if "args_" in node.name:
+-                    args_idx = int(node.name.split("_")[-1])
+-
+-                    n_cache_layers = (
+-                        self.decode.meta["get_n_self_layers"]
+-                        if self.control_args.decoder_model == "gemma4-e2b"
+-                        else self.decode.meta["get_n_layers"]
+-                    )
+-                    if args_idx >= n_cache_layers:
+-                        v_input_cache_nodes.append(node)
+-                    else:
+-                        k_input_cache_nodes.append(node)
+-
+-            if not k_input_cache_nodes or not v_input_cache_nodes:
+-                raise RuntimeError(
+-                    "KV cache input detection failed. This likely means the model naming "
+-                    "does not match expected prefixes."
+-                )
+-
+-            k_output_cache_nodes = []
+-            v_output_cache_nodes = []
+-            for node in quantized_model.graph.nodes:
+-                if not is_graph_output(node):
+-                    continue
+-                cache_output_node = node.args[0].args[0]
+-                if is_node_src_start_with_name(cache_output_node, kv_cache_prefix="k_"):
+-                    k_output_cache_nodes.append(cache_output_node)
+-                elif is_node_src_start_with_name(
+-                    cache_output_node, kv_cache_prefix="v_"
+-                ):
+-                    v_output_cache_nodes.append(cache_output_node)
+-
+-            if not k_output_cache_nodes or not v_output_cache_nodes:
+-                raise RuntimeError(
+-                    "KV cache detection failed. This likely means the model naming "
+-                    "does not match expected prefixes."
+-                )
+-
+-            for input_k_cache_node, output_k_cache_node in zip(
+-                k_input_cache_nodes, k_output_cache_nodes
+-            ):
+-                activation_override(output_k_cache_node, input_k_cache_node)
+-            for input_v_cache_node, output_v_cache_node in zip(
+-                v_input_cache_nodes, v_output_cache_nodes
+-            ):
+-                activation_override(output_v_cache_node, input_v_cache_node)
 +    def _build(self, mode: Mode, request: Request) -> "TextDecoder":
 +        decoder = TextDecoder(
 +            self.control_args,
@@ -203,37 +671,30 @@ index 264f8b7..cd3b60c 100644
 +        decoder.quantize(request)
 +        return decoder
 +
-     def _encoding_override(  # noqa: C901
-         self,
-         quantized_model,
-@@ -966,11 +1037,16 @@ class HybridTextDecoder(Component):
-                     attr = getattr(attr, target_atom)
-                 setattr(attr, target_list[-1], replacement)
++    def _encoding_override(self, quantized_model, unquantized_model, override_kv_cache):
++        _apply_encodings(
++            _extract_encodings(quantized_model, override_kv_cache),
++            unquantized_model,
++            self._n_cache_layers(),
++        )
  
--            _set_attr(
--                unquantized_model,
--                unquantized_node.target,
--                _get_attr(quantized_model, quantized_node.target),
--            )
-+            # A CALIBRATE graph shorter than max_context_len has shorter RoPE tables; keep the
-+            # target's own tensor and copy only its quantization parameters.
-+            source = _get_attr(quantized_model, quantized_node.target)
-+            target = _get_attr(unquantized_model, unquantized_node.target)
-+            if not (
-+                isinstance(source, torch.Tensor)
-+                and isinstance(target, torch.Tensor)
-+                and source.shape != target.shape
-+            ):
-+                _set_attr(unquantized_model, unquantized_node.target, source)
-             # scale / zero point are part of op's attributes
-             if list(quantized_node.users)[0].target in ptq_target:
-                 activation_override(quantized_node, unquantized_node)
-@@ -1064,80 +1140,59 @@ class HybridTextDecoder(Component):
+-        unquantized_model.recompile()
++    def _n_cache_layers(self):
++        meta = next(d for d in (self.decode, self.prefill) if d is not None).meta
++        return (
++            meta["get_n_self_layers"]
++            if self.control_args.decoder_model == "gemma4-e2b"
++            else meta["get_n_layers"]
++        )
  
      def quantize(self, request: Request):
          if request.method_data[TEXT_DECODER].skip_quantize:
 +            self.decode = self._build(Mode.DECODE, request)
 +            self.prefill = self._build(Mode.PREFILL, request)
++            return
++        stage = export_stage()
++        if stage is not None:
++            self._quantize_stage(stage, request)
              return
          self.calibration_prefill.quantize(request)
 -
@@ -249,6 +710,10 @@ index 264f8b7..cd3b60c 100644
 -        # save AoT quantization time as well.
 -        # ---
 -        if not request.method_data[TEXT_DECODER].skip_quantize:
+-            self._encoding_override(
+-                quantized_model=self.calibration_prefill.decoder,
+-                unquantized_model=self.decode.decoder,
+-                override_kv_cache=True,
 +        self.decode = self._build(Mode.DECODE, request)
 +        self._transfer_to_decode()
 +        del self.calibration_prefill
@@ -256,39 +721,26 @@ index 264f8b7..cd3b60c 100644
 +        self.prefill = self._build(Mode.PREFILL, request)
 +        self._transfer_to_prefill()
 +
-+    def _transfer_to_decode(self):
-+        self._encoding_override(
-+            quantized_model=self.calibration_prefill.decoder,
-+            unquantized_model=self.decode.decoder,
-+            override_kv_cache=True,
-+        )
-+        self.decode._save_logits_quant_attrs()
-+        self.decode._save_output_kv_cache_quant_attrs()
-+        if self.apply_embedding:
-             self._encoding_override(
--                quantized_model=self.calibration_prefill.decoder,
--                unquantized_model=self.decode.decoder,
--                override_kv_cache=True,
-+                quantized_model=self.calibration_prefill.tok_embedding,
-+                unquantized_model=self.decode.tok_embedding,
-+                override_kv_cache=False,
++    def _quantize_stage(self, stage, request):
++        args = self.control_args
++        if stage == "calibrate":
++            self.calibration_prefill.quantize(request)
++            table = _extract_encodings(self.calibration_prefill.decoder, override_kv_cache=True)
++            _save_encodings(table, _stage_path(args, "calibrate_encodings.pt"))
++            _finish_stage(args, stage)
++        elif stage == "decode":
++            self.decode = self._build(Mode.DECODE, request)
++            _apply_encodings(
++                torch.load(_stage_path(args, "calibrate_encodings.pt"), weights_only=False),
++                self.decode.decoder,
++                self._n_cache_layers(),
              )
-+        # QDQ EP for SQNR evaluation
-+        qdq_ep = torch.export.export(
-+            self.calibration_prefill.decoder,
-+            self.calibration_prefill.export_input,
-+            strict=True,
-+        )
-+        qdq_ep_path = f"{self.decode.control_args.artifact}/{DECODE_QDQ_FILENAME}"
-+        torch.export.save(qdq_ep, qdq_ep_path)
-+        logging.info(f"QDQ EP saved to {qdq_ep_path}")
-+        del qdq_ep
- 
+-
 -            # save logit's quantization attributes to meta
--            self.decode._save_logits_quant_attrs()
+             self.decode._save_logits_quant_attrs()
 -
 -            # save output KV cache's quantization attributes to meta for attention sink
--            self.decode._save_output_kv_cache_quant_attrs()
+             self.decode._save_output_kv_cache_quant_attrs()
 -
 -            if self.apply_embedding:
 -                self._encoding_override(
@@ -302,20 +754,7 @@ index 264f8b7..cd3b60c 100644
 -                self.calibration_prefill.decoder,
 -                self.calibration_prefill.export_input,
 -                strict=True,
-+    def _transfer_to_prefill(self):
-+        if self.prefill.decoder is None or not self.prefill.meta["get_use_kv_cache"]:
-+            return
-+        self._encoding_override(
-+            quantized_model=self.decode.decoder,
-+            unquantized_model=self.prefill.decoder,
-+            override_kv_cache=True,
-+        )
-+        if self.apply_embedding:
-+            self._encoding_override(
-+                quantized_model=self.decode.tok_embedding,
-+                unquantized_model=self.prefill.tok_embedding,
-+                override_kv_cache=False,
-             )
+-            )
 -            qdq_ep_path = f"{self.decode.control_args.artifact}/{DECODE_QDQ_FILENAME}"
 -            torch.export.save(qdq_ep, qdq_ep_path)
 -            logging.info(f"QDQ EP saved to {qdq_ep_path}")
@@ -343,15 +782,110 @@ index 264f8b7..cd3b60c 100644
 -                        quantized_model=self.decode.tok_embedding,
 -                        unquantized_model=self.prefill.tok_embedding,
 -                        override_kv_cache=False,
--                    )
--
++            table = _extract_encodings(self.decode.decoder, override_kv_cache=True)
++            _save_encodings(table, _stage_path(args, "decode_encodings.pt"))
++            _save_lowering_input(self.decode, _stage_path(args, "decode"))
++            _finish_stage(args, stage)
++        elif stage == "prefill":
++            self.prefill = self._build(Mode.PREFILL, request)
++            if self.prefill.decoder is not None:
++                if self.prefill.meta["get_use_kv_cache"]:
++                    _apply_encodings(
++                        torch.load(_stage_path(args, "decode_encodings.pt"), weights_only=False),
++                        self.prefill.decoder,
++                        self._n_cache_layers(),
+                     )
++                _save_lowering_input(self.prefill, _stage_path(args, "prefill"))
++            _finish_stage(args, stage)
++        else:
++            self.decode = _load_lowering_input(_stage_path(args, "decode"), args)
++            prefill_path = _stage_path(args, "prefill")
++            if os.path.exists(f"{prefill_path}.pt2"):
++                self.prefill = _load_lowering_input(prefill_path, args)
++
++    def _transfer_to_decode(self):
++        self._encoding_override(
++            quantized_model=self.calibration_prefill.decoder,
++            unquantized_model=self.decode.decoder,
++            override_kv_cache=True,
++        )
++        self.decode._save_logits_quant_attrs()
++        self.decode._save_output_kv_cache_quant_attrs()
++        if self.apply_embedding:
++            self._encoding_override(
++                quantized_model=self.calibration_prefill.tok_embedding,
++                unquantized_model=self.decode.tok_embedding,
++                override_kv_cache=False,
++            )
++        # QDQ EP for SQNR evaluation
++        qdq_ep = torch.export.export(
++            self.calibration_prefill.decoder,
++            self.calibration_prefill.export_input,
++            strict=True,
++        )
++        qdq_ep_path = f"{self.decode.control_args.artifact}/{DECODE_QDQ_FILENAME}"
++        torch.export.save(qdq_ep, qdq_ep_path)
++        logging.info(f"QDQ EP saved to {qdq_ep_path}")
++        del qdq_ep
+ 
 -        # calibration_prefill is only used for encoding override
 -        # free it once encoding override is complete.
 -        del self.calibration_prefill
 -        gc.collect()
++    def _transfer_to_prefill(self):
++        if self.prefill.decoder is None or not self.prefill.meta["get_use_kv_cache"]:
++            return
++        self._encoding_override(
++            quantized_model=self.decode.decoder,
++            unquantized_model=self.prefill.decoder,
++            override_kv_cache=True,
++        )
++        if self.apply_embedding:
++            self._encoding_override(
++                quantized_model=self.decode.tok_embedding,
++                unquantized_model=self.prefill.tok_embedding,
++                override_kv_cache=False,
++            )
  
 +    @log_info
 +    def compile(self, request: Request):  # noqa: C901
          # prepare lowering tok_embedding if applicable
          if self.apply_embedding:
              tok_embedding_data = request.method_data[TOK_EMBEDDING]
+@@ -1151,7 +1351,9 @@ class HybridTextDecoder(Component):
+ 
+         # prepare lowering decoder
+         data = request.method_data[TEXT_DECODER]
+-        models = [d for d in [self.decode, self.prefill] if d.decoder is not None]
++        models = [
++            d for d in [self.decode, self.prefill] if d is not None and d.decoder is not None
++        ]
+         example_inputs = [m.export_input for m in models if m is not None]
+         graph_names = DECODER_GRAPH_NAMES[: len(models)]
+ 
+@@ -1486,6 +1688,25 @@ class MultiModalManager(Component):
+         backend,
+         soc_model,
+     ):
++        if export_stage() not in (None, "calibrate"):
++            self.process(
++                Request(
++                    inspect.currentframe().f_code.co_name,
++                    {
++                        m: Request.Data(
++                            quantization_data=Request.QuantizationData(
++                                calib_loader=None, train_loader=None, val_loader=None
++                            ),
++                            skip_quantize=skip_quantize.get(m, False),
++                            tokenizer=tokenizer_wrapper.tokenizer,
++                            backend=backend,
++                            soc_model=soc_model,
++                        )
++                        for m in self._modalities
++                    },
++                )
++            )
++            return
+         data_config = DataConfig.from_args(self.control_args)
+         dataset_builder = DatasetBuilder(
+             data_config=data_config,
