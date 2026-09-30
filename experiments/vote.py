@@ -80,6 +80,10 @@ def main() -> int:
     outputs, votes_path, key_path = resolve_vote(args.a, args.b, args.votes)
     arm_a, arm_b = tuple(outputs)
     ids = sorted(p.stem for p in outputs[arm_a].glob("*.txt") if (outputs[arm_b] / p.name).exists())
+    if args.a is not None:
+        # Identical outputs have nothing to choose between.
+        read = lambda arm, i: (outputs[arm] / f"{i}.txt").read_text().strip()
+        ids = [i for i in ids if read(arm_a, i) != read(arm_b, i)]
     if not ids:
         if args.a is None:
             sys.exit("no cleaned rambles from both arms; run experiments.clean_bakeoff first")
@@ -100,7 +104,21 @@ def main() -> int:
         usable = None if choice == "t" else ask(f"Is {choice.upper()} usable without edits?", "yn") == "y"
         paths.append_jsonl(votes_path, {"id": i, "choice": choice, "usable": usable})
     print("All voted.")
+    print_tally(key, paths.read_jsonl(votes_path))
     return 0
+
+
+def print_tally(key: dict, votes: list[dict]) -> None:
+    wins: dict[str, int] = {}
+    ties = 0
+    for vote in votes:
+        if vote["choice"] == "t":
+            ties += 1
+        else:
+            arm = key["labels"][vote["id"]][vote["choice"].upper()]
+            wins[arm] = wins.get(arm, 0) + 1
+    arms = sorted({arm for labels in key["labels"].values() for arm in labels.values()})
+    print(", ".join(f"{Path(arm).name} {wins.get(arm, 0)}" for arm in arms) + f", tie {ties}")
 
 
 if __name__ == "__main__":

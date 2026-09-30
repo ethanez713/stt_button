@@ -143,3 +143,11 @@ class TestVotePaths:
     def test_a_b_and_votes_must_be_given_together(self, tmp_path):
         with pytest.raises(SystemExit, match="together"):
             vote.resolve_vote(tmp_path / "a", None, None)
+
+
+def test_vote_tally_maps_letters_to_arms(capsys):
+    from experiments import vote
+
+    key = {"labels": {"x": {"A": "/d/whole", "B": "/d/chunk64"}, "y": {"A": "/d/chunk64", "B": "/d/whole"}}}
+    vote.print_tally(key, [{"id": "x", "choice": "b"}, {"id": "y", "choice": "a"}, {"id": "z", "choice": "t"}])
+    assert capsys.readouterr().out.strip() == "chunk64 2, whole 0, tie 1"
