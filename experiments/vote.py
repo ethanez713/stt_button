@@ -13,6 +13,7 @@ import sys
 from pathlib import Path
 
 from experiments import paths
+from stt_button import config
 
 ARMS = ("s1-mini", "qwen3.5-2b")
 SEED = 20260927
@@ -88,7 +89,8 @@ def main() -> int:
     recognizer_by_id = {r["id"]: r["recognizer"] for r in paths.read_jsonl(paths.CLEAN_RESULTS)}
 
     for n, i in enumerate(todo, 1):
-        raw_path = paths.ASR / recognizer_by_id.get(i, "") / f"{i}.txt"
+        # Takes outside the cleaner bakeoff were recognized by the configured recognizer.
+        raw_path = paths.ASR / recognizer_by_id.get(i, config.load()["recognizer"]) / f"{i}.txt"
         raw = raw_path.read_text().strip() if raw_path.is_file() else "(raw transcript not found)"
         labels = key["labels"][i]
         print(f"\n===== {n}/{len(todo)}  {i} =====\n\nRAW:\n{raw}\n")
@@ -97,7 +99,7 @@ def main() -> int:
         choice = ask("Which would you rather have inserted?", "abt")
         usable = None if choice == "t" else ask(f"Is {choice.upper()} usable without edits?", "yn") == "y"
         paths.append_jsonl(votes_path, {"id": i, "choice": choice, "usable": usable})
-    print("All rambles voted.")
+    print("All voted.")
     return 0
 
 
