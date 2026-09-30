@@ -41,12 +41,15 @@ def main() -> int:
               f"{per_k / 1000:.1f} s per 1000 input tokens")
     print(f"identical outputs: {len(transcripts) - len(differing)} of {len(transcripts)}")
     for name in differing:
-        a, b = outputs["llama"][name].split(), outputs["ollama"][name].split()
-        changes = [f"[{' '.join(a[i1:i2])} -> {' '.join(b[j1:j2])}]"
-                   for op, i1, i2, j1, j2 in difflib.SequenceMatcher(a=a, b=b, autojunk=False).get_opcodes()
-                   if op != "equal"]
-        print(f"  {name}: {' '.join(changes)[:300]}")
+        print(f"  {name}: {word_changes(outputs['llama'][name], outputs['ollama'][name])[:300]}")
     return 0
+
+
+def word_changes(a: str, b: str) -> str:
+    x, y = a.split(), b.split()
+    return " ".join(f"[{' '.join(x[i1:i2])} -> {' '.join(y[j1:j2])}]"
+                    for op, i1, i2, j1, j2 in difflib.SequenceMatcher(a=x, b=y, autojunk=False).get_opcodes()
+                    if op != "equal")
 
 
 if __name__ == "__main__":
