@@ -18,6 +18,12 @@ import kotlin.math.hypot
  * so it has no FLAG_ALT_FOCUSABLE_IM: combined with FLAG_NOT_FOCUSABLE that flag would put it
  * behind the keyboard.
  */
+enum class ButtonMode(val idle: Long, val pressed: Long) {
+    IDLE(0x6600BCD4, 0xCC00BCD4),
+    RECORDING(0xCCE53935, 0xFFB71C1C),
+    BUSY(0xCC9E9E9E, 0xCC9E9E9E),
+}
+
 class Overlay(
     private val context: Context,
     private val onTap: () -> Unit,
@@ -27,6 +33,7 @@ class Overlay(
     private val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
     private val density = context.resources.displayMetrics.density
     private var view: View? = null
+    private var mode = ButtonMode.IDLE
     private var zones: DropZonesView? = null
     private val params = overlayParams(WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
         WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL)
@@ -63,6 +70,11 @@ class Overlay(
             zones?.let { windowManager.updateViewLayout(it, zoneParams()) }
             windowManager.updateViewLayout(current, params)
         }
+    }
+
+    fun setMode(next: ButtonMode) {
+        mode = next
+        view?.background = oval(mode.idle.toInt())
     }
 
     fun remove() {
@@ -119,9 +131,7 @@ class Overlay(
 
     @SuppressLint("ClickableViewAccessibility")
     private fun createView(): View = View(context).apply {
-        val idle = oval(0x6600BCD4)
-        val pressed = oval(0xCC00BCD4.toInt())
-        background = idle
+        background = oval(mode.idle.toInt())
         val slop = ViewConfiguration.get(context).scaledTouchSlop
         var downX = 0f
         var downY = 0f
@@ -136,7 +146,7 @@ class Overlay(
                     startX = params.x
                     startY = params.y
                     dragging = false
-                    v.background = pressed
+                    v.background = oval(mode.pressed.toInt())
                 }
                 MotionEvent.ACTION_MOVE -> {
                     val dx = event.rawX - downX
@@ -153,11 +163,11 @@ class Overlay(
                     }
                 }
                 MotionEvent.ACTION_UP -> {
-                    v.background = idle
+                    v.background = oval(mode.idle.toInt())
                     if (dragging) drop(zoneAt(event)) else onTap()
                 }
                 MotionEvent.ACTION_CANCEL -> {
-                    v.background = idle
+                    v.background = oval(mode.idle.toInt())
                     if (dragging) drop(null)
                 }
             }

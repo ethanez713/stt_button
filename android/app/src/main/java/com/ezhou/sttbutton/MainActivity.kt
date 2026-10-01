@@ -1,6 +1,8 @@
 package com.ezhou.sttbutton
 
+import android.Manifest
 import android.app.Activity
+import android.content.pm.PackageManager
 import android.content.ComponentName
 import android.content.Intent
 import android.os.Bundle
@@ -35,6 +37,10 @@ class MainActivity : Activity() {
             addView(TextView(context).apply { setText(R.string.restricted_settings_hint) })
             addView(TextView(context).apply { setText(R.string.drag_hint) })
             addView(unhide)
+            addView(Button(context).apply {
+                setText(R.string.grant_microphone)
+                setOnClickListener { requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), 1) }
+            })
             addView(TextView(context).apply { setText(R.string.licenses) })
         })
     }

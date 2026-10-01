@@ -13,13 +13,13 @@ OUT="${OUT:-/tmp/selftest}"
 source ~/android-tooling/env.sh
 S="$("$(dirname "$0")/test_device.sh")"
 suffix=out.txt
-[ "$kind" = wav ] && suffix=asr.txt
+case "$kind" in wav) suffix=take.txt ;; asr) suffix=asr.txt ;; esac
 
 adb -s "$S" shell "run-as com.ezhou.sttbutton rm -f files/selftest/$name.$suffix"
 adb -s "$S" logcat -c
 adb -s "$S" shell am start-foreground-service -n com.ezhou.sttbutton/.SelfTest --es "$kind" "$name" >/dev/null
-for _ in $(seq 150); do
-    adb -s "$S" logcat -d -s SttButton:* | grep -E "selftest (wav|clean) $name|selftest failed" && break
+for _ in $(seq "${WAIT_LOOPS:-150}"); do
+    adb -s "$S" logcat -d -s SttButton:* | grep -E "selftest (wav|asr|clean) $name|selftest failed" && break
     sleep 2
 done
 mkdir -p "$OUT"

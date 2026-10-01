@@ -10,22 +10,20 @@ import android.content.pm.ServiceInfo
 import android.os.IBinder
 import android.os.SystemClock
 import android.util.Log
-import com.k2fsa.sherpa.onnx.FeatureConfig
-import com.k2fsa.sherpa.onnx.OfflineModelConfig
-import com.k2fsa.sherpa.onnx.OfflineRecognizer
-import com.k2fsa.sherpa.onnx.OfflineRecognizerConfig
-import com.k2fsa.sherpa.onnx.OfflineTransducerModelConfig
 import java.io.File
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import kotlin.concurrent.thread
 
 /**
- * adb shell am start-foreground-service -n com.ezhou.sttbutton/.SelfTest --es wav <name>
+ * adb shell am start-foreground-service -n com.ezhou.sttbutton/.SelfTest --es wav <name> [--ei speed N]
+ * adb shell am start-foreground-service -n com.ezhou.sttbutton/.SelfTest --es asr <name>
  * adb shell am start-foreground-service -n com.ezhou.sttbutton/.SelfTest --es clean <name>
  *
- * Reads files/selftest/<name>.wav, or <name>.prompt.txt with <name>.max, and writes its result next to
- * the input as <name>.asr.txt or <name>.out.txt. A summary goes to logcat tag SttButton. It runs as a
+ * wav plays files/selftest/<name>.wav through the take pipeline (models, slicer, worker, chunk
+ * cleans) at N times real time, inserting nothing, and writes the text a take would insert to
+ * <name>.take.txt. asr recognizes the wav alone (<name>.asr.txt). clean runs <name>.prompt.txt with
+ * the token limit in <name>.max (<name>.out.txt). A summary goes to logcat tag SttButton. It runs as a
  * foreground service because that is the priority the dictation service gives the models; a broadcast
  * receiver's process is throttled to a fraction of the speed.
  */
@@ -39,8 +37,9 @@ class SelfTest : Service() {
             .setContentTitle("Self-test").build(), ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
         thread {
             try {
-                intent.getStringExtra("wav")?.let { recognize(this, it) }
-                intent.getStringExtra("clean")?.let { clean(this, it) }
+                intent.getStringExtra("wav")?.let { take(this, it, intent.getIntExtra("speed", 1)) }
+                intent.getStringExtra("asr")?.let { recognize(this, it) }
+                intent.getStringExtra("clean")?.let { clean(this, it, intent.getStringExtra("with")) }
             } catch (e: Throwable) {
                 Log.e(TAG, "selftest failed", e)
             } finally {
@@ -52,37 +51,51 @@ class SelfTest : Service() {
 
     private fun recognize(context: Context, name: String) {
         val dir = File(context.filesDir, "selftest")
-        val samples = readWav(File(dir, "$name.wav"))
-        val model = File(context.filesDir, ModelFiles.UNIFIED)
+        val samples = readWav(File(dir, "$name.wav")).let { pcm -> FloatArray(pcm.size) { pcm[it] / 32768f } }
         val started = SystemClock.elapsedRealtime()
-        val recognizer = OfflineRecognizer(config = OfflineRecognizerConfig(
-            featConfig = FeatureConfig(sampleRate = 16000, featureDim = 80),
-            modelConfig = OfflineModelConfig(
-                transducer = OfflineTransducerModelConfig(
-                    encoder = File(model, "encoder.int8.onnx").path,
-                    decoder = File(model, "decoder.int8.onnx").path,
-                    joiner = File(model, "joiner.int8.onnx").path,
-                ),
-                tokens = File(model, "tokens.txt").path,
-                numThreads = 6,
-                modelType = "nemo_transducer",
-            ),
-            decodingMethod = "greedy_search",
-        ))
-        val loaded = SystemClock.elapsedRealtime()
-        val stream = recognizer.createStream()
-        stream.acceptWaveform(samples, 16000)
-        recognizer.decode(stream)
-        val text = recognizer.getResult(stream).text.trim()
-        stream.release()
-        recognizer.release()
-        File(dir, "$name.asr.txt").writeText(text + "\n")
-        Log.i(TAG, "selftest wav $name audio_ms=${samples.size / 16} load_ms=${loaded - started} " +
-            "decode_ms=${SystemClock.elapsedRealtime() - loaded} words=${text.split(' ').size}")
+        ParakeetRecognizer(context.filesDir).use { recognizer ->
+            val loaded = SystemClock.elapsedRealtime()
+            val text = recognizer.recognize(samples)
+            File(dir, "$name.asr.txt").writeText(text + "\n")
+            Log.i(TAG, "selftest asr $name audio_ms=${samples.size / 16} load_ms=${loaded - started} " +
+                "decode_ms=${SystemClock.elapsedRealtime() - loaded} words=${text.split(' ').size}")
+        }
     }
 
-    private fun clean(context: Context, name: String) {
+    private fun take(context: Context, name: String, speed: Int) {
         val dir = File(context.filesDir, "selftest")
+        val cfg = PipelineConfig(org.json.JSONObject(context.assets.open("pipeline.json").bufferedReader().readText()))
+        val audio = readWav(File(dir, "$name.wav"))
+        val models = Models(context.filesDir, cfg)
+        val live = LiveTake(models.recognizer, models::cleaner, cfg)
+        val stopping = java.util.concurrent.atomic.AtomicBoolean(false)
+        val worker = thread {
+            while (!stopping.get()) if (!live.step()) Thread.sleep(25)
+        }
+        val piece = Slicer.SAMPLE_RATE / 10
+        for (at in audio.indices step piece) {
+            live.addSamples(audio.copyOfRange(at, minOf(audio.size, at + piece)))
+            Thread.sleep(100L / speed)
+        }
+        stopping.set(true)
+        worker.join()
+        val stopped = SystemClock.elapsedRealtime()
+        live.markStop()
+        val result = live.finish()
+        val stopToInsert = SystemClock.elapsedRealtime() - stopped
+        models.close()
+        File(dir, "$name.take.txt").writeText(result.cleaned + "\n")
+        File(dir, "$name.raw.txt").writeText(result.raw + "\n")
+        Log.i(TAG, "selftest wav $name audio_ms=${audio.size / 16} speed=$speed mode=${result.cleanMode} " +
+            "chunks=${result.chunks} stop_to_insert_ms=$stopToInsert asr_ms=${result.asrMs} clean_ms=${result.cleanMs} " +
+            "asr_after_stop_ms=${result.asrMsAfterStop} clean_after_stop_ms=${result.cleanMsAfterStop} " +
+            "idle_cleans=${result.idleCleans} idle_hits=${result.idleHits} raw_words=${result.raw.split(' ').size}")
+    }
+
+    private fun clean(context: Context, name: String, with: String?) {
+        val dir = File(context.filesDir, "selftest")
+        val parakeet = if (with != null) ParakeetRecognizer(context.filesDir) else null
+        if (with == "decode") parakeet!!.recognize(FloatArray(16000 * 5))
         val prompt = File(dir, "$name.prompt.txt").readText()
         val max = File(dir, "$name.max").readText().trim().toInt()
         val started = SystemClock.elapsedRealtime()
@@ -91,13 +104,14 @@ class SelfTest : Service() {
             val text = cleaner.clean(prompt, max)?.trim() ?: error("clean returned null")
             val stats = cleaner.stats()
             File(dir, "$name.out.txt").writeText(text + "\n")
-            Log.i(TAG, "selftest clean $name load_ms=${loaded - started} " +
+            parakeet?.close()
+            Log.i(TAG, "selftest clean $name with=$with load_ms=${loaded - started} " +
                 "clean_ms=${SystemClock.elapsedRealtime() - loaded} out_tokens=${stats.outTokens} " +
-                "drafted=${stats.drafted} accepted=${stats.accepted}")
+                "drafted=${stats.drafted} accepted=${stats.accepted} threads=${stats.threads}")
         }
     }
 
-    private fun readWav(file: File): FloatArray {
+    private fun readWav(file: File): ShortArray {
         val bytes = ByteBuffer.wrap(file.readBytes()).order(ByteOrder.LITTLE_ENDIAN)
         var at = 12
         while (at + 8 <= bytes.limit()) {
@@ -105,7 +119,7 @@ class SelfTest : Service() {
             val size = bytes.getInt(at + 4)
             if (id == "data") {
                 val count = minOf(size, bytes.limit() - at - 8) / 2
-                return FloatArray(count) { bytes.getShort(at + 8 + 2 * it) / 32768f }
+                return ShortArray(count) { bytes.getShort(at + 8 + 2 * it) }
             }
             at += 8 + size
         }

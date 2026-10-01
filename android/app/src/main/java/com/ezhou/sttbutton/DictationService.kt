@@ -19,6 +19,7 @@ import android.view.inputmethod.InputMethodManager
  */
 class DictationService : AccessibilityService() {
     private lateinit var overlay: Overlay
+    private lateinit var controller: TakeController
     /** true English, false another language, null unresolved. */
     private var english: Boolean? = null
     private var lastState: String? = null
@@ -34,6 +35,7 @@ class DictationService : AccessibilityService() {
     private val imeObserver = object : ContentObserver(Handler(Looper.getMainLooper())) {
         override fun onChange(selfChange: Boolean) {
             english = resolveEnglish()
+            if (english == false && ::controller.isInitialized) controller.discard(DiscardReason.LANGUAGE)
             reconcile()
         }
     }
@@ -41,9 +43,10 @@ class DictationService : AccessibilityService() {
     override fun onServiceConnected() {
         overlay = Overlay(
             this,
-            onTap = { Log.i(TAG, "tap (no-op)") },
+            onTap = { controller.onTap() },
             onPlacementChanged = ::reconcile,
         )
+        controller = TakeController(this, overlay).also { it.deleteLeftovers() }
         for (key in listOf(Settings.Secure.SELECTED_INPUT_METHOD_SUBTYPE, Settings.Secure.DEFAULT_INPUT_METHOD)) {
             contentResolver.registerContentObserver(Settings.Secure.getUriFor(key), false, imeObserver)
         }
@@ -52,13 +55,29 @@ class DictationService : AccessibilityService() {
         reconcile()
     }
 
-    override fun onAccessibilityEvent(event: AccessibilityEvent) = reconcile()
+    override fun onAccessibilityEvent(event: AccessibilityEvent) {
+        if (::controller.isInitialized) controller.onAccessibilityEvent(event)
+        reconcile()
+    }
+
+    fun focusedField(): AccessibilityNodeInfo? = findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
+
+    fun activePackage(): String? = rootInActiveWindow?.packageName?.toString()
+
+    /** TYPE_VIEW_TEXT_CHANGED is only worth its event traffic while a field this app wrote into is tracked. */
+    fun watchTextChanges(on: Boolean) {
+        val info = serviceInfo ?: return
+        info.eventTypes = if (on) info.eventTypes or AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED
+        else info.eventTypes and AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED.inv()
+        serviceInfo = info
+    }
 
     override fun onInterrupt() = Unit
 
     override fun onDestroy() {
         contentResolver.unregisterContentObserver(imeObserver)
         handler.removeCallbacks(reread)
+        if (::controller.isInitialized) controller.shutdown()
         if (::overlay.isInitialized) overlay.remove()
         super.onDestroy()
     }
@@ -99,11 +118,11 @@ class DictationService : AccessibilityService() {
         if (overlay.isHidden) return removed("hidden from the drop zone")
         if (english == false) return removed("keyboard not English")
         val ime = windows.firstOrNull { it.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD }
-            ?: return removed("no keyboard window")
+            ?: return removed("no keyboard window", keepWhileTaking = true)
         val field = findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
         if (field != null) {
-            if (field.packageName == packageName) return removed("own app")
-            FieldPolicy.exclusion(field.isPassword, field.inputType)?.let { return removed(it) }
+            if (field.packageName == packageName) return removed("own app", keepWhileTaking = true)
+            FieldPolicy.exclusion(field.isPassword, field.inputType)?.let { return removed(it, keepWhileTaking = true) }
         }
         val root = ime.root
         val mic = root?.let(MicLocator::find)
@@ -112,7 +131,7 @@ class DictationService : AccessibilityService() {
             imePrefs.edit().putBoolean(KEY_VOICE_KEY_SEEN, true).apply()
         }
         // A readable keyboard without the voice key it has shown before is on another panel.
-        if (mic == null && root != null && voiceKeySeen) return removed("keyboard panel without a voice key")
+        if (mic == null && root != null && voiceKeySeen) return removed("keyboard panel without a voice key", keepWhileTaking = true)
         if (mic == null && root != null && imeTreeLoggedFor != ime.id) {
             imeTreeLoggedFor = ime.id
             Log.i(TAG, "voice key not found; IME descriptions: ${MicLocator.descriptions(root)}")
@@ -147,7 +166,9 @@ class DictationService : AccessibilityService() {
         if (wanted.reread) handler.postDelayed(reread, REREAD_MS)
     }
 
-    private fun removed(reason: String): String {
+    // The button stays up for an open take so it can be tapped to stop, whatever the keyboard is doing.
+    private fun removed(reason: String, keepWhileTaking: Boolean = false): String {
+        if (keepWhileTaking && controller.hasOpenTake) return "kept for the open take: $reason"
         handler.removeCallbacks(reread)
         placement.reset()
         overlay.remove()

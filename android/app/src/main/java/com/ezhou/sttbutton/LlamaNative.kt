@@ -13,7 +13,7 @@ object LlamaNative {
     external fun clean(handle: Long, prompt: ByteArray, maxTokens: Int): ByteArray?
     external fun cancel(handle: Long)
 
-    /** Output tokens, drafted tokens and accepted draft tokens of the last [clean]. */
+    /** Output tokens, drafted tokens, accepted draft tokens and threads used by the last [clean]. */
     external fun lastStats(handle: Long): IntArray
     external fun release(handle: Long)
 }

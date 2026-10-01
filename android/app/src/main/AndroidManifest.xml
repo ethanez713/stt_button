@@ -5,6 +5,10 @@
     <!-- No build of this app may reach the network; this also strips it if a dependency adds it. -->
     <uses-permission android:name="android.permission.INTERNET" tools:node="remove" />
 
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+
     <queries>
         <intent>
             <action android:name="android.view.InputMethod" />
@@ -25,6 +29,11 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <service
+            android:name=".RecordingService"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
 
         <service
             android:name=".DictationService"

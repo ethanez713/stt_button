@@ -1,6 +1,7 @@
 // S1-mini on llama.cpp with prompt-lookup decoding: the loop of llama.cpp's speculative-simple
 // example (b11264) with --spec-type ngram-simple, greedy, ported onto llama.h alone.
 #include <jni.h>
+#include <sched.h>
 
 #include <algorithm>
 #include <atomic>
@@ -8,6 +9,7 @@
 #include <string>
 #include <vector>
 
+#include "ggml-cpu.h"
 #include "llama.h"
 
 namespace {
@@ -21,11 +23,40 @@ struct Cleaner {
     llama_context * ctx = nullptr;
     const llama_vocab * vocab = nullptr;
     llama_sampler * greedy = nullptr;
+    ggml_threadpool * pool = nullptr;
+    int wanted_threads = 0;
+    int pool_threads = 0;
     std::atomic<bool> cancel{false};
     int out_tokens = 0;
     int drafted = 0;
     int accepted = 0;
 };
+
+int allowed_cpus() {
+    cpu_set_t set;
+    CPU_ZERO(&set);
+    return sched_getaffinity(0, sizeof set, &set) == 0 ? std::max(CPU_COUNT(&set), 1) : 1;
+}
+
+// ggml's workers spin at a barrier after every operation. When the system has confined the process to
+// fewer cores than threads (it does, for example, while another app is in the foreground), the spinning
+// threads starve the ones with work and decoding runs 15 to 50 times slower, so the pool follows the
+// cores the process may use right now.
+void fit_threads_to_cores(Cleaner & c) {
+    const int threads = std::min(c.wanted_threads, allowed_cpus());
+    if (threads == c.pool_threads) {
+        return;
+    }
+    ggml_threadpool_params params = ggml_threadpool_params_default(threads);
+    ggml_threadpool * next = ggml_threadpool_new(&params);
+    llama_attach_threadpool(c.ctx, next, nullptr);
+    llama_set_n_threads(c.ctx, threads, threads);
+    if (c.pool != nullptr) {
+        ggml_threadpool_free(c.pool);
+    }
+    c.pool = next;
+    c.pool_threads = threads;
+}
 
 std::string bytes_to_string(JNIEnv * env, jbyteArray array) {
     const jsize n = env->GetArrayLength(array);
@@ -90,6 +121,7 @@ void batch_add(llama_batch & batch, llama_token token, llama_pos pos, bool logit
 
 bool generate(Cleaner & c, const std::vector<llama_token> & prompt, int n_predict_max, std::string & out) {
     c.out_tokens = c.drafted = c.accepted = 0;
+    fit_threads_to_cores(c);
     llama_memory_clear(llama_get_memory(c.ctx), true);
 
     const int n_input = prompt.size();
@@ -189,6 +221,9 @@ JNIEXPORT jlong JNICALL Java_com_ezhou_sttbutton_LlamaNative_load(JNIEnv * env, 
     auto * c = new Cleaner();
     c->model = model;
     c->ctx = ctx;
+    // Without a pool of its own, ggml starts and joins its worker threads on every llama_decode.
+    c->wanted_threads = threads;
+    fit_threads_to_cores(*c);
     c->vocab = llama_model_get_vocab(model);
     c->greedy = llama_sampler_init_greedy();
     return reinterpret_cast<jlong>(c);
@@ -218,9 +253,9 @@ JNIEXPORT void JNICALL Java_com_ezhou_sttbutton_LlamaNative_cancel(JNIEnv *, job
 
 JNIEXPORT jintArray JNICALL Java_com_ezhou_sttbutton_LlamaNative_lastStats(JNIEnv * env, jobject, jlong handle) {
     auto * c = reinterpret_cast<Cleaner *>(handle);
-    const jint stats[3] = {c->out_tokens, c->drafted, c->accepted};
-    jintArray result = env->NewIntArray(3);
-    env->SetIntArrayRegion(result, 0, 3, stats);
+    const jint stats[4] = {c->out_tokens, c->drafted, c->accepted, c->pool_threads};
+    jintArray result = env->NewIntArray(4);
+    env->SetIntArrayRegion(result, 0, 4, stats);
     return result;
 }
 
@@ -228,6 +263,7 @@ JNIEXPORT void JNICALL Java_com_ezhou_sttbutton_LlamaNative_release(JNIEnv *, jo
     auto * c = reinterpret_cast<Cleaner *>(handle);
     llama_sampler_free(c->greedy);
     llama_free(c->ctx);
+    ggml_threadpool_free(c->pool);
     llama_model_free(c->model);
     delete c;
 }

@@ -16,11 +16,11 @@ class LlamaCleaner(modelPath: String, threads: Int = THREADS) : AutoCloseable {
 
     fun cancel() = LlamaNative.cancel(handle)
 
-    fun stats(): Stats = LlamaNative.lastStats(handle).let { Stats(it[0], it[1], it[2]) }
+    fun stats(): Stats = LlamaNative.lastStats(handle).let { Stats(it[0], it[1], it[2], it[3]) }
 
     override fun close() = LlamaNative.release(handle)
 
-    data class Stats(val outTokens: Int, val drafted: Int, val accepted: Int)
+    data class Stats(val outTokens: Int, val drafted: Int, val accepted: Int, val threads: Int)
 
     companion object {
         const val THREADS = 6
