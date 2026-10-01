@@ -21,6 +21,10 @@ class Take(val id: String, val pkg: String, val startedAtMs: Long) {
     var discardReason: DiscardReason? = null
         private set
 
+    /** Segments of this take whose text has been inserted. */
+    var segmentsInserted = 0
+        private set
+
     /** The button ignores taps from the stop until the insert. */
     val busy: Boolean get() = state == TakeState.STOPPING
 
@@ -28,7 +32,17 @@ class Take(val id: String, val pkg: String, val startedAtMs: Long) {
 
     fun requestStop(): Boolean = move(TakeState.OPEN, TakeState.STOPPING)
 
-    fun markInserted(): Boolean = move(TakeState.STOPPING, TakeState.INSERTED)
+    /** A pause inserted the text so far and the take stays open. */
+    fun markSegmentInserted(): Boolean {
+        if (state != TakeState.OPEN && state != TakeState.STOPPING) return false
+        segmentsInserted++
+        return true
+    }
+
+    fun markInserted(): Boolean = move(TakeState.STOPPING, TakeState.INSERTED).also { if (it) segmentsInserted++ }
+
+    /** The stop found nothing new to insert after earlier segments were inserted. */
+    fun finishWithoutText(): Boolean = segmentsInserted > 0 && move(TakeState.STOPPING, TakeState.INSERTED)
 
     fun discard(reason: DiscardReason): Boolean {
         if (finished) return false

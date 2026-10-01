@@ -8,6 +8,7 @@ class PipelineConfig(json: JSONObject) {
     val sliceMaxS = json.getDouble("slice_max_s")
     val sliceSearchS = json.getDouble("slice_search_s")
     val pauseS: Double? = if (json.isNull("pause_s")) null else json.getDouble("pause_s")
+    val insertPauseS: Double? = if (json.isNull("insert_pause_s")) null else json.getDouble("insert_pause_s")
     val sliceMinS = json.getDouble("slice_min_s")
     val pauseMarginDb = json.getDouble("pause_margin_db")
     val chunkMinTokens = json.getInt("chunk_min_tokens")
@@ -58,8 +59,8 @@ object Pipeline {
         wordCount(text) <= cfg.skipMaxWords && matchedCue(text, cfg.selfCorrectionCues) == null
 
     /** Mirrors `stt_button.cleaner.casual`. */
-    fun casual(text: String, cfg: PipelineConfig): String =
-        if (wordCount(text) > cfg.skipMaxWords) text
+    fun casual(text: String, cfg: PipelineConfig, judged: String = text): String =
+        if (wordCount(judged) > cfg.skipMaxWords) text
         else FINAL_PERIOD.replace(COMMA_OUTSIDE_NUMBER.replace(text, ""), "$1")
 
     /** Mirrors `stt_button.cleaner.live_chunks`. */

@@ -106,6 +106,70 @@ class LiveTakeTest {
         assertEquals(listOf("text"), triggers)
     }
 
+    private fun feedSegment(take: LiveTake, speechS: Double, silenceS: Double) {
+        val chunk = audio(speechS, silenceS)
+        for (at in chunk.indices step Slicer.SAMPLE_RATE / 10) take.addSamples(chunk.copyOfRange(at, minOf(chunk.size, at + Slicer.SAMPLE_RATE / 10)))
+    }
+
+    @Test
+    fun given_a_one_second_pause_when_checked_then_no_segment_is_due_but_two_seconds_make_one() {
+        val take = LiveTake(ScriptedRecognizer("Okay sounds good", "unused"), { UppercaseCleaner() }, cfg)
+        feedSegment(take, 1.5, 1.0)
+        assertFalse(take.segmentDue())
+        feedSegment(take, 0.0, 1.2)
+        assertTrue(take.segmentDue())
+    }
+
+    @Test
+    fun given_two_segments_when_finished_then_each_is_judged_on_the_take_so_far_and_cleaned_on_its_own() {
+        val cleaner = UppercaseCleaner()
+        val take = LiveTake(ScriptedRecognizer("Okay, sounds good.", "and bring the cake please thanks."), { cleaner }, cfg)
+        feedSegment(take, 1.5, 2.5)
+        while (take.step()) Unit
+        assertTrue(take.segmentDue())
+        val first = take.finishSegment()
+
+        assertEquals("raw", first.cleanMode)
+        assertEquals("Okay sounds good", first.cleaned)
+        assertFalse(take.segmentDue())
+
+        feedSegment(take, 1.5, 2.5)
+        while (take.step()) Unit
+        assertTrue(take.segmentDue())
+        val second = take.finishSegment()
+
+        assertEquals("chunks", second.cleanMode)
+        assertEquals(listOf("and bring the cake please thanks."), cleaner.calls)
+        assertEquals("AND BRING THE CAKE PLEASE THANKS.", second.cleaned)
+    }
+
+    @Test
+    fun given_a_segment_ended_by_a_pause_when_the_take_stops_then_silence_alone_is_not_recognized() {
+        val take = LiveTake(ScriptedRecognizer("Okay sounds good"), { UppercaseCleaner() }, cfg)
+        feedSegment(take, 1.5, 2.5)
+        while (take.step()) Unit
+        take.finishSegment()
+        feedSegment(take, 0.0, 1.0)
+        val last = take.finish()
+
+        assertEquals("", last.cleaned)
+    }
+
+    @Test
+    fun given_an_earlier_cue_when_a_later_segment_is_finished_then_it_is_cleaned_even_though_it_is_short() {
+        val cleaner = UppercaseCleaner()
+        val take = LiveTake(ScriptedRecognizer("meet Tuesday actually", "no Wednesday"), { cleaner }, cfg)
+        feedSegment(take, 1.5, 2.5)
+        while (take.step()) Unit
+        take.finishSegment()
+        feedSegment(take, 1.5, 2.5)
+        while (take.step()) Unit
+        val second = take.finishSegment()
+
+        assertEquals("chunks", second.cleanMode)
+        assertEquals("actually", second.cue)
+    }
+
     private fun pausedTake(cleaner: UppercaseCleaner, vararg texts: String): LiveTake {
         val take = LiveTake(ScriptedRecognizer(*texts), { cleaner }, cfg)
         take.addSamples(audio(3.0, 3.0))

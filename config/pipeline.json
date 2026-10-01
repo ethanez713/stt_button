@@ -3,6 +3,7 @@
   "slice_max_s": 30,
   "slice_search_s": 5,
   "pause_s": 1.6,
+  "insert_pause_s": 2,
   "slice_min_s": 2,
   "pause_margin_db": 10,
   "chunk_max_tokens": 1000,

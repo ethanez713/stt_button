@@ -18,6 +18,7 @@ interface ChunkCleaner {
 interface TakeSink {
     fun sliceLanded(endS: Double, text: String)
     fun chunkCleaned(raw: String, cleaned: String)
+    fun segmentEnded(endS: Double) {}
 }
 
 class LiveResult(
@@ -34,6 +35,7 @@ class LiveResult(
     val idleCleans: Int,
     val idleHits: Int,
     val cue: String?,
+    val audioMs: Long,
 )
 
 /**
@@ -59,11 +61,19 @@ class LiveTake(
     private var idleCleans = 0
     private var stopAsrMs = 0L
     private var stopCleanMs = 0L
+    private val finishedRaw = mutableListOf<String>()
+    private var segmentStartSample = 0
+    private var segmentsEnded = 0
 
     @Volatile private var idleSpoken: Int? = null
     private var timedLoadRequested = false
 
     val raw: String get() = Pipeline.joinSlices(texts)
+
+    /** The take's raw text up to this segment, which the skip and casual rules are judged on. */
+    private val judged: String get() = Pipeline.joinSlices(finishedRaw + texts)
+
+    private fun skips() = Pipeline.skipsCleaner(judged, cfg)
 
     fun addSamples(samples: ShortArray, length: Int = samples.size) {
         val slices = slicer.feed(samples, length)
@@ -82,7 +92,7 @@ class LiveTake(
         if (slices.isEmpty()) return idleStep()
         for (slice in slices) {
             recognize(slice)
-            if (!Pipeline.skipsCleaner(raw, cfg)) prepareCleaner("text")
+            if (!skips()) prepareCleaner("text")
             cleanClosed(final = false)
         }
         return true
@@ -93,18 +103,51 @@ class LiveTake(
         stopCleanMs = cleanMs
     }
 
-    fun finish(): LiveResult {
-        for (slice in takePending() + slicer.finish()) recognize(slice)
+    /** After a segment has ended, a leftover of silence alone is dropped; a take without one slices as the host does. */
+    fun finish(): LiveResult =
+        complete(takePending() + if (segmentsEnded > 0) slicer.endSegment() else slicer.finish())
+
+    /** Speech was heard and followed by `insert_pause_s` of silence: the text so far is due for insertion. */
+    fun segmentDue(): Boolean = cfg.insertPauseS?.let(slicer::segmentDue) ?: false
+
+    /** Finishes the open segment as [finish] finishes a take, then starts the next one empty. */
+    fun finishSegment(): LiveResult {
+        markStop()
+        val result = complete(takePending() + slicer.endSegment())
+        sink?.segmentEnded(slicer.sampleCount.toDouble() / Slicer.SAMPLE_RATE)
+        startNextSegment()
+        return result
+    }
+
+    private fun complete(slices: List<IntArray>): LiveResult {
+        for (slice in slices) recognize(slice)
         val raw = raw
-        if (Pipeline.skipsCleaner(raw, cfg)) return result(raw, Pipeline.casual(raw, cfg), 0, "raw", 0)
+        if (skips()) return result(raw, Pipeline.casual(raw, cfg, judged), 0, "raw", 0)
         val chunks = cleanClosed(final = true)
         val cleaned = chunks.map { cleanedChunks.getValue(it) }.filter { it.isNotEmpty() }.joinToString("\n\n")
-        return result(raw, Pipeline.casual(cleaned, cfg), chunks.size, "chunks", chunks.count { it in idleChunks })
+        return result(raw, Pipeline.casual(cleaned, cfg, judged), chunks.size, "chunks", chunks.count { it in idleChunks })
+    }
+
+    private fun startNextSegment() {
+        if (raw.isNotEmpty()) finishedRaw += raw
+        texts.clear()
+        cleanedChunks.clear()
+        idleChunks.clear()
+        asrMs = 0
+        cleanMs = 0
+        inTokens = 0
+        outTokens = 0
+        idleCleans = 0
+        stopAsrMs = 0
+        stopCleanMs = 0
+        segmentStartSample = slicer.sampleCount
+        segmentsEnded++
     }
 
     private fun result(raw: String, cleaned: String, chunks: Int, mode: String, idleHits: Int) = LiveResult(
         raw, cleaned, chunks, mode, asrMs, cleanMs, asrMs - stopAsrMs, cleanMs - stopCleanMs,
-        inTokens, outTokens, idleCleans, idleHits, Pipeline.matchedCue(raw, cfg.selfCorrectionCues),
+        inTokens, outTokens, idleCleans, idleHits, Pipeline.matchedCue(judged, cfg.selfCorrectionCues),
+        (slicer.sampleCount - segmentStartSample) / (Slicer.SAMPLE_RATE / 1000).toLong(),
     )
 
     private fun takePending(): List<IntArray> = synchronized(pending) { pending.toList().also { pending.clear() } }
@@ -122,7 +165,7 @@ class LiveTake(
         Pipeline.liveChunks(raw, cleaner::countTokens, cfg.chunkMinTokens, cfg.chunkMaxTokens, final)
 
     private fun cleanClosed(final: Boolean): List<String> {
-        if (Pipeline.skipsCleaner(raw, cfg)) return emptyList()
+        if (skips()) return emptyList()
         val cleaner = cleaner()
         val chunks = chunksOf(cleaner, final)
         for (chunk in chunks) {
@@ -137,7 +180,7 @@ class LiveTake(
 
     private fun idleStep(): Boolean {
         val spoken = slicer.lastSpeechEnd
-        if (!slicer.paused || slicer.start < spoken || Pipeline.skipsCleaner(raw, cfg)) return false
+        if (!slicer.paused || slicer.start < spoken || skips()) return false
         val cleaner = cleaner()
         val chunks = chunksOf(cleaner, final = true).filter { it !in cleanedChunks }
         if (chunks.isEmpty()) return false

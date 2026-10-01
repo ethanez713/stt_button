@@ -76,8 +76,12 @@ class SelfTest : Service() {
             bubble.preview(words)
         })
         val stopping = java.util.concurrent.atomic.AtomicBoolean(false)
+        val segments = java.util.Collections.synchronizedList(mutableListOf<LiveResult>())
         val worker = thread {
-            while (!stopping.get()) if (!live.step()) Thread.sleep(25)
+            while (!stopping.get()) {
+                if (live.step()) continue
+                if (live.segmentDue()) segments += live.finishSegment() else Thread.sleep(25)
+            }
         }
         val piece = Slicer.SAMPLE_RATE / 10
         for (at in audio.indices step piece) {
@@ -91,13 +95,18 @@ class SelfTest : Service() {
         val stopped = SystemClock.elapsedRealtime()
         live.markStop()
         val result = live.finish()
+        segments += result
+        val inserted = segments.map { it.cleaned }.filter { it.isNotBlank() }.joinToString(" ")
         val stopToInsert = SystemClock.elapsedRealtime() - stopped
         preview.stop()
         val shown = bubble.text()
         models.close()
         Log.i(TAG, "selftest bubble $name first_preview_ms=$firstPreviewMs settled_words=${Pipeline.wordCount(shown.settled)} " +
             "preview_words=${Pipeline.wordCount(shown.preview)}")
-        File(dir, "$name.take.txt").writeText(result.cleaned + "\n")
+        File(dir, "$name.take.txt").writeText(inserted + "\n")
+        segments.forEachIndexed { i, r ->
+            Log.i(TAG, "selftest segment $name #$i mode=${r.cleanMode} chunks=${r.chunks} audio_ms=${r.audioMs} cue=${r.cue} text=${r.cleaned}")
+        }
         File(dir, "$name.raw.txt").writeText(result.raw + "\n")
         Log.i(TAG, "selftest wav $name audio_ms=${audio.size / 16} speed=$speed mode=${result.cleanMode} " +
             "chunks=${result.chunks} stop_to_insert_ms=$stopToInsert asr_ms=${result.asrMs} clean_ms=${result.cleanMs} " +

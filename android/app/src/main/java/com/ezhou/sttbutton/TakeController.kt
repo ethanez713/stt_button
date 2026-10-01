@@ -15,7 +15,7 @@ import kotlin.concurrent.thread
 
 /**
  * Runs takes for the accessibility service: the tap starts one, the next tap or the cap stops it, and
- * the text is inserted once at the stop. Everything here is called on the main thread except the
+ * the text is inserted at the stop and after each pause of `insert_pause_s`. Everything here is called on the main thread except the
  * worker's own loop, which hands its result back through the handler.
  */
 class TakeController(private val service: DictationService, private val overlay: Overlay, private val bubble: BubbleOverlay) {
@@ -120,12 +120,19 @@ class TakeController(private val service: DictationService, private val overlay:
     private fun work(current: Run) {
         try {
             while (!current.stopRequested) {
-                if (!current.live.step()) Thread.sleep(IDLE_POLL_MS)
+                if (current.live.step()) continue
+                if (current.live.segmentDue()) {
+                    val dueAtMs = SystemClock.elapsedRealtime()
+                    val segment = current.live.finishSegment()
+                    handler.post { insert(current, segment, TRIGGER_PAUSE, dueAtMs) }
+                    continue
+                }
+                Thread.sleep(IDLE_POLL_MS)
             }
             if (!current.aborted) {
                 current.live.markStop()
                 val result = current.live.finish()
-                handler.post { insert(current, result) }
+                handler.post { insert(current, result, TRIGGER_STOP, current.stoppedAtMs) }
             }
         } catch (e: Throwable) {
             Log.e(tag, "take failed", e)
@@ -137,12 +144,18 @@ class TakeController(private val service: DictationService, private val overlay:
         }
     }
 
-    private fun insert(current: Run, result: LiveResult) {
+    /** Inserts one segment: the pause's text while the take stays open, or the last one at the stop. */
+    private fun insert(current: Run, result: LiveResult, trigger: String, triggerAtMs: Long) {
         val take = current.take
-        if (take.state != TakeState.STOPPING) return
+        val last = trigger == TRIGGER_STOP
+        if (take.finished || (last && take.state != TakeState.STOPPING)) return
+        if (result.cleaned.isBlank()) {
+            if (!last) return
+            if (take.finishWithoutText()) release(current) else discard(DiscardReason.EMPTY)
+            return
+        }
         val field = service.focusedField()
         val reason = when {
-            result.cleaned.isBlank() -> DiscardReason.EMPTY
             field == null -> DiscardReason.NO_FIELD
             take.pkg != UNKNOWN_PACKAGE && field.packageName?.toString() != take.pkg -> DiscardReason.PACKAGE
             else -> null
@@ -151,22 +164,35 @@ class TakeController(private val service: DictationService, private val overlay:
             discard(reason ?: DiscardReason.NO_FIELD)
             return
         }
-        val outcome = inserter.insert(field, result.cleaned)
-        take.markInserted()
-        current.sampler.stop()
+        val separator = if (take.segmentsInserted > 0) " " else ""
+        val outcome = inserter.insert(field, separator + result.cleaned)
+        val segment = take.segmentsInserted
+        if (last) {
+            take.markInserted()
+            current.sampler.stop()
+        } else {
+            take.markSegmentInserted()
+        }
         log.write("insert", take.id,
             "pkg" to take.pkg, "raw" to result.raw, "cleaned" to result.cleaned, "text_before" to outcome.textBefore,
             "insert_path" to outcome.path, "landed" to outcome.landed,
             "asr_ms" to result.asrMs, "clean_ms" to result.cleanMs, "asr_backend" to "cpu", "clean_backend" to "cpu",
-            "audio_ms" to current.live.slicer.sampleCount / (Slicer.SAMPLE_RATE / 1000),
+            "audio_ms" to result.audioMs,
             "in_tokens" to result.inTokens, "out_tokens" to result.outTokens,
             "clean_mode" to result.cleanMode, "chunks" to result.chunks,
             "idle_cleans" to result.idleCleans, "idle_hits" to result.idleHits, "cue" to result.cue,
+            "segment" to segment, "trigger" to trigger,
             "asr_ms_after_stop" to result.asrMsAfterStop, "clean_ms_after_stop" to result.cleanMsAfterStop,
-            "stop_to_insert_ms" to SystemClock.elapsedRealtime() - current.stoppedAtMs,
+            "stop_to_insert_ms" to SystemClock.elapsedRealtime() - triggerAtMs,
             *current.cost.lap().toTypedArray())
-        tracker = FieldTracker(take.id, field, inserter.textOf(field))
-        release(current)
+        track(take, field)
+        if (last) release(current)
+    }
+
+    private fun track(take: Take, field: AccessibilityNodeInfo) {
+        val existing = tracker
+        if (existing != null && existing.takeId == take.id) existing.refresh(inserter.textOf(field))
+        else tracker = FieldTracker(take.id, field, inserter.textOf(field))
     }
 
     private fun release(current: Run) {
@@ -209,12 +235,16 @@ class TakeController(private val service: DictationService, private val overlay:
      * Follows the field a take was inserted into, to log what the user sent. The latest non-empty
      * text is kept because a field often clears on send, and it is written when focus leaves.
      */
-    private inner class FieldTracker(private val takeId: String, private val field: AccessibilityNodeInfo, initial: String) {
+    private inner class FieldTracker(val takeId: String, private val field: AccessibilityNodeInfo, initial: String) {
         private var latest = initial
         private val pkg = field.packageName?.toString()
 
         init {
             service.watchTextChanges(true)
+        }
+
+        fun refresh(text: String) {
+            if (text.isNotEmpty()) latest = text
         }
 
         fun onEvent(event: AccessibilityEvent) {
@@ -239,6 +269,8 @@ class TakeController(private val service: DictationService, private val overlay:
     companion object {
         private const val UNKNOWN_PACKAGE = "unknown"
         private const val IDLE_POLL_MS = 25L
+        private const val TRIGGER_PAUSE = "pause"
+        private const val TRIGGER_STOP = "stop"
         private const val BUBBLE_MS = 100L
     }
 }
