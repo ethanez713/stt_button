@@ -17,6 +17,11 @@ android {
         ndk { abiFilters += "arm64-v8a" }
     }
 
+    sourceSets {
+        getByName("main").assets.srcDir("../../config")
+        getByName("test").resources.srcDirs("../../tests/fixtures", "../../config")
+    }
+
     externalNativeBuild {
         cmake {
             path = file("src/main/cpp/CMakeLists.txt")
@@ -35,4 +40,5 @@ android {
 
 dependencies {
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20240303")
 }
