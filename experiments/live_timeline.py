@@ -52,26 +52,27 @@ def as_written(slices: list[tuple[float, float, str]], count) -> float:
 
 
 def live(slices: list[tuple[float, float, str]], count, k: int) -> float:
+    """One worker runs slices and chunk cleans in order: run concurrently on the phone, the cleaner
+    decoded 3-14x slower (results/10, contention)."""
     whole = " ".join(t for _, _, t in slices)
-    stop = slices[-1][1]
-    last_asr_done = stop + asr_s(slices[-1][1] - slices[-1][0])
-    if skips_cleaner(whole):
-        return last_asr_done - stop
-    cleaner_free = 0.0
+    worker_free = 0.0
     pending: list[str] = []
     committed: list[str] = []
     for start, end, text in slices[:-1]:
-        committed_at = end + asr_s(end - start)
+        worker_free = max(worker_free, end) + asr_s(end - start)
         committed += split_sentences(text)
         # The newest sentence may continue into the next slice, so it is held back.
         ready, committed = committed[:-1], committed[-1:]
         for sentence in ready:
             pending.append(sentence)
             if count(" ".join(pending)) >= k:
-                cleaner_free = max(cleaner_free, committed_at) + clean_s(count(" ".join(pending)))
+                worker_free += clean_s(count(" ".join(pending)))
                 pending = []
-    rest = " ".join(pending + committed + [slices[-1][2]]).strip()
-    done = max(cleaner_free, last_asr_done) + (clean_s(count(rest)) if rest else 0)
+    start, stop, last_text = slices[-1]
+    done = max(worker_free, stop) + asr_s(stop - start)
+    rest = " ".join(pending + committed + [last_text]).strip()
+    if rest and not skips_cleaner(whole):
+        done += clean_s(count(rest))
     return done - stop
 
 

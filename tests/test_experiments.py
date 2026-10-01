@@ -151,3 +151,22 @@ def test_vote_tally_maps_letters_to_arms(capsys):
     key = {"labels": {"x": {"A": "/d/whole", "B": "/d/chunk64"}, "y": {"A": "/d/chunk64", "B": "/d/whole"}}}
     vote.print_tally(key, [{"id": "x", "choice": "b"}, {"id": "y", "choice": "a"}, {"id": "z", "choice": "t"}])
     assert capsys.readouterr().out.strip() == "chunk64 2, whole 0, tie 1"
+
+
+class TestLiveTimeline:
+    def test_a_chunk_still_cleaning_at_stop_delays_the_last_slice(self):
+        from experiments import live_timeline as lt
+
+        long_sentence = " ".join(["word"] * 200) + "."
+        slices = [(0.0, 30.0, f"{long_sentence} Held back."), (30.0, 31.0, "End.")]
+        first_free = 30.0 + lt.asr_s(30.0) + lt.clean_s(200)
+        assert first_free > 31.0
+        expected = first_free + lt.asr_s(1.0) + lt.clean_s(word_tokens("Held back. End.")) - 31.0
+        assert lt.live(slices, word_tokens, k=64) == expected
+
+    def test_a_skipped_take_waits_only_for_its_last_slice(self):
+        from experiments import live_timeline as lt
+
+        assert lt.live([(0.0, 3.0, "On my way.")], word_tokens, k=64) == lt.asr_s(3.0)
+        corrected = [(0.0, 3.0, "Tuesday, actually no, Wednesday.")]
+        assert lt.live(corrected, word_tokens, k=64) > lt.asr_s(3.0)
