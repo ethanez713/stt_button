@@ -45,6 +45,7 @@ class HotkeyWindow : Form {
     [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr hWnd);
     [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int count);
     [DllImport("user32.dll", SetLastError = true)] static extern uint SendInput(uint count, INPUT[] inputs, int size);
 
     [StructLayout(LayoutKind.Sequential)]
@@ -64,6 +65,10 @@ class HotkeyWindow : Form {
     const uint VK_SPACE = 0x20;
     const int TOGGLE = 1, CANCEL = 2;
     const int TAKE_CAP_MS = 300 * 1000;
+    // Long enough for Claude Code to have collapsed the first paste into its placeholder.
+    const int PASTE_AGAIN_MS = 400;
+    // Claude Code titles its terminal "<glyph> <topic>"; the glyph is the idle mark or a spinner frame.
+    const string CLAUDE_TITLE_GLYPHS = "\u2733\u00B7\u2722\u2736\u273B\u273D";
     // After a take the mic stays open this long, so the next take starts without opening the device.
     const int MIC_WARM_MS = 5 * 60 * 1000;
 
@@ -259,14 +264,49 @@ class HotkeyWindow : Form {
         if (target != IntPtr.Zero && GetForegroundWindow() != target) refocused = SetForegroundWindow(target);
         // Windows Terminal here has Ctrl+V unbound, so a plain Ctrl+V reaches Claude Code, which reads the clipboard
         // through two powershell.exe launches; Ctrl+Shift+V is read by the terminal itself, at once.
-        bool shift = ProcessName(target) == "WindowsTerminal";
+        bool terminal = ProcessName(target) == "WindowsTerminal";
+        bool again = terminal && IsClaudeCode(WindowTitle(target)) && ClaudeCollapses(text);
+        uint sent = SendChord(terminal);
+        Log(string.Format("paste target={0} refocused={1} foreground={2} chord={3} sent={4} claude={5} pastes={6}",
+            ProcessName(target), refocused, ProcessName(GetForegroundWindow()), terminal ? "ctrl+shift+v" : "ctrl+v",
+            sent == 0 ? "blocked" : "ok", again, again ? 2 : 1));
+        if (sent == 0) indicator.Flash("\u26A0 Paste was blocked; the text is on the clipboard");
+        if (!again) return;
+        // A second identical paste expands Claude Code's "[Pasted text]" placeholder in place.
+        var second = new System.Windows.Forms.Timer { Interval = PASTE_AGAIN_MS };
+        second.Tick += (s, e) => {
+            second.Stop();
+            second.Dispose();
+            bool focused = GetForegroundWindow() == target;
+            if (focused) SendChord(true);
+            Log("paste again focused=" + focused);
+        };
+        second.Start();
+    }
+
+    // Returns 0 when Windows rejected the input, else the number of events sent.
+    static uint SendChord(bool shift) {
         INPUT[] keys = PasteChord(shift);
         // SendInput rather than SendKeys: SendKeys' journal-hook path can drop input on current Windows.
         uint sent = SendInput((uint)keys.Length, keys, Marshal.SizeOf(typeof(INPUT)));
-        Log(string.Format("paste target={0} refocused={1} foreground={2} chord={3} sent={4}/{5} err={6}",
-            ProcessName(target), refocused, ProcessName(GetForegroundWindow()), shift ? "ctrl+shift+v" : "ctrl+v",
-            sent, keys.Length, Marshal.GetLastWin32Error()));
-        if (sent != keys.Length) indicator.Flash("\u26A0 Paste was blocked; the text is on the clipboard");
+        return sent == keys.Length ? sent : 0;
+    }
+
+    static string WindowTitle(IntPtr window) {
+        var title = new StringBuilder(256);
+        GetWindowText(window, title, title.Capacity);
+        return title.ToString();
+    }
+
+    static bool IsClaudeCode(string title) {
+        return title.Length > 1 && title[1] == ' ' && CLAUDE_TITLE_GLYPHS.IndexOf(title[0]) >= 0;
+    }
+
+    // Mirrors Claude Code's own collapse threshold; guessing wrong would paste the text twice.
+    static bool ClaudeCollapses(string text) {
+        string normal = text.Replace("\r\n", "\n").Replace('\r', '\n');
+        int newlines = normal.Length - normal.Replace("\n", "").Length;
+        return normal.Length > 800 || newlines > 2;
     }
 
     static INPUT[] PasteChord(bool shift) {
