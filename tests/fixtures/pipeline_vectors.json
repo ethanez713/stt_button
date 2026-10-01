@@ -1094,6 +1094,155 @@
    "casual": "Version 2.5"
   }
  ],
+ "junction": [
+  {
+   "tokens": [
+    " update",
+    " the",
+    " plan",
+    ".",
+    " have",
+    " some",
+    " monitoring"
+   ],
+   "times": [
+    0.1,
+    0.4,
+    0.7,
+    0.9,
+    2.3,
+    2.6,
+    2.9
+   ],
+   "junction_s": 2.0,
+   "split": [
+    ".",
+    "have some monitoring"
+   ]
+  },
+  {
+   "tokens": [
+    " a",
+    " b",
+    " c"
+   ],
+   "times": [
+    0.1,
+    0.5,
+    2.5
+   ],
+   "junction_s": 2.0,
+   "split": [
+    "",
+    "c"
+   ]
+  },
+  {
+   "tokens": [
+    " a",
+    " b"
+   ],
+   "times": [
+    0.1,
+    0.5
+   ],
+   "junction_s": 2.0,
+   "split": [
+    "",
+    ""
+   ]
+  },
+  {
+   "tokens": [
+    " is",
+    " it",
+    " ok",
+    "?",
+    " yes",
+    ",",
+    " fine"
+   ],
+   "times": [
+    0.2,
+    0.5,
+    0.8,
+    1.0,
+    2.2,
+    2.4,
+    2.6
+   ],
+   "junction_s": 2.0,
+   "split": [
+    "?",
+    "yes, fine"
+   ]
+  },
+  {
+   "tokens": [
+    " x",
+    " y"
+   ],
+   "times": [
+    3.0,
+    3.5
+   ],
+   "junction_s": 2.0,
+   "split": [
+    "",
+    "x y"
+   ]
+  }
+ ],
+ "context_audio": [
+  {
+   "samples": 160000,
+   "speech_before": 64000,
+   "speech_after": 128000,
+   "end": 160000,
+   "context_s": 2,
+   "squeeze_s": 0.2,
+   "length": 68800,
+   "first": 32000,
+   "last": 159999,
+   "junction_s": 2.2
+  },
+  {
+   "samples": 160000,
+   "speech_before": 64000,
+   "speech_after": 128000,
+   "end": 160000,
+   "context_s": 2,
+   "squeeze_s": null,
+   "length": 128000,
+   "first": 32000,
+   "last": 159999,
+   "junction_s": 5.9
+  },
+  {
+   "samples": 160000,
+   "speech_before": 16000,
+   "speech_after": 16800,
+   "end": 96000,
+   "context_s": 4,
+   "squeeze_s": 0.2,
+   "length": 96000,
+   "first": 0,
+   "last": 95999,
+   "junction_s": 1.0
+  },
+  {
+   "samples": 160000,
+   "speech_before": 64000,
+   "speech_after": 67200,
+   "end": 144000,
+   "context_s": 4,
+   "squeeze_s": 0.2,
+   "length": 144000,
+   "first": 0,
+   "last": 143999,
+   "junction_s": 4.1
+  }
+ ],
  "spoken": [
   {
    "text": "He said quote hello world, unquote and left",

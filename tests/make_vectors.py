@@ -12,6 +12,7 @@ from pathlib import Path
 import numpy as np
 
 from stt_button import asr, config
+from stt_button.asr import context_audio, split_at_junction
 from stt_button.bubble import Bubble
 from stt_button.cleaner import casual, live_chunks, matched_cue, skips_cleaner
 from stt_button.spoken import spoken_punctuation
@@ -105,6 +106,29 @@ SPOKEN_TEXTS = [
 ]
 
 
+JUNCTION_CASES = [
+    {"tokens": [" update", " the", " plan", ".", " have", " some", " monitoring"],
+     "times": [0.1, 0.4, 0.7, 0.9, 2.3, 2.6, 2.9], "junction_s": 2.0},
+    {"tokens": [" a", " b", " c"], "times": [0.1, 0.5, 2.5], "junction_s": 2.0},
+    {"tokens": [" a", " b"], "times": [0.1, 0.5], "junction_s": 2.0},
+    {"tokens": [" is", " it", " ok", "?", " yes", ",", " fine"], "times": [0.2, 0.5, 0.8, 1.0, 2.2, 2.4, 2.6], "junction_s": 2.0},
+    {"tokens": [" x", " y"], "times": [3.0, 3.5], "junction_s": 2.0},
+]
+
+CONTEXT_AUDIO_CASES = [
+    {"samples": 10 * SR, "speech_before": 4 * SR, "speech_after": 8 * SR, "end": 10 * SR, "context_s": 2, "squeeze_s": 0.2},
+    {"samples": 10 * SR, "speech_before": 4 * SR, "speech_after": 8 * SR, "end": 10 * SR, "context_s": 2, "squeeze_s": None},
+    {"samples": 10 * SR, "speech_before": 1 * SR, "speech_after": 1 * SR + 800, "end": 6 * SR, "context_s": 4, "squeeze_s": 0.2},
+    {"samples": 10 * SR, "speech_before": 4 * SR, "speech_after": 4 * SR + 3200, "end": 9 * SR, "context_s": 4, "squeeze_s": 0.2},
+]
+
+
+def context_audio_vector(case: dict) -> dict:
+    audio, junction = context_audio(np.arange(case["samples"], dtype=np.float32), case["speech_before"],
+                                    case["speech_after"], case["end"], case["context_s"], case["squeeze_s"])
+    return {**case, "length": len(audio), "first": int(audio[0]), "last": int(audio[-1]), "junction_s": junction}
+
+
 BUBBLE_SEQUENCES = {
     "slice_drops_preview_words": [
         ["preview", [["meet", 0.4], ["me", 0.9], ["at", 1.5], ["noon", 2.1], ["okay", 3.2]]],
@@ -151,6 +175,8 @@ def vectors() -> dict:
         "bubble": [{"name": n, "events": e, "after_each": replay_bubble(e)} for n, e in BUBBLE_SEQUENCES.items()],
         "live_chunks": chunks,
         "casual": [{"text": t, "casual": casual(t, cfg)} for t in CASUAL_TEXTS],
+        "junction": [{**c, "split": list(split_at_junction(c["tokens"], c["times"], c["junction_s"]))} for c in JUNCTION_CASES],
+        "context_audio": [context_audio_vector(c) for c in CONTEXT_AUDIO_CASES],
         "spoken": [{"text": t, "spoken": spoken_punctuation(t)} for t in SPOKEN_TEXTS],
         "skips_cleaner": {
             "skip_max_words": cfg["skip_max_words"],

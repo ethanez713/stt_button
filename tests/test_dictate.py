@@ -121,6 +121,9 @@ class ScriptedRecognizer:
     def recognize(self, samples):
         return self.texts.pop(0)
 
+    def recognize_after(self, audio, junction_s):
+        return ".", self.texts.pop(0)
+
 
 class UppercaseCleaner:
     backend = "stub"

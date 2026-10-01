@@ -194,6 +194,7 @@ def work(pcm: Path) -> None:
                 "clean_ms": live.clean_ms, "clean_ms_after_stop": result.clean_ms_after_stop,
                 "stop_to_result_ms": stop_to_result_ms, "clean_mode": result.clean_mode, "chunks": result.chunks,
                 "idle_cleans": result.idle_cleans, "idle_hits": result.idle_hits, "cue": result.cue,
+                "context_decodes": result.context_decodes, "context_fallbacks": result.context_fallbacks,
                 "cleaner_backend": loaded.get("backend"),
                 "raw": result.raw, "cleaned": result.cleaned,
             }, ensure_ascii=False) + "\n")

@@ -9,7 +9,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from stt_button.asr import SAMPLE_RATE, Slicer, join_slices
+from stt_button.asr import SAMPLE_RATE, TRAILING_MARK, Slicer, context_audio, join_slices
 from stt_button.cleaner import casual, live_chunks, matched_cue, skips_cleaner
 from stt_button.spoken import spoken_punctuation
 
@@ -25,6 +25,8 @@ class LiveResult:
     idle_cleans: int = 0
     idle_hits: int = 0
     cue: str | None = None
+    context_decodes: int = 0
+    context_fallbacks: int = 0
 
 
 IDLE_POLL_S = 0.05
@@ -50,6 +52,8 @@ class LiveTake:
         self.idle_cleans = 0
         self._pending: list[tuple[int, int]] = []
         self.asr_ms = 0
+        self.context_decodes = 0
+        self.context_fallbacks = 0
         self.clean_ms = 0
         self._stop_asr_ms = self._stop_clean_ms = 0
 
@@ -106,19 +110,39 @@ class LiveTake:
         self._pending = []
         raw = self.raw
         if skips_cleaner(raw, self.cfg):
-            return LiveResult(raw, casual(spoken_punctuation(raw), self.cfg), 0, "raw", self.asr_ms - self._stop_asr_ms, 0)
+            return LiveResult(raw, casual(spoken_punctuation(raw), self.cfg), 0, "raw", self.asr_ms - self._stop_asr_ms, 0,
+                              context_decodes=self.context_decodes, context_fallbacks=self.context_fallbacks)
         chunks = self._clean_closed(final=True)
         cleaned = "\n\n".join(o for o in (self.cleaned_chunks[c] for c in chunks) if o)
         return LiveResult(raw, casual(cleaned, self.cfg), len(chunks), "chunks", self.asr_ms - self._stop_asr_ms,
                           self.clean_ms - self._stop_clean_ms, self.idle_cleans,
-                          sum(c in self.idle_chunks for c in chunks), matched_cue(raw, self.cfg["self_correction_cues"]))
+                          sum(c in self.idle_chunks for c in chunks), matched_cue(raw, self.cfg["self_correction_cues"]),
+                          self.context_decodes, self.context_fallbacks)
 
     def _recognize(self, start: int, end: int) -> None:
         started = time.monotonic()
-        self.texts.append(self.recognizer.recognize(self.slicer.samples[start:end]))
+        self.texts.append(self._slice_text(start, end))
         self.asr_ms += _ms(started)
         if self.bubble:
             self.bubble.slice_landed(end / SAMPLE_RATE, self.texts[-1])
+
+    def _slice_text(self, start: int, end: int) -> str:
+        """A slice after a pause is decoded with the speech before it, so the recognizer judges the
+        sentence break and the capital from the words around it; the previous slice's closing
+        punctuation is then the one the context decode gave it."""
+        before, after = self.slicer.speech_before(start), self.slicer.speech_after(start)
+        if not self.texts or before is None or after is None or after >= end:
+            return self.recognizer.recognize(self.slicer.samples[start:end])
+        audio, junction_s = context_audio(self.slicer.samples, before, after, end, self.cfg["context_s"],
+                                          self.cfg["junction_squeeze_s"])
+        self.context_decodes += 1
+        mark, text = self.recognizer.recognize_after(audio, junction_s)
+        if not text:
+            self.context_fallbacks += 1
+            return self.recognizer.recognize(self.slicer.samples[start:end])
+        if self.texts[-1]:
+            self.texts[-1] = TRAILING_MARK.sub("", self.texts[-1]) + mark
+        return text
 
     def _clean_closed(self, final: bool) -> list[str]:
         raw = self.raw

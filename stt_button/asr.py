@@ -177,6 +177,11 @@ class Recognizer:
     def recognize(self, samples: np.ndarray) -> str:
         return self.decode(samples).text.strip()
 
+    def recognize_after(self, audio: np.ndarray, junction_s: float) -> tuple[str, str]:
+        """Decodes context_audio's output; returns (the context's closing punctuation, the slice's text)."""
+        result = self.decode(audio)
+        return split_at_junction(result.tokens, result.timestamps, junction_s)
+
     def transcribe(self, wav_path: str | Path) -> RawTranscript:
         started = time.monotonic()
         samples = read_wav(wav_path)
@@ -187,7 +192,7 @@ class Recognizer:
 
 
 CONTEXT_LEAD_S = 0.1
-_TRAILING_MARK = re.compile(r"[.,?!;:]$")
+TRAILING_MARK = re.compile(r"[.,?!;:]$")
 
 
 def context_audio(samples: np.ndarray, speech_before: int, speech_after: int, end: int, context_s: float,
@@ -211,7 +216,7 @@ def split_at_junction(tokens: list[str], timestamps: list[float], junction_s: fl
 
     words = words_from_tokens(tokens, timestamps)
     context = [w for w, t in words if t < junction_s]
-    mark = _TRAILING_MARK.search(context[-1]) if context else None
+    mark = TRAILING_MARK.search(context[-1]) if context else None
     return (mark.group() if mark else ""), " ".join(w for w, t in words if t >= junction_s)
 
 
