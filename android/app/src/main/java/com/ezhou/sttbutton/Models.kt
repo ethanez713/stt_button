@@ -118,6 +118,9 @@ class Models(
 
     fun cleaner(): ChunkCleaner = cleanerProxy
 
+    /** Blocks until the recognizer has loaded or failed to. */
+    fun awaitRecognizerLoaded() = recognizerReady.await()
+
     private val recognizerLoader = Thread {
         try {
             val started = System.nanoTime()

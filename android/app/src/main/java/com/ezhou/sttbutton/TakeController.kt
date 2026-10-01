@@ -18,7 +18,7 @@ import kotlin.concurrent.thread
  * the text is inserted once at the stop. Everything here is called on the main thread except the
  * worker's own loop, which hands its result back through the handler.
  */
-class TakeController(private val service: DictationService, private val overlay: Overlay) {
+class TakeController(private val service: DictationService, private val overlay: Overlay, private val bubble: BubbleOverlay) {
     private val tag = DictationService.TAG
     private val handler = Handler(Looper.getMainLooper())
     private val cfg = PipelineConfig(org.json.JSONObject(service.assets.open("pipeline.json").bufferedReader().readText()))
@@ -26,12 +26,13 @@ class TakeController(private val service: DictationService, private val overlay:
     private val inserter = Inserter(service)
     private val takesDir = File(service.filesDir, "takes")
     private var run: Run? = null
+    private val bubbleQueued = java.util.concurrent.atomic.AtomicBoolean(false)
     private var tracker: FieldTracker? = null
     private val capRunnable = Runnable { run?.let(::stop) }
 
     private class Run(
         val take: Take, val pcm: File, val models: Models, val live: LiveTake, val recorder: Recorder,
-        val cost: TakeCost, val sampler: CostSampler,
+        val cost: TakeCost, val sampler: CostSampler, val bubbleText: BubbleText, val preview: PreviewRecognizer,
     ) {
         @Volatile var stopRequested = false
         @Volatile var aborted = false
@@ -70,11 +71,16 @@ class TakeController(private val service: DictationService, private val overlay:
             Log.e(tag, "microphone foreground service refused", e)
         }
         val models = Models.forFiles(service.filesDir, cfg)
-        val live = LiveTake(models.recognizer, models::cleaner, cfg, prepareCleaner = models::prepareCleaner)
+        val bubbleText = BubbleText().apply { onChange = ::scheduleBubble }
+        val live = LiveTake(models.recognizer, models::cleaner, cfg, bubbleText, models::prepareCleaner)
+        val preview = PreviewRecognizer(File(service.filesDir, ModelFiles.PREVIEW), models::awaitRecognizerLoaded, bubbleText::preview)
         val pcm = File(takesDir, "${take.id}.pcm")
-        val recorder = Recorder(pcm) { samples, length -> live.addSamples(samples, length) }
+        val recorder = Recorder(pcm) { samples, length ->
+            live.addSamples(samples, length)
+            preview.offer(samples, length)
+        }
         val cost = TakeCost(AndroidCostProbe(service)).also { it.start() }
-        val current = Run(take, pcm, models, live, recorder, cost, CostSampler(cost))
+        val current = Run(take, pcm, models, live, recorder, cost, CostSampler(cost), bubbleText, preview)
         try {
             recorder.start()
         } catch (e: Exception) {
@@ -84,6 +90,7 @@ class TakeController(private val service: DictationService, private val overlay:
             return
         }
         run = current
+        bubble.show()
         thread(name = "take-worker") { work(current) }
         handler.postDelayed(capRunnable, cfg.takeCapS * 1000L)
         overlay.setMode(ButtonMode.RECORDING)
@@ -124,6 +131,7 @@ class TakeController(private val service: DictationService, private val overlay:
             Log.e(tag, "take failed", e)
             handler.post { if (run === current) discard(DiscardReason.ERROR) }
         } finally {
+            current.preview.stop()
             current.models.close()
             current.pcm.delete()
         }
@@ -163,6 +171,7 @@ class TakeController(private val service: DictationService, private val overlay:
 
     private fun release(current: Run) {
         current.sampler.stop()
+        bubble.hide()
         if (run === current) run = null
         overlay.setMode(ButtonMode.IDLE)
         service.stopService(Intent(service, RecordingService::class.java))
@@ -174,6 +183,15 @@ class TakeController(private val service: DictationService, private val overlay:
             if (focused != null && current.take.pkg != UNKNOWN_PACKAGE && focused != current.take.pkg) discard(DiscardReason.PACKAGE)
         }
         tracker?.onEvent(event)
+    }
+
+    /** Redraws the bubble from the worker's and the preview thread's latest text, at most every [BUBBLE_MS]. */
+    private fun scheduleBubble() {
+        if (!bubbleQueued.compareAndSet(false, true)) return
+        handler.postDelayed({
+            bubbleQueued.set(false)
+            run?.let { bubble.update(it.bubbleText.text()) }
+        }, BUBBLE_MS)
     }
 
     fun onTrimMemory(level: Int) {
@@ -221,5 +239,6 @@ class TakeController(private val service: DictationService, private val overlay:
     companion object {
         private const val UNKNOWN_PACKAGE = "unknown"
         private const val IDLE_POLL_MS = 25L
+        private const val BUBBLE_MS = 100L
     }
 }

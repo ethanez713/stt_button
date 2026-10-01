@@ -19,6 +19,7 @@ import android.view.inputmethod.InputMethodManager
  */
 class DictationService : AccessibilityService() {
     private lateinit var overlay: Overlay
+    private lateinit var bubble: BubbleOverlay
     private lateinit var controller: TakeController
     /** true English, false another language, null unresolved. */
     private var english: Boolean? = null
@@ -46,7 +47,8 @@ class DictationService : AccessibilityService() {
             onTap = { controller.onTap() },
             onPlacementChanged = ::reconcile,
         )
-        controller = TakeController(this, overlay).also {
+        bubble = BubbleOverlay(this)
+        controller = TakeController(this, overlay, bubble).also {
             it.deleteLeftovers()
             it.logProcessExits()
         }
@@ -127,6 +129,7 @@ class DictationService : AccessibilityService() {
         if (english == false) return removed("keyboard not English")
         val ime = windows.firstOrNull { it.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD }
             ?: return removed("no keyboard window", keepWhileTaking = true)
+        bubble.setAnchor(Rect().also(ime::getBoundsInScreen))
         val field = findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
         if (field != null) {
             if (field.packageName == packageName) return removed("own app", keepWhileTaking = true)

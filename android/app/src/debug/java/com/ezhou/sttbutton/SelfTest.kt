@@ -67,14 +67,23 @@ class SelfTest : Service() {
         val cfg = PipelineConfig(org.json.JSONObject(context.assets.open("pipeline.json").bufferedReader().readText()))
         val audio = readWav(File(dir, "$name.wav"))
         val models = Models.forFiles(context.filesDir, cfg)
-        val live = LiveTake(models.recognizer, models::cleaner, cfg, prepareCleaner = models::prepareCleaner)
+        val bubble = BubbleText()
+        val live = LiveTake(models.recognizer, models::cleaner, cfg, bubble, models::prepareCleaner)
+        val feedStarted = SystemClock.elapsedRealtime()
+        var firstPreviewMs = -1L
+        val preview = PreviewRecognizer(File(context.filesDir, ModelFiles.PREVIEW), models::awaitRecognizerLoaded, { words ->
+            if (firstPreviewMs < 0 && words.isNotEmpty()) firstPreviewMs = SystemClock.elapsedRealtime() - feedStarted
+            bubble.preview(words)
+        })
         val stopping = java.util.concurrent.atomic.AtomicBoolean(false)
         val worker = thread {
             while (!stopping.get()) if (!live.step()) Thread.sleep(25)
         }
         val piece = Slicer.SAMPLE_RATE / 10
         for (at in audio.indices step piece) {
-            live.addSamples(audio.copyOfRange(at, minOf(audio.size, at + piece)))
+            val buffer = audio.copyOfRange(at, minOf(audio.size, at + piece))
+            live.addSamples(buffer)
+            preview.offer(buffer, buffer.size)
             Thread.sleep(100L / speed)
         }
         stopping.set(true)
@@ -83,7 +92,11 @@ class SelfTest : Service() {
         live.markStop()
         val result = live.finish()
         val stopToInsert = SystemClock.elapsedRealtime() - stopped
+        preview.stop()
+        val shown = bubble.text()
         models.close()
+        Log.i(TAG, "selftest bubble $name first_preview_ms=$firstPreviewMs settled_words=${Pipeline.wordCount(shown.settled)} " +
+            "preview_words=${Pipeline.wordCount(shown.preview)}")
         File(dir, "$name.take.txt").writeText(result.cleaned + "\n")
         File(dir, "$name.raw.txt").writeText(result.raw + "\n")
         Log.i(TAG, "selftest wav $name audio_ms=${audio.size / 16} speed=$speed mode=${result.cleanMode} " +
