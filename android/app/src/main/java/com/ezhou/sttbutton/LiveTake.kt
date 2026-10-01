@@ -2,6 +2,9 @@ package com.ezhou.sttbutton
 
 interface SliceRecognizer {
     fun recognize(samples: FloatArray): String
+
+    /** Decodes `Pipeline.contextAudio`'s output: the context's closing punctuation and the slice's words. */
+    fun recognizeAfter(samples: FloatArray, junctionS: Double): Pair<String, String>
 }
 
 class ChunkResult(val text: String, val outTokens: Int)
@@ -36,6 +39,10 @@ class LiveResult(
     val idleHits: Int,
     val cue: String?,
     val audioMs: Long,
+    /** What goes before [cleaned] to join it to the text inserted earlier in the take; empty for the first segment. */
+    val prefix: String = "",
+    val contextDecodes: Int = 0,
+    val contextFallbacks: Int = 0,
 )
 
 /**
@@ -64,6 +71,14 @@ class LiveTake(
     private val finishedRaw = mutableListOf<String>()
     private var segmentStartSample = 0
     private var segmentsEnded = 0
+    private var slicesRecognized = 0
+    private var contextDecodes = 0
+    private var contextFallbacks = 0
+    private var segmentsWithText = 0
+    /** The punctuation the context decode put after the speech before this segment, or null without one. */
+    private var leadingMark: String? = null
+    /** The closing punctuation withheld from the last inserted segment, which the next one decides. */
+    private var heldMark = ""
 
     @Volatile private var idleSpoken: Int? = null
     private var timedLoadRequested = false
@@ -105,7 +120,7 @@ class LiveTake(
 
     /** After a segment has ended, a leftover of silence alone is dropped; a take without one slices as the host does. */
     fun finish(): LiveResult =
-        complete(takePending() + if (segmentsEnded > 0) slicer.endSegment() else slicer.finish())
+        join(complete(takePending() + if (segmentsEnded > 0) slicer.endSegment() else slicer.finish()), holdMark = false)
 
     /** Speech was heard and followed by `insert_pause_s` of silence: the text so far is due for insertion. */
     fun segmentDue(): Boolean = cfg.insertPauseS?.let(slicer::segmentDue) ?: false
@@ -113,10 +128,39 @@ class LiveTake(
     /** Finishes the open segment as [finish] finishes a take, then starts the next one empty. */
     fun finishSegment(): LiveResult {
         markStop()
-        val result = complete(takePending() + slicer.endSegment())
+        val result = join(complete(takePending() + slicer.endSegment()), holdMark = true)
         sink?.segmentEnded(slicer.sampleCount.toDouble() / Slicer.SAMPLE_RATE)
         startNextSegment()
         return result
+    }
+
+    /**
+     * Joins a segment to the text before it. The closing punctuation of a segment ended by a pause is
+     * withheld, because whether the pause ended the sentence is only known once the next words are heard;
+     * the next segment then opens with the mark its context decode gave, or the withheld one without it.
+     */
+    private fun join(result: LiveResult, holdMark: Boolean): LiveResult {
+        val earlier = segmentsWithText > 0
+        val mark = if (earlier) leadingMark ?: heldMark else ""
+        var body = result.cleaned
+        if (earlier && leadingMark != null && leadingMark !in listOf(".", "?", "!")) body = Pipeline.continueSentence(body, result.raw)
+        var prefix = ""
+        if (earlier && body.isNotBlank()) {
+            val joined = Pipeline.casual(if (mark.isEmpty()) body else "$mark $body", cfg, judged)
+            prefix = joined.removeSuffix(body)
+            if (prefix.isEmpty() || !(prefix.first().isWhitespace() || prefix.first() in Pipeline.SENTENCE_MARKS)) prefix = " $prefix"
+        } else if (earlier && !holdMark) {
+            prefix = Pipeline.casual(mark, cfg, judged)
+        }
+        val held = if (holdMark) Pipeline.trailingMark(body) else ""
+        if (holdMark) body = Pipeline.withoutTrailingMark(body)
+        if (body.isNotBlank() || prefix.isNotBlank()) segmentsWithText++
+        heldMark = held
+        return LiveResult(
+            result.raw, body, result.chunks, result.cleanMode, result.asrMs, result.cleanMs, result.asrMsAfterStop,
+            result.cleanMsAfterStop, result.inTokens, result.outTokens, result.idleCleans, result.idleHits, result.cue,
+            result.audioMs, prefix, contextDecodes, contextFallbacks,
+        )
     }
 
     private fun complete(slices: List<IntArray>): LiveResult {
@@ -140,6 +184,7 @@ class LiveTake(
         idleCleans = 0
         stopAsrMs = 0
         stopCleanMs = 0
+        leadingMark = null
         segmentStartSample = slicer.sampleCount
         segmentsEnded++
     }
@@ -154,11 +199,33 @@ class LiveTake(
 
     private fun recognize(slice: IntArray) {
         val started = System.nanoTime()
-        val pcm = slicer.copy(slice[0], slice[1])
-        val text = recognizer.recognize(FloatArray(pcm.size) { pcm[it] / 32768f })
+        val text = sliceText(slice)
         asrMs += elapsedMs(started)
+        slicesRecognized++
         texts += text
         sink?.sliceLanded(slice[1].toDouble() / Slicer.SAMPLE_RATE, text)
+    }
+
+    private fun samples(from: Int, to: Int): FloatArray {
+        val pcm = slicer.copy(from, to)
+        return FloatArray(pcm.size) { pcm[it] / 32768f }
+    }
+
+    /** Mirrors `stt_button.live.LiveTake._slice_text`: a slice after a pause is decoded with the speech before it. */
+    private fun sliceText(slice: IntArray): String {
+        val before = slicer.speechBefore(slice[0])
+        val after = slicer.speechAfter(slice[0])
+        if (slicesRecognized == 0 || before == null || after == null || after >= slice[1]) return recognizer.recognize(samples(slice[0], slice[1]))
+        val (audio, junctionS) = Pipeline.contextAudio(::samples, before, after, slice[1], cfg.contextS, cfg.junctionSqueezeS)
+        contextDecodes++
+        val (mark, text) = recognizer.recognizeAfter(audio, junctionS)
+        if (text.isEmpty()) {
+            contextFallbacks++
+            return recognizer.recognize(samples(slice[0], slice[1]))
+        }
+        if (texts.isEmpty()) leadingMark = mark
+        else if (texts.last().isNotEmpty()) texts[texts.lastIndex] = Pipeline.withoutTrailingMark(texts.last()) + mark
+        return text
     }
 
     private fun chunksOf(cleaner: ChunkCleaner, final: Boolean) =

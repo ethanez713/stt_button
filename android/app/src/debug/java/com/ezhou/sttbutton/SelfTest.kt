@@ -96,7 +96,7 @@ class SelfTest : Service() {
         live.markStop()
         val result = live.finish()
         segments += result
-        val inserted = segments.map { it.cleaned }.filter { it.isNotBlank() }.joinToString(" ")
+        val inserted = segments.filter { it.cleaned.isNotBlank() || it.prefix.isNotBlank() }.joinToString("") { it.prefix + it.cleaned }
         val stopToInsert = SystemClock.elapsedRealtime() - stopped
         preview.stop()
         val shown = bubble.text()
@@ -105,7 +105,7 @@ class SelfTest : Service() {
             "preview_words=${Pipeline.wordCount(shown.preview)}")
         File(dir, "$name.take.txt").writeText(inserted + "\n")
         segments.forEachIndexed { i, r ->
-            Log.i(TAG, "selftest segment $name #$i mode=${r.cleanMode} chunks=${r.chunks} audio_ms=${r.audioMs} cue=${r.cue} text=${r.cleaned}")
+            Log.i(TAG, "selftest segment $name #$i mode=${r.cleanMode} chunks=${r.chunks} audio_ms=${r.audioMs} cue=${r.cue} prefix='${r.prefix}' context=${r.contextDecodes}/${r.contextFallbacks} text=${r.cleaned}")
         }
         File(dir, "$name.raw.txt").writeText(result.raw + "\n")
         Log.i(TAG, "selftest wav $name audio_ms=${audio.size / 16} speed=$speed mode=${result.cleanMode} " +

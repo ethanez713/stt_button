@@ -10,6 +10,8 @@ class PipelineConfig(json: JSONObject) {
     val pauseS: Double? = if (json.isNull("pause_s")) null else json.getDouble("pause_s")
     val insertPauseS: Double? = if (json.isNull("insert_pause_s")) null else json.getDouble("insert_pause_s")
     val sliceMinS = json.getDouble("slice_min_s")
+    val contextS = json.getDouble("context_s")
+    val junctionSqueezeS: Double? = if (json.isNull("junction_squeeze_s")) null else json.getDouble("junction_squeeze_s")
     val pauseMarginDb = json.getDouble("pause_margin_db")
     val chunkMinTokens = json.getInt("chunk_min_tokens")
     val chunkMaxTokens = json.getInt("chunk_max_tokens")
@@ -31,6 +33,9 @@ object Pipeline {
     private val COMMA_OUTSIDE_NUMBER = Regex("(?<![0-9]),|,(?![0-9])")
     private val FINAL_PERIOD = Regex("(?<!\\.)\\.(\\s*)$")
     private val NOT_SPOKEN = Regex("[^\\p{L}\\p{N}_\\s]")
+    private val TRAILING_MARK = Regex("[.,?!;:]$")
+    private const val CONTEXT_LEAD_S = 0.1
+    const val SENTENCE_MARKS = ".,?!;:"
 
     fun renderPrompt(systemPrompt: String, userTurn: String): String =
         "<|im_start|>system\n$systemPrompt$END_OF_TURN\n<|im_start|>user\n$userTurn$END_OF_TURN\n$ASSISTANT_NO_THINK"
@@ -62,6 +67,45 @@ object Pipeline {
     fun casual(text: String, cfg: PipelineConfig, judged: String = text): String =
         if (wordCount(judged) > cfg.skipMaxWords) text
         else FINAL_PERIOD.replace(COMMA_OUTSIDE_NUMBER.replace(text, ""), "$1")
+
+    fun trailingMark(text: String): String = TRAILING_MARK.find(text)?.value ?: ""
+
+    fun withoutTrailingMark(text: String): String = TRAILING_MARK.replace(text, "")
+
+    /** Mirrors `stt_button.asr.context_audio`; [read] returns the samples in [from, to). */
+    fun contextAudio(
+        read: (Int, Int) -> FloatArray, speechBefore: Int, speechAfter: Int, end: Int, contextS: Double, squeezeS: Double?,
+    ): Pair<FloatArray, Double> {
+        val rate = Slicer.SAMPLE_RATE
+        val before = read(maxOf(0, speechBefore - (contextS * rate).toInt()), speechBefore)
+        val afterStart = maxOf(speechBefore, speechAfter - (CONTEXT_LEAD_S * rate).toInt())
+        var gap = read(speechBefore, afterStart)
+        if (squeezeS != null) gap = gap.copyOf(minOf(gap.size, (squeezeS * rate).toInt()))
+        val audio = before + gap + read(afterStart, end)
+        return audio to (before.size + gap.size).toDouble() / rate
+    }
+
+    /** Mirrors `stt_button.asr.split_at_junction`: the context's closing punctuation and the slice's words. */
+    fun splitAtJunction(tokens: List<String>, times: List<Double>, junctionS: Double): Pair<String, String> {
+        if (times.size != tokens.size) return "" to ""
+        val words = BubbleText.wordsFromTokens(tokens.toTypedArray(), FloatArray(times.size) { times[it].toFloat() })
+        val context = words.filter { it.startS < junctionS }
+        return trailingMark(context.lastOrNull()?.text ?: "") to words.filter { it.startS >= junctionS }.joinToString(" ") { it.text }
+    }
+
+    /**
+     * A segment that continues the sentence before it keeps the raw words' lower case: the cleaner
+     * capitalizes the first word of every chunk it is given.
+     */
+    fun continueSentence(cleaned: String, raw: String): String {
+        val cleanedWord = cleaned.trimStart().split(WHITESPACE).firstOrNull().orEmpty()
+        val rawWord = raw.trimStart().split(WHITESPACE).firstOrNull().orEmpty()
+        val key = { word: String -> word.filter { it.isLetterOrDigit() }.lowercase() }
+        val first = cleaned.indexOfFirst { !it.isWhitespace() }
+        if (first < 0 || rawWord.isEmpty() || key(cleanedWord) != key(rawWord)) return cleaned
+        val rawLetter = rawWord.firstOrNull { it.isLetter() } ?: return cleaned
+        return if (rawLetter.isLowerCase() && cleaned[first].isUpperCase()) cleaned.replaceRange(first, first + 1, cleaned[first].lowercase()) else cleaned
+    }
 
     /** Mirrors `stt_button.cleaner.live_chunks`. */
     fun liveChunks(text: String, countTokens: (String) -> Int, minTokens: Int, maxTokens: Int, final: Boolean): List<String> {

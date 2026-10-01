@@ -156,7 +156,8 @@ class TakeController(private val service: DictationService, private val overlay:
         val take = current.take
         val last = trigger != TRIGGER_PAUSE
         if (take.finished || (last && take.state != TakeState.STOPPING)) return
-        if (result.cleaned.isBlank()) {
+        val text = if (result.cleaned.isBlank()) result.prefix.trim() else result.prefix + result.cleaned
+        if (text.isBlank()) {
             if (!last) return
             if (take.finishWithoutText()) release(current) else discard(DiscardReason.EMPTY)
             return
@@ -171,8 +172,7 @@ class TakeController(private val service: DictationService, private val overlay:
             discard(reason ?: DiscardReason.NO_FIELD)
             return
         }
-        val separator = if (take.segmentsInserted > 0) " " else ""
-        val outcome = inserter.insert(field, separator + result.cleaned)
+        val outcome = inserter.insert(field, text)
         val segment = take.segmentsInserted
         if (last) {
             take.markInserted()
@@ -188,6 +188,7 @@ class TakeController(private val service: DictationService, private val overlay:
             "in_tokens" to result.inTokens, "out_tokens" to result.outTokens,
             "clean_mode" to result.cleanMode, "chunks" to result.chunks,
             "idle_cleans" to result.idleCleans, "idle_hits" to result.idleHits, "cue" to result.cue,
+            "context_decodes" to result.contextDecodes, "context_fallbacks" to result.contextFallbacks,
             "segment" to segment, "trigger" to trigger,
             "asr_ms_after_stop" to result.asrMsAfterStop, "clean_ms_after_stop" to result.cleanMsAfterStop,
             "stop_to_insert_ms" to SystemClock.elapsedRealtime() - triggerAtMs,

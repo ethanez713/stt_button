@@ -8,6 +8,7 @@ class ModelsTest {
     private class FakeRecognizer : ClosableRecognizer {
         var closed = false
         override fun recognize(samples: FloatArray) = "heard"
+        override fun recognizeAfter(samples: FloatArray, junctionS: Double) = "" to "heard"
         override fun close() {
             closed = true
         }

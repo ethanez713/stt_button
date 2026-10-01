@@ -75,6 +75,39 @@ class PipelineVectorsTest {
     }
 
     @Test
+    fun given_junction_vectors_when_split_then_the_mark_and_text_match_the_host() {
+        for (case in Fixtures.objects(Fixtures.vectors.getJSONArray("junction"))) {
+            val times = case.getJSONArray("times").let { a -> List(a.length(), a::getDouble) }
+            val expected = Fixtures.strings(case.getJSONArray("split"))
+            val split = Pipeline.splitAtJunction(Fixtures.strings(case.getJSONArray("tokens")), times, case.getDouble("junction_s"))
+            assertEquals(expected, listOf(split.first, split.second))
+        }
+    }
+
+    @Test
+    fun given_context_audio_vectors_when_built_then_length_ends_and_junction_match_the_host() {
+        for (case in Fixtures.objects(Fixtures.vectors.getJSONArray("context_audio"))) {
+            val squeeze = if (case.isNull("squeeze_s")) null else case.getDouble("squeeze_s")
+            val (audio, junction) = Pipeline.contextAudio(
+                { from, to -> FloatArray(to - from) { (from + it).toFloat() } }, case.getInt("speech_before"),
+                case.getInt("speech_after"), case.getInt("end"), case.getDouble("context_s"), squeeze,
+            )
+            assertEquals(case.getInt("length"), audio.size)
+            assertEquals(case.getInt("first"), audio.first().toInt())
+            assertEquals(case.getInt("last"), audio.last().toInt())
+            assertEquals(case.getDouble("junction_s"), junction, 1e-9)
+        }
+    }
+
+    @Test
+    fun given_a_cleaned_first_word_that_matches_a_lower_case_raw_one_when_continued_then_it_is_lowercased() {
+        assertEquals("have some", Pipeline.continueSentence("Have some", "have some monitoring"))
+        assertEquals("Have some", Pipeline.continueSentence("Have some", "Have some monitoring"))
+        assertEquals("Okay then", Pipeline.continueSentence("Okay then", "so then"))
+        assertEquals("I think so", Pipeline.continueSentence("I think so", "I think so"))
+    }
+
+    @Test
     fun given_the_prompt_when_rendered_then_it_is_the_training_format() {
         val prompt = Pipeline.promptFor(Fixtures.config, "um so hi")
         assertTrue(prompt.startsWith("<|im_start|>system\nYou are a text normalizer"))

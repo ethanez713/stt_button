@@ -46,6 +46,18 @@ class ParakeetRecognizer(filesDir: File, threads: Int = LlamaCleaner.THREADS) : 
         }
     }
 
+    override fun recognizeAfter(samples: FloatArray, junctionS: Double): Pair<String, String> {
+        val stream = recognizer.createStream()
+        try {
+            stream.acceptWaveform(samples, 16000)
+            recognizer.decode(stream)
+            val result = recognizer.getResult(stream)
+            return Pipeline.splitAtJunction(result.tokens.toList(), result.timestamps.map { it.toDouble() }, junctionS)
+        } finally {
+            stream.release()
+        }
+    }
+
     override fun close() = recognizer.release()
 }
 
@@ -106,6 +118,13 @@ class Models(
             recognizerFailure?.let { throw IllegalStateException("recognizer failed to load", it) }
             check(!closed) { "models released" }
             return recognizerModel!!.recognize(samples)
+        }
+
+        override fun recognizeAfter(samples: FloatArray, junctionS: Double): Pair<String, String> {
+            recognizerReady.await()
+            recognizerFailure?.let { throw IllegalStateException("recognizer failed to load", it) }
+            check(!closed) { "models released" }
+            return recognizerModel!!.recognizeAfter(samples, junctionS)
         }
     }
 

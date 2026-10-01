@@ -29,6 +29,7 @@ class Slicer(
     private var energies = 0
     private val sorted = ArrayList<Long>()
     private var lastSpeech = -1
+    private val speech = ArrayList<Boolean>()
     private var segmentStart = 0
 
     val sampleCount: Int get() = synchronized(this) { size }
@@ -71,6 +72,18 @@ class Slicer(
         rest
     }
 
+    /** Where the last non-silent window that ends at or before [sample] ends, or null. */
+    fun speechBefore(sample: Int): Int? = synchronized(this) {
+        var last = min(sample / WIN, speech.size) - 1
+        while (last >= 0 && !speech[last]) last--
+        if (last < 0) null else (last + 1) * WIN
+    }
+
+    /** Where the first non-silent window that starts at or after [sample] starts, or null. */
+    fun speechAfter(sample: Int): Int? = synchronized(this) {
+        (((sample + WIN - 1) / WIN) until speech.size).firstOrNull { speech[it] }?.let { it * WIN }
+    }
+
     fun copy(from: Int, to: Int): ShortArray = synchronized(this) { pcm.copyOfRange(from, to) }
 
     private fun append(chunk: ShortArray, length: Int) {
@@ -87,7 +100,8 @@ class Slicer(
         if (at < 0) at = -at - 1
         sorted.add(at, energy)
         val floor = max(sorted[(sorted.size - 1) / 10].toDouble(), floorMin)
-        if (energy.toDouble() >= floor * margin) lastSpeech = energies
+        speech.add(energy.toDouble() >= floor * margin)
+        if (speech.last()) lastSpeech = energies
         energies++
     }
 

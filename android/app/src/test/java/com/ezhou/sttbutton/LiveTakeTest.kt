@@ -10,6 +10,7 @@ class LiveTakeTest {
     private class ScriptedRecognizer(vararg texts: String) : SliceRecognizer {
         private val queue = ArrayDeque(texts.toList())
         override fun recognize(samples: FloatArray) = queue.removeFirst()
+        override fun recognizeAfter(samples: FloatArray, junctionS: Double) = "." to queue.removeFirst()
     }
 
     private class UppercaseCleaner(private val onClean: (String) -> Unit = {}) : ChunkCleaner {
@@ -140,7 +141,7 @@ class LiveTakeTest {
 
         assertEquals("chunks", second.cleanMode)
         assertEquals(listOf("and bring the cake please thanks."), cleaner.calls)
-        assertEquals("AND BRING THE CAKE PLEASE THANKS.", second.cleaned)
+        assertEquals("AND BRING THE CAKE PLEASE THANKS", second.cleaned)
     }
 
     @Test
@@ -230,5 +231,111 @@ class LiveTakeTest {
         val take = pausedTake(cleaner, "Meet at noon, okay.", "")
         assertFalse(take.step())
         assertTrue(cleaner.calls.isEmpty())
+    }
+
+    private class MarkedRecognizer(private val first: String, vararg after: Pair<String, String>) : SliceRecognizer {
+        private val queue = ArrayDeque(after.toList())
+        override fun recognize(samples: FloatArray) = first
+        override fun recognizeAfter(samples: FloatArray, junctionS: Double) = queue.removeFirst()
+    }
+
+    private class SentenceCleaner : ChunkCleaner {
+        override fun countTokens(text: String) = Pipeline.wordCount(text)
+        override fun clean(chunk: String) = ChunkResult(chunk.replaceFirstChar { it.uppercase() }.removeSuffix(".") + ".", 1)
+        override fun cancel() = Unit
+    }
+
+    private val longCasualCfg = PipelineConfig(org.json.JSONObject(Fixtures.resource("pipeline.json")).apply { put("skip_max_words", 40) })
+
+    private fun segments(recognizer: SliceRecognizer, config: PipelineConfig, cleaner: ChunkCleaner = SentenceCleaner()): Pair<LiveResult, LiveResult> {
+        val take = LiveTake(recognizer, { cleaner }, config)
+        feedSegment(take, 1.5, 2.5)
+        while (take.step()) Unit
+        val first = take.finishSegment()
+        feedSegment(take, 1.5, 2.5)
+        while (take.step()) Unit
+        return first to take.finishSegment()
+    }
+
+    @Test
+    fun given_a_mid_sentence_pause_when_the_next_segment_is_decoded_then_it_continues_in_lower_case_with_no_period() {
+        val (first, second) = segments(MarkedRecognizer("Update the plan in this project to.", "" to "have some monitoring"), longCasualCfg)
+
+        assertEquals("Update the plan in this project to", first.cleaned)
+        assertEquals("have some monitoring", second.cleaned)
+        assertEquals(" ", second.prefix)
+    }
+
+    @Test
+    fun given_a_pause_that_ended_a_sentence_when_the_next_segment_is_decoded_then_the_period_comes_back_before_it() {
+        val (_, second) = segments(MarkedRecognizer("Update the plan.", "." to "Have some monitoring"), longCasualCfg)
+
+        assertEquals(". ", second.prefix)
+        assertEquals("Have some monitoring", second.cleaned)
+    }
+
+    @Test
+    fun given_a_comma_after_the_pause_when_the_take_is_casual_then_the_comma_is_dropped() {
+        val (_, second) = segments(MarkedRecognizer("Update the plan", "," to "and then"), longCasualCfg)
+
+        assertEquals(" ", second.prefix)
+    }
+
+    @Test
+    fun given_a_cleaned_segment_when_a_pause_ends_it_then_its_period_is_withheld_and_the_next_one_continues_in_lower_case() {
+        val (first, second) = segments(MarkedRecognizer("Update the plan in this project to.", "" to "have some monitoring now please"), cfg)
+
+        assertEquals("Update the plan in this project to", first.cleaned)
+        assertEquals("have some monitoring now please", second.cleaned)
+        assertEquals(" ", second.prefix)
+    }
+
+    @Test
+    fun given_a_withheld_question_mark_when_the_take_stops_in_silence_then_the_mark_is_inserted_alone() {
+        val take = LiveTake(MarkedRecognizer("Is it ready?"), { SentenceCleaner() }, longCasualCfg)
+        feedSegment(take, 1.5, 2.5)
+        while (take.step()) Unit
+        assertEquals("Is it ready", take.finishSegment().cleaned.removeSuffix("?"))
+        feedSegment(take, 0.0, 1.0)
+        val last = take.finish()
+
+        assertEquals("", last.cleaned)
+        assertEquals("?", last.prefix)
+    }
+
+    @Test
+    fun given_a_withheld_period_in_a_long_take_when_the_take_stops_in_silence_then_the_period_is_inserted_alone() {
+        val take = LiveTake(MarkedRecognizer("Update the plan in this project to."), { SentenceCleaner() }, cfg)
+        feedSegment(take, 1.5, 2.5)
+        while (take.step()) Unit
+        take.finishSegment()
+        feedSegment(take, 0.0, 1.0)
+        val last = take.finish()
+
+        assertEquals(".", last.prefix)
+    }
+
+    @Test
+    fun given_a_short_take_when_a_pause_ends_it_then_nothing_is_withheld_and_a_silent_stop_inserts_nothing() {
+        val take = LiveTake(MarkedRecognizer("Update the plan."), { SentenceCleaner() }, longCasualCfg)
+        feedSegment(take, 1.5, 2.5)
+        while (take.step()) Unit
+        assertEquals("Update the plan", take.finishSegment().cleaned)
+        feedSegment(take, 0.0, 1.0)
+
+        assertEquals("", take.finish().prefix)
+    }
+
+    @Test
+    fun given_a_context_decode_with_no_words_when_decoded_then_the_slice_is_recognized_plainly_and_counted() {
+        val recognizer = object : SliceRecognizer {
+            private var plain = 0
+            override fun recognize(samples: FloatArray) = if (plain++ == 0) "Update the plan" else "plain fallback"
+            override fun recognizeAfter(samples: FloatArray, junctionS: Double) = "" to ""
+        }
+        val (_, second) = segments(recognizer, longCasualCfg)
+
+        assertEquals("plain fallback", second.cleaned)
+        assertEquals(1, second.contextFallbacks)
     }
 }
