@@ -66,8 +66,8 @@ class SelfTest : Service() {
         val dir = File(context.filesDir, "selftest")
         val cfg = PipelineConfig(org.json.JSONObject(context.assets.open("pipeline.json").bufferedReader().readText()))
         val audio = readWav(File(dir, "$name.wav"))
-        val models = Models(context.filesDir, cfg)
-        val live = LiveTake(models.recognizer, models::cleaner, cfg)
+        val models = Models.forFiles(context.filesDir, cfg)
+        val live = LiveTake(models.recognizer, models::cleaner, cfg, prepareCleaner = models::prepareCleaner)
         val stopping = java.util.concurrent.atomic.AtomicBoolean(false)
         val worker = thread {
             while (!stopping.get()) if (!live.step()) Thread.sleep(25)

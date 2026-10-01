@@ -45,6 +45,7 @@ class LiveTake(
     private val cleaner: () -> ChunkCleaner,
     private val cfg: PipelineConfig,
     private val sink: TakeSink? = null,
+    private val prepareCleaner: (trigger: String) -> Unit = {},
 ) {
     val slicer = Slicer.fromConfig(cfg)
     private val pending = ArrayDeque<IntArray>()
@@ -60,12 +61,17 @@ class LiveTake(
     private var stopCleanMs = 0L
 
     @Volatile private var idleSpoken: Int? = null
+    private var timedLoadRequested = false
 
     val raw: String get() = Pipeline.joinSlices(texts)
 
     fun addSamples(samples: ShortArray, length: Int = samples.size) {
         val slices = slicer.feed(samples, length)
         if (slices.isNotEmpty()) synchronized(pending) { pending += slices }
+        if (!timedLoadRequested && slicer.sampleCount >= cfg.cleanerLoadAfterS * Slicer.SAMPLE_RATE) {
+            timedLoadRequested = true
+            prepareCleaner("time")
+        }
         val spoken = idleSpoken
         if (spoken != null && slicer.lastSpeechEnd != spoken) cleaner().cancel()
     }
@@ -76,6 +82,7 @@ class LiveTake(
         if (slices.isEmpty()) return idleStep()
         for (slice in slices) {
             recognize(slice)
+            if (!Pipeline.skipsCleaner(raw, cfg)) prepareCleaner("text")
             cleanClosed(final = false)
         }
         return true

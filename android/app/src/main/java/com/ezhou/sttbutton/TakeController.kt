@@ -66,8 +66,8 @@ class TakeController(private val service: DictationService, private val overlay:
         } catch (e: Exception) {
             Log.e(tag, "microphone foreground service refused", e)
         }
-        val models = Models(service.filesDir, cfg)
-        val live = LiveTake(models.recognizer, models::cleaner, cfg)
+        val models = Models.forFiles(service.filesDir, cfg)
+        val live = LiveTake(models.recognizer, models::cleaner, cfg, prepareCleaner = models::prepareCleaner)
         val pcm = File(takesDir, "${take.id}.pcm")
         val recorder = Recorder(pcm) { samples, length -> live.addSamples(samples, length) }
         val current = Run(take, pcm, models, live, recorder)

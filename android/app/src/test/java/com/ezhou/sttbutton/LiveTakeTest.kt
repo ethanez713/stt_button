@@ -73,6 +73,39 @@ class LiveTakeTest {
         assertEquals("raw", result.cleanMode)
     }
 
+    @Test
+    fun given_a_short_plain_take_when_run_then_the_cleaner_is_never_prepared() {
+        val triggers = mutableListOf<String>()
+        val take = LiveTake(ScriptedRecognizer("Meet at noon."), { error("not needed") }, cfg, prepareCleaner = { triggers += it })
+        take.addSamples(tone(3))
+        take.finish()
+
+        assertTrue(triggers.isEmpty())
+    }
+
+    @Test
+    fun given_audio_past_the_load_threshold_when_fed_then_the_cleaner_is_prepared_once_by_time() {
+        val triggers = mutableListOf<String>()
+        val take = LiveTake(ScriptedRecognizer("Meet at noon."), { error("not needed") }, cfg, prepareCleaner = { triggers += it })
+        take.addSamples(tone(5))
+        assertTrue(triggers.isEmpty())
+        take.addSamples(tone(2))
+        take.addSamples(tone(2))
+
+        assertEquals(listOf("time"), triggers)
+    }
+
+    @Test
+    fun given_a_cue_in_a_landed_slice_when_stepped_then_the_cleaner_is_prepared_by_text() {
+        val triggers = mutableListOf<String>()
+        val cleaner = UppercaseCleaner()
+        val take = LiveTake(ScriptedRecognizer("Tuesday actually Wednesday."), { cleaner }, cfg, prepareCleaner = { triggers += it })
+        take.addSamples(audio(1.5, 1.5))
+        take.step()
+
+        assertEquals(listOf("text"), triggers)
+    }
+
     private fun pausedTake(cleaner: UppercaseCleaner, vararg texts: String): LiveTake {
         val take = LiveTake(ScriptedRecognizer(*texts), { cleaner }, cfg)
         take.addSamples(audio(3.0, 3.0))

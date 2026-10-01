@@ -8,8 +8,13 @@ import com.k2fsa.sherpa.onnx.OfflineRecognizerConfig
 import com.k2fsa.sherpa.onnx.OfflineTransducerModelConfig
 import java.io.File
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.atomic.AtomicBoolean
 
-class ParakeetRecognizer(filesDir: File, threads: Int = LlamaCleaner.THREADS) : SliceRecognizer, AutoCloseable {
+interface ClosableRecognizer : SliceRecognizer, AutoCloseable
+
+interface ClosableCleaner : ChunkCleaner, AutoCloseable
+
+class ParakeetRecognizer(filesDir: File, threads: Int = LlamaCleaner.THREADS) : ClosableRecognizer {
     private val recognizer: OfflineRecognizer
 
     init {
@@ -44,7 +49,7 @@ class ParakeetRecognizer(filesDir: File, threads: Int = LlamaCleaner.THREADS) : 
     override fun close() = recognizer.release()
 }
 
-class LlamaChunkCleaner(private val llama: LlamaCleaner, private val cfg: PipelineConfig) : ChunkCleaner, AutoCloseable {
+class LlamaChunkCleaner(private val llama: LlamaCleaner, private val cfg: PipelineConfig) : ClosableCleaner {
     @Volatile private var cancelRequested = false
 
     override fun countTokens(text: String) = llama.countTokens(text)
@@ -74,23 +79,38 @@ class LlamaChunkCleaner(private val llama: LlamaCleaner, private val cfg: Pipeli
 }
 
 /**
- * The models of one take, loaded on a background thread from the moment the take opens and released
- * when its text is inserted or the take is discarded. Users block until their model is ready.
+ * The models of one take, released when its text is inserted or the take is discarded. The recognizer
+ * loads as the take opens, so a short take waits only for it. The cleaner loads on [prepareCleaner],
+ * which the take calls once it runs long or its text needs cleaning; a user of the cleaner before then
+ * triggers the load and blocks until it is ready.
  */
-class Models(private val filesDir: File, private val cfg: PipelineConfig) : AutoCloseable {
-    private val ready = CountDownLatch(1)
-    @Volatile private var recognizerModel: ParakeetRecognizer? = null
-    @Volatile private var cleanerModel: LlamaChunkCleaner? = null
-    @Volatile private var failure: Throwable? = null
+class Models(
+    private val loadRecognizer: () -> ClosableRecognizer,
+    private val loadCleaner: () -> ClosableCleaner,
+    private val log: (String) -> Unit = { Log.i(DictationService.TAG, it) },
+) : AutoCloseable {
+    private val recognizerReady = CountDownLatch(1)
+    private val cleanerReady = CountDownLatch(1)
+    private val cleanerRequested = AtomicBoolean(false)
+    @Volatile private var recognizerModel: ClosableRecognizer? = null
+    @Volatile private var cleanerModel: ClosableCleaner? = null
+    @Volatile private var recognizerFailure: Throwable? = null
+    @Volatile private var cleanerFailure: Throwable? = null
     @Volatile private var closed = false
+    private var cleanerLoader: Thread? = null
 
     val recognizer = object : SliceRecognizer {
-        override fun recognize(samples: FloatArray) = await { recognizerModel!! }.recognize(samples)
+        override fun recognize(samples: FloatArray): String {
+            recognizerReady.await()
+            recognizerFailure?.let { throw IllegalStateException("recognizer failed to load", it) }
+            check(!closed) { "models released" }
+            return recognizerModel!!.recognize(samples)
+        }
     }
 
     private val cleanerProxy = object : ChunkCleaner {
-        override fun countTokens(text: String) = await { cleanerModel!! }.countTokens(text)
-        override fun clean(chunk: String) = await { cleanerModel!! }.clean(chunk)
+        override fun countTokens(text: String) = awaitCleaner().countTokens(text)
+        override fun clean(chunk: String) = awaitCleaner().clean(chunk)
         override fun cancel() {
             cleanerModel?.cancel()
         }
@@ -98,33 +118,67 @@ class Models(private val filesDir: File, private val cfg: PipelineConfig) : Auto
 
     fun cleaner(): ChunkCleaner = cleanerProxy
 
-    private val loader = Thread {
+    private val recognizerLoader = Thread {
         try {
             val started = System.nanoTime()
-            recognizerModel = ParakeetRecognizer(filesDir)
-            cleanerModel = LlamaChunkCleaner(LlamaCleaner(File(filesDir, ModelFiles.S1_MINI).path), cfg)
-            Log.i(DictationService.TAG, "models loaded in ${(System.nanoTime() - started) / 1_000_000} ms")
+            recognizerModel = loadRecognizer()
+            log("recognizer loaded ms=${(System.nanoTime() - started) / 1_000_000}")
         } catch (e: Throwable) {
-            failure = e
-            Log.e(DictationService.TAG, "model load failed", e)
+            recognizerFailure = e
+            Log.e(DictationService.TAG, "recognizer load failed", e)
         } finally {
-            ready.countDown()
+            recognizerReady.countDown()
         }
-    }.apply { name = "model-loader"; start() }
+    }.apply { name = "recognizer-loader"; start() }
 
-    private fun <T> await(model: () -> T): T {
-        ready.await()
-        failure?.let { throw IllegalStateException("models failed to load", it) }
+    /** Starts loading the cleaner if nothing has; [trigger] is logged by the call that starts it. */
+    fun prepareCleaner(trigger: String) {
+        if (!cleanerRequested.compareAndSet(false, true)) return
+        synchronized(this) {
+            if (closed) {
+                cleanerReady.countDown()
+                return
+            }
+            cleanerLoader = Thread {
+                try {
+                    val started = System.nanoTime()
+                    cleanerModel = loadCleaner()
+                    log("cleaner loaded ms=${(System.nanoTime() - started) / 1_000_000} trigger=$trigger")
+                } catch (e: Throwable) {
+                    cleanerFailure = e
+                    Log.e(DictationService.TAG, "cleaner load failed", e)
+                } finally {
+                    cleanerReady.countDown()
+                }
+            }.apply { name = "cleaner-loader"; start() }
+        }
+    }
+
+    private fun awaitCleaner(): ClosableCleaner {
+        prepareCleaner("stop")
+        cleanerReady.await()
+        cleanerFailure?.let { throw IllegalStateException("cleaner failed to load", it) }
         check(!closed) { "models released" }
-        return model()
+        return cleanerModel!!
     }
 
     override fun close() {
-        loader.join()
-        closed = true
+        val loader = synchronized(this) {
+            closed = true
+            cleanerLoader
+        }
+        recognizerLoader.join()
+        loader?.join()
         recognizerModel?.close()
         cleanerModel?.close()
         recognizerModel = null
         cleanerModel = null
+    }
+
+    companion object {
+        fun forFiles(filesDir: File, cfg: PipelineConfig) = Models(
+            { ParakeetRecognizer(filesDir) },
+            { LlamaChunkCleaner(LlamaCleaner(File(filesDir, ModelFiles.S1_MINI).path), cfg) },
+        )
     }
 }
