@@ -193,7 +193,7 @@ def work(pcm: Path) -> None:
                 "audio_s": round(audio_s, 2), "asr_ms_after_stop": result.asr_ms_after_stop,
                 "clean_ms": live.clean_ms, "clean_ms_after_stop": result.clean_ms_after_stop,
                 "stop_to_result_ms": stop_to_result_ms, "clean_mode": result.clean_mode, "chunks": result.chunks,
-                "idle_cleans": result.idle_cleans, "idle_hits": result.idle_hits,
+                "idle_cleans": result.idle_cleans, "idle_hits": result.idle_hits, "cue": result.cue,
                 "cleaner_backend": loaded.get("backend"),
                 "raw": result.raw, "cleaned": result.cleaned,
             }, ensure_ascii=False) + "\n")

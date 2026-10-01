@@ -79,14 +79,14 @@ def live_chunks(text: str, count_tokens: Callable[[str], int], min_tokens: int, 
     return chunks
 
 
-def has_self_correction(text: str, cues: list[str]) -> bool:
+def matched_cue(text: str, cues: list[str]) -> str | None:
     spoken = re.sub(r"[^\w\s]", "", text.lower())
-    return any(re.search(r"(?<![a-z])" + r"\s+".join(map(re.escape, cue.split())) + r"(?![a-z])", spoken)
-               for cue in cues)
+    return next((cue for cue in cues
+                 if re.search(r"(?<![a-z])" + r"\s+".join(map(re.escape, cue.split())) + r"(?![a-z])", spoken)), None)
 
 
 def skips_cleaner(text: str, cfg: dict) -> bool:
-    return len(text.split()) <= cfg["skip_max_words"] and not has_self_correction(text, cfg["self_correction_cues"])
+    return len(text.split()) <= cfg["skip_max_words"] and matched_cue(text, cfg["self_correction_cues"]) is None
 
 
 def casual(text: str, cfg: dict) -> str:

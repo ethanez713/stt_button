@@ -1117,51 +1117,63 @@
   "cases": [
    {
     "text": "",
-    "skipped": true
+    "skipped": true,
+    "cue": null
    },
    {
     "text": "Yes.",
-    "skipped": true
+    "skipped": true,
+    "cue": null
    },
    {
     "text": "meet Tuesday, actually no, Wednesday",
-    "skipped": false
+    "skipped": false,
+    "cue": "actually"
    },
    {
     "text": "Dinner is at seven I mean eight",
-    "skipped": false
+    "skipped": false,
+    "cue": "i mean"
    },
    {
     "text": "a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a ",
-    "skipped": false
+    "skipped": false,
+    "cue": null
    },
    {
     "text": "a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a ",
-    "skipped": true
+    "skipped": true,
+    "cue": null
    },
    {
     "text": "this is a cannot be rather odd",
-    "skipped": false
+    "skipped": false,
+    "cue": "rather"
    },
    {
     "text": "the knot was nothing",
-    "skipped": true
+    "skipped": true,
+    "cue": null
    },
    {
     "text": "Okay. Wait, what?",
-    "skipped": false
+    "skipped": false,
+    "cue": "wait"
    },
    {
     "text": "Not apples, pears?",
-    "skipped": false
+    "skipped": false,
+    "cue": "not"
    },
    {
     "text": "555-010 no 555-010-7896",
-    "skipped": false
+    "skipped": false,
+    "cue": "no"
    },
    {
     "text": "Tuesday? Actually make that Wednesday",
-    "skipped": false
+    "skipped": false,
+    "cue": "actually"
    }
   ]
  }

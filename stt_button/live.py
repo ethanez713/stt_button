@@ -10,7 +10,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from stt_button.asr import SAMPLE_RATE, Slicer, join_slices
-from stt_button.cleaner import casual, live_chunks, skips_cleaner
+from stt_button.cleaner import casual, live_chunks, matched_cue, skips_cleaner
 
 
 @dataclass
@@ -23,6 +23,7 @@ class LiveResult:
     clean_ms_after_stop: int
     idle_cleans: int = 0
     idle_hits: int = 0
+    cue: str | None = None
 
 
 IDLE_POLL_S = 0.05
@@ -109,7 +110,7 @@ class LiveTake:
         cleaned = "\n\n".join(o for o in (self.cleaned_chunks[c] for c in chunks) if o)
         return LiveResult(raw, casual(cleaned, self.cfg), len(chunks), "chunks", self.asr_ms - self._stop_asr_ms,
                           self.clean_ms - self._stop_clean_ms, self.idle_cleans,
-                          sum(c in self.idle_chunks for c in chunks))
+                          sum(c in self.idle_chunks for c in chunks), matched_cue(raw, self.cfg["self_correction_cues"]))
 
     def _recognize(self, start: int, end: int) -> None:
         started = time.monotonic()

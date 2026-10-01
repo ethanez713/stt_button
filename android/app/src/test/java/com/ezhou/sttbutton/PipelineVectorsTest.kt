@@ -55,6 +55,8 @@ class PipelineVectorsTest {
         assertEquals(Fixtures.config.skipMaxWords, skips.getInt("skip_max_words"))
         for (case in Fixtures.objects(skips.getJSONArray("cases"))) {
             assertEquals(case.getString("text"), case.getBoolean("skipped"), Pipeline.skipsCleaner(case.getString("text"), Fixtures.config))
+            val cue = if (case.isNull("cue")) null else case.getString("cue")
+            assertEquals(case.getString("text"), cue, Pipeline.matchedCue(case.getString("text"), Fixtures.config.selfCorrectionCues))
         }
     }
 

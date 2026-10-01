@@ -33,6 +33,7 @@ class LiveResult(
     val outTokens: Int,
     val idleCleans: Int,
     val idleHits: Int,
+    val cue: String?,
 )
 
 /**
@@ -96,7 +97,7 @@ class LiveTake(
 
     private fun result(raw: String, cleaned: String, chunks: Int, mode: String, idleHits: Int) = LiveResult(
         raw, cleaned, chunks, mode, asrMs, cleanMs, asrMs - stopAsrMs, cleanMs - stopCleanMs,
-        inTokens, outTokens, idleCleans, idleHits,
+        inTokens, outTokens, idleCleans, idleHits, Pipeline.matchedCue(raw, cfg.selfCorrectionCues),
     )
 
     private fun takePending(): List<IntArray> = synchronized(pending) { pending.toList().also { pending.clear() } }

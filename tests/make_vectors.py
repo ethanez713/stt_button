@@ -13,7 +13,7 @@ import numpy as np
 
 from stt_button import asr, config
 from stt_button.bubble import Bubble
-from stt_button.cleaner import casual, live_chunks, skips_cleaner
+from stt_button.cleaner import casual, live_chunks, matched_cue, skips_cleaner
 
 FIXTURE = Path(__file__).parent / "fixtures" / "pipeline_vectors.json"
 SR = asr.SAMPLE_RATE
@@ -133,7 +133,8 @@ def vectors() -> dict:
         "skips_cleaner": {
             "skip_max_words": cfg["skip_max_words"],
             "self_correction_cues": cfg["self_correction_cues"],
-            "cases": [{"text": t, "skipped": skips_cleaner(t, cfg)} for t in SKIP_TEXTS],
+            "cases": [{"text": t, "skipped": skips_cleaner(t, cfg), "cue": matched_cue(t, cfg["self_correction_cues"])}
+                      for t in SKIP_TEXTS],
         },
     }
 

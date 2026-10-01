@@ -45,16 +45,16 @@ object Pipeline {
 
     fun wordCount(text: String): Int = text.trim().split(WHITESPACE).count { it.isNotEmpty() }
 
-    fun hasSelfCorrection(text: String, cues: List<String>): Boolean {
+    fun matchedCue(text: String, cues: List<String>): String? {
         val spoken = NOT_SPOKEN.replace(text.lowercase(), "")
-        return cues.any { cue ->
+        return cues.firstOrNull { cue ->
             val words = cue.trim().split(WHITESPACE).joinToString("\\s+") { Regex.escape(it) }
             Regex("(?<![a-z])$words(?![a-z])").containsMatchIn(spoken)
         }
     }
 
     fun skipsCleaner(text: String, cfg: PipelineConfig): Boolean =
-        wordCount(text) <= cfg.skipMaxWords && !hasSelfCorrection(text, cfg.selfCorrectionCues)
+        wordCount(text) <= cfg.skipMaxWords && matchedCue(text, cfg.selfCorrectionCues) == null
 
     /** Mirrors `stt_button.cleaner.casual`. */
     fun casual(text: String, cfg: PipelineConfig): String =
