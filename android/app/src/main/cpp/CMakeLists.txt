@@ -19,3 +19,5 @@ add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../../../../third_party/llama.cpp l
 
 add_library(cleaner_jni SHARED cleaner_jni.cpp)
 target_link_libraries(cleaner_jni llama log)
+# Devices with 16 KB pages refuse libraries whose segments are aligned to the NDK 26 default of 4 KB.
+target_link_options(cleaner_jni PRIVATE "-Wl,-z,max-page-size=16384")
