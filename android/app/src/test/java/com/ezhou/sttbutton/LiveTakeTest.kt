@@ -100,7 +100,7 @@ class LiveTakeTest {
         val triggers = mutableListOf<String>()
         val cleaner = UppercaseCleaner()
         val take = LiveTake(ScriptedRecognizer("Tuesday actually Wednesday."), { cleaner }, cfg, prepareCleaner = { triggers += it })
-        take.addSamples(audio(1.5, 1.5))
+        take.addSamples(audio(1.5, 2.0))
         take.step()
 
         assertEquals(listOf("text"), triggers)

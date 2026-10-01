@@ -173,3 +173,18 @@ class TestLiveTimeline:
         assert lt.live([(0.0, 3.0, "On my way.")], word_tokens, k=64) == lt.asr_s(3.0)
         corrected = [(0.0, 3.0, "Tuesday, actually no, Wednesday.")]
         assert lt.live(corrected, word_tokens, k=64) > lt.asr_s(3.0)
+
+
+class TestBoundaryPunct:
+    def test_a_false_break_and_its_capital_are_counted_and_j_fixes_the_capital_only_without_a_break(self):
+        from experiments.boundary_punct import boundary_counts
+        reference = "we can always update that later and then it works"
+        counts = boundary_counts(["we can always update.", "That later and then it works"], reference)
+        assert counts["breaks"] == 1 and counts["caps"] == 1 and counts["caps_after_j"] == 1
+        counts = boundary_counts(["we can always update", "That later and then it works"], reference)
+        assert counts["breaks"] == 0 and counts["j_fixed"] == 1
+
+    def test_a_capital_the_reference_shares_is_a_j_harm_not_an_error(self):
+        from experiments.boundary_punct import boundary_counts
+        counts = boundary_counts(["send it to", "Paris today"], "send it to Paris today")
+        assert counts["caps"] == 0 and counts["j_harms"] == 1
