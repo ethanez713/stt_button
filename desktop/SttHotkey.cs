@@ -252,34 +252,31 @@ class HotkeyWindow : Form {
 
     void Paste(string text) {
         if (string.IsNullOrEmpty(text)) return;
-        IDataObject saved = CopyClipboard();
         Clipboard.SetText(text);
         // Sending Ctrl+V while the hotkey's Ctrl/Alt/Shift are still held would type Ctrl+Alt+V.
         while (Held(VK_CONTROL) || Held(VK_MENU) || Held(VK_SHIFT)) Thread.Sleep(20);
         bool refocused = false;
         if (target != IntPtr.Zero && GetForegroundWindow() != target) refocused = SetForegroundWindow(target);
+        // Windows Terminal here has Ctrl+V unbound, so a plain Ctrl+V reaches Claude Code, which reads the clipboard
+        // through two powershell.exe launches; Ctrl+Shift+V is read by the terminal itself, at once.
+        bool shift = ProcessName(target) == "WindowsTerminal";
+        INPUT[] keys = PasteChord(shift);
         // SendInput rather than SendKeys: SendKeys' journal-hook path can drop input on current Windows.
-        INPUT[] keys = { Key(VK_CONTROL, 0), Key(VK_V, 0), Key(VK_V, KEYEVENTF_KEYUP), Key(VK_CONTROL, KEYEVENTF_KEYUP) };
         uint sent = SendInput((uint)keys.Length, keys, Marshal.SizeOf(typeof(INPUT)));
-        Log(string.Format("paste target={0} refocused={1} foreground={2} sent={3}/4 err={4}",
-            ProcessName(target), refocused, ProcessName(GetForegroundWindow()), sent, Marshal.GetLastWin32Error()));
-        if (sent != keys.Length) indicator.Flash("\u26A0 Ctrl+V was blocked; the text is on the clipboard");
-        // Long enough for slow apps (terminals, Electron) to read the clipboard before it is restored.
-        var restore = new System.Windows.Forms.Timer { Interval = 1500 };
-        restore.Tick += (s, e) => {
-            restore.Stop();
-            try {
-                if (saved != null) {
-                    // Without these, the restore re-enters Win+V history as a duplicate of the old clip.
-                    saved.SetData("CanIncludeInClipboardHistory", new MemoryStream(BitConverter.GetBytes(0)));
-                    saved.SetData("CanUploadToCloudClipboard", new MemoryStream(BitConverter.GetBytes(0)));
-                    Clipboard.SetDataObject(saved, true);
-                } else {
-                    Clipboard.Clear();
-                }
-            } catch (ExternalException) { }
-        };
-        restore.Start();
+        Log(string.Format("paste target={0} refocused={1} foreground={2} chord={3} sent={4}/{5} err={6}",
+            ProcessName(target), refocused, ProcessName(GetForegroundWindow()), shift ? "ctrl+shift+v" : "ctrl+v",
+            sent, keys.Length, Marshal.GetLastWin32Error()));
+        if (sent != keys.Length) indicator.Flash("\u26A0 Paste was blocked; the text is on the clipboard");
+    }
+
+    static INPUT[] PasteChord(bool shift) {
+        var keys = new List<INPUT> { Key(VK_CONTROL, 0) };
+        if (shift) keys.Add(Key(VK_SHIFT, 0));
+        keys.Add(Key(VK_V, 0));
+        keys.Add(Key(VK_V, KEYEVENTF_KEYUP));
+        if (shift) keys.Add(Key(VK_SHIFT, KEYEVENTF_KEYUP));
+        keys.Add(Key(VK_CONTROL, KEYEVENTF_KEYUP));
+        return keys.ToArray();
     }
 
     static bool Held(ushort vk) { return (GetAsyncKeyState(vk) & 0x8000) != 0; }
@@ -302,24 +299,6 @@ class HotkeyWindow : Form {
         try {
             File.AppendAllText(logPath, DateTime.Now.ToString("s") + " " + line + Environment.NewLine);
         } catch (IOException) { }
-    }
-
-    // The live clipboard object goes stale once replaced, so copy each format out first.
-    static IDataObject CopyClipboard() {
-        try {
-            IDataObject live = Clipboard.GetDataObject();
-            if (live == null) return null;
-            var copy = new DataObject();
-            foreach (string format in live.GetFormats(false)) {
-                try {
-                    object data = live.GetData(format, false);
-                    if (data != null) copy.SetData(format, false, data);
-                } catch (Exception) { }
-            }
-            return copy.GetFormats().Length > 0 ? copy : null;
-        } catch (ExternalException) {
-            return null;
-        }
     }
 }
 
