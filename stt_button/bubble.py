@@ -98,5 +98,9 @@ class SharedBubble(Bubble):
             return
         partial = self.path.with_suffix(".tmp")
         partial.write_text(json.dumps({"settled": settled, "preview": preview}, ensure_ascii=False))
-        partial.replace(self.path)
+        try:
+            partial.replace(self.path)
+        except PermissionError:
+            # Windows refuses the rename while the helper has the file open; the next write retries.
+            return
         self._written, self._last_write = (settled, preview), now

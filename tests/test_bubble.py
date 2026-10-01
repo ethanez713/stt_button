@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 from stt_button.bubble import Bubble, SharedBubble, words_from_tokens
 
@@ -43,3 +44,23 @@ def test_given_updates_when_shared_then_the_file_holds_the_latest_text(tmp_path)
     bubble.preview([("hello", 0.5), ("there", 1.5)])
 
     assert json.loads(path.read_text()) == {"settled": "Hello.", "preview": "there"}
+
+
+def test_given_the_file_is_held_open_when_a_write_collides_then_it_is_skipped_and_the_next_write_lands(tmp_path, monkeypatch):
+    path = tmp_path / "t.bubble.json"
+    bubble = SharedBubble(path, min_interval_s=0)
+    real_replace = Path.replace
+    refusals = []
+
+    def replace_refused_once(self, target):
+        if not refusals:
+            refusals.append(target)
+            raise PermissionError(13, "Permission denied")
+        return real_replace(self, target)
+
+    monkeypatch.setattr(Path, "replace", replace_refused_once)
+    bubble.preview([("hello", 0.5)])
+    assert not path.exists()
+
+    bubble.preview([("hello", 0.5), ("there", 1.5)])
+    assert json.loads(path.read_text()) == {"settled": "", "preview": "hello there"}

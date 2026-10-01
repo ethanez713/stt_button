@@ -195,7 +195,9 @@ class HotkeyWindow : Form {
         if (bubblePath == null) return false;
         string json;
         try {
-            json = File.ReadAllText(bubblePath, Encoding.UTF8);
+            using (var stream = new FileStream(bubblePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+            using (var reader = new StreamReader(stream, Encoding.UTF8))
+                json = reader.ReadToEnd();
         } catch (IOException) {
             return bubbleShown != null;
         }
