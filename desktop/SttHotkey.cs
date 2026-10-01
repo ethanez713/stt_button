@@ -67,8 +67,9 @@ class HotkeyWindow : Form {
     const int TAKE_CAP_MS = 300 * 1000;
     // Long enough for Claude Code to have collapsed the first paste into its placeholder.
     const int PASTE_AGAIN_MS = 400;
-    // Claude Code titles its terminal "<glyph> <topic>"; the glyph is the idle mark or a spinner frame.
-    const string CLAUDE_TITLE_GLYPHS = "\u2733\u00B7\u2722\u2736\u273B\u273D";
+    // Claude Code titles its terminal "<glyph> <topic>", and claude-autoresume swaps the glyph for any session's state
+    // (idle, spinner frame, ask, subagents, limit). Braille is left out: it is Grok's spinner.
+    const string CLAUDE_TITLE_GLYPHS = "\u2733\u00B7*\u2722\u2736\u273B\u273D\u25D0\u25D1\u2757\u25CB\u29D7";
     // After a take the mic stays open this long, so the next take starts without opening the device.
     const int MIC_WARM_MS = 5 * 60 * 1000;
 
@@ -267,11 +268,13 @@ class HotkeyWindow : Form {
         // Windows Terminal here has Ctrl+V unbound, so a plain Ctrl+V reaches Claude Code, which reads the clipboard
         // through two powershell.exe launches; Ctrl+Shift+V is read by the terminal itself, at once.
         bool terminal = ProcessName(target) == "WindowsTerminal";
-        bool again = terminal && IsClaudeCode(WindowTitle(target)) && ClaudeCollapses(text);
+        string title = terminal ? WindowTitle(target) : "";
+        bool again = terminal && IsClaudeCode(title) && ClaudeCollapses(text);
         uint sent = SendChord(terminal);
-        Log(string.Format("paste target={0} refocused={1} foreground={2} chord={3} sent={4} claude={5} pastes={6}",
+        Log(string.Format("paste target={0} refocused={1} foreground={2} chord={3} sent={4} claude={5} pastes={6} glyph={7}",
             ProcessName(target), refocused, ProcessName(GetForegroundWindow()), terminal ? "ctrl+shift+v" : "ctrl+v",
-            sent == 0 ? "blocked" : "ok", again, again ? 2 : 1));
+            sent == 0 ? "blocked" : "ok", again, again ? 2 : 1,
+            title.Length > 0 ? "U+" + ((int)title[0]).ToString("X4") : "-"));
         if (sent == 0) indicator.Flash("\u26A0 Paste was blocked; the text is on the clipboard");
         if (!again) return;
         // A second identical paste expands Claude Code's "[Pasted text]" placeholder in place.
