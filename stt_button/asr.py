@@ -1,4 +1,5 @@
 import bisect
+import re
 import time
 import wave
 from dataclasses import dataclass
@@ -55,6 +56,7 @@ class Slicer:
         self._energies = 0
         self._sorted: list[int] = []
         self._last_speech: int | None = None
+        self._speech: list[bool] = []
 
     @classmethod
     def from_config(cls, cfg: dict) -> "Slicer":
@@ -71,6 +73,20 @@ class Slicer:
     def last_speech_end(self) -> int | None:
         """Sample offset where the last non-silent window ended."""
         return None if self._last_speech is None else (self._last_speech + 1) * self.win
+
+    def speech_before(self, sample: int) -> int | None:
+        """Sample offset where the last non-silent window that ends at or before sample ends."""
+        last = min(sample // self.win, len(self._speech)) - 1
+        while last >= 0 and not self._speech[last]:
+            last -= 1
+        return None if last < 0 else (last + 1) * self.win
+
+    def speech_after(self, sample: int) -> int | None:
+        """Sample offset where the first non-silent window that starts at or after sample starts."""
+        for index in range(-(-sample // self.win), len(self._speech)):
+            if self._speech[index]:
+                return index * self.win
+        return None
 
     def feed(self, chunk: np.ndarray) -> list[tuple[int, int]]:
         """Append audio; return the slices it completed, as (start, end) sample offsets."""
@@ -93,7 +109,8 @@ class Slicer:
         energy = int(np.square(pcm).sum())
         bisect.insort(self._sorted, energy)
         floor = max(self._sorted[(len(self._sorted) - 1) // 10], self.floor_min)
-        if energy >= floor * self.margin:
+        self._speech.append(energy >= floor * self.margin)
+        if self._speech[-1]:
             self._last_speech = self._energies
         self._energies += 1
 
@@ -151,11 +168,14 @@ class Recognizer:
             decoding_method="greedy_search",
         )
 
-    def recognize(self, samples: np.ndarray) -> str:
+    def decode(self, samples: np.ndarray):
         stream = self._recognizer.create_stream()
         stream.accept_waveform(SAMPLE_RATE, samples)
         self._recognizer.decode_stream(stream)
-        return stream.result.text.strip()
+        return stream.result
+
+    def recognize(self, samples: np.ndarray) -> str:
+        return self.decode(samples).text.strip()
 
     def transcribe(self, wav_path: str | Path) -> RawTranscript:
         started = time.monotonic()
@@ -164,6 +184,35 @@ class Recognizer:
         bounds = slicer.feed(samples) + slicer.finish()
         texts = [self.recognize(samples[start:end]) for start, end in bounds]
         return RawTranscript(join_slices(texts), int((time.monotonic() - started) * 1000))
+
+
+CONTEXT_LEAD_S = 0.1
+_TRAILING_MARK = re.compile(r"[.,?!;:]$")
+
+
+def context_audio(samples: np.ndarray, speech_before: int, speech_after: int, end: int, context_s: float,
+                  squeeze_s: float | None) -> tuple[np.ndarray, float]:
+    """The audio to decode for a slice that follows a pause: the last context_s of speech before the
+    pause, the pause (squeezed to squeeze_s of its own audio, or whole when None), then the slice from
+    just before its first speech to end. Returns it with the time at which the slice's own speech begins."""
+    lead = int(CONTEXT_LEAD_S * SAMPLE_RATE)
+    before = samples[max(0, speech_before - int(context_s * SAMPLE_RATE)):speech_before]
+    after_start = max(speech_before, speech_after - lead)
+    gap = samples[speech_before:after_start]
+    if squeeze_s is not None:
+        gap = gap[:int(squeeze_s * SAMPLE_RATE)]
+    audio = np.concatenate([before, gap, samples[after_start:end]])
+    return audio, (len(before) + len(gap)) / SAMPLE_RATE
+
+
+def split_at_junction(tokens: list[str], timestamps: list[float], junction_s: float) -> tuple[str, str]:
+    """(punctuation the context ended with, the words from the junction on) of a context decode."""
+    from stt_button.bubble import words_from_tokens
+
+    words = words_from_tokens(tokens, timestamps)
+    context = [w for w, t in words if t < junction_s]
+    mark = _TRAILING_MARK.search(context[-1]) if context else None
+    return (mark.group() if mark else ""), " ".join(w for w, t in words if t >= junction_s)
 
 
 def join_slices(texts: list[str]) -> str:
