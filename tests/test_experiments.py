@@ -3,6 +3,7 @@ import json
 import pytest
 
 from experiments import chunk_clean, paths, report_asr, report_clean, vote
+from stt_button.config import REPO
 
 
 def arm(wer_nonum, rtf):
@@ -140,14 +141,16 @@ class TestVotePaths:
         assert other == (tmp_path / "chunk128_key.json").resolve()
         assert not other.exists()
 
+    def test_arms_inside_the_repo_are_labelled_relative_to_it(self):
+        outputs, _, _ = vote.resolve_vote(REPO / "data/x/whole", REPO / "data/x/chunk", REPO / "data/x/v.jsonl")
+        assert list(outputs) == ["data/x/whole", "data/x/chunk"]
+
     def test_a_b_and_votes_must_be_given_together(self, tmp_path):
         with pytest.raises(SystemExit, match="together"):
             vote.resolve_vote(tmp_path / "a", None, None)
 
 
 def test_vote_tally_maps_letters_to_arms(capsys):
-    from experiments import vote
-
     key = {"labels": {"x": {"A": "/d/whole", "B": "/d/chunk64"}, "y": {"A": "/d/chunk64", "B": "/d/whole"}}}
     vote.print_tally(key, [{"id": "x", "choice": "b"}, {"id": "y", "choice": "a"}, {"id": "z", "choice": "t"}])
     assert capsys.readouterr().out.strip() == "chunk64 2, whole 0, tie 1"

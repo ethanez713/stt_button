@@ -14,6 +14,7 @@ from pathlib import Path
 
 from experiments import paths
 from stt_button import config
+from stt_button.config import REPO
 
 ARMS = ("s1-mini", "qwen3.5-2b")
 SEED = 20260927
@@ -60,7 +61,12 @@ def resolve_vote(
     if a is None or b is None or votes is None:
         sys.exit("--a, --b and --votes must be given together")
     a, b, votes = a.resolve(), b.resolve(), votes.resolve()
-    return {str(a): a, str(b): b}, votes, votes.with_name(votes.stem + "_key.json")
+    return {arm_label(a): a, arm_label(b): b}, votes, votes.with_name(votes.stem + "_key.json")
+
+
+def arm_label(directory: Path) -> str:
+    """Relative to the repo, so a blind key still resolves after the repo moves."""
+    return str(directory.relative_to(REPO)) if directory.is_relative_to(REPO) else str(directory)
 
 
 def pending(key: dict, votes: list[dict]) -> list[str]:
@@ -82,8 +88,10 @@ def main() -> int:
     ids = sorted(p.stem for p in outputs[arm_a].glob("*.txt") if (outputs[arm_b] / p.name).exists())
     if args.a is not None:
         # Identical outputs have nothing to choose between.
-        read = lambda arm, i: (outputs[arm] / f"{i}.txt").read_text().strip()
-        ids = [i for i in ids if read(arm_a, i) != read(arm_b, i)]
+        def output(arm: str, i: str) -> str:
+            return (outputs[arm] / f"{i}.txt").read_text().strip()
+
+        ids = [i for i in ids if output(arm_a, i) != output(arm_b, i)]
     if not ids:
         if args.a is None:
             sys.exit("no cleaned rambles from both arms; run experiments.clean_bakeoff first")

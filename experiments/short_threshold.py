@@ -19,7 +19,7 @@ BANDS = [(1, 5), (6, 10), (11, 20), (21, 40), (41, 10**9)]
 
 
 def bare_words(text: str) -> list[str]:
-    return [w for w in re.sub(r"[^\w\s']", " ", text.lower()).split()]
+    return re.sub(r"[^\w\s']", " ", text.lower()).split()
 
 
 def classify(raw: str, cleaned: str) -> str:
