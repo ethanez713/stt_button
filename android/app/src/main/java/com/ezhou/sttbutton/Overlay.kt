@@ -33,6 +33,18 @@ class Overlay(
 
     val isDragged: Boolean get() = prefs.contains(KEY_X)
     val isHidden: Boolean get() = isHidden(context)
+    val isShowing: Boolean get() = view != null
+
+    /** Where the microphone last settled with this screen size, or null before the first settle. */
+    fun rememberedBounds(): Bounds? =
+        prefs.getString(settledKey(), null)?.split(",")?.mapNotNull(String::toIntOrNull)
+            ?.takeIf { it.size == 4 }?.let { Bounds(it[0], it[1], it[2], it[3]) }
+
+    fun remember(bounds: Bounds) {
+        prefs.edit().putString(settledKey(), "${bounds.left},${bounds.top},${bounds.right},${bounds.bottom}").apply()
+    }
+
+    private fun settledKey(): String = screen().let { "settled_${it.width()}x${it.height()}" }
 
     fun show(bounds: Rect) {
         val dragged = draggedPosition()

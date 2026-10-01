@@ -5,6 +5,7 @@ import android.database.ContentObserver
 import android.graphics.Rect
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.provider.Settings
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
@@ -22,6 +23,9 @@ class DictationService : AccessibilityService() {
     private var english: Boolean? = null
     private var lastState: String? = null
     private var imeTreeLoggedFor: Int? = null
+    private val placement = MicPlacement()
+    private val handler = Handler(Looper.getMainLooper())
+    private val reread = Runnable { reconcile() }
     private val imePrefs by lazy { getSharedPreferences("ime", MODE_PRIVATE) }
     /** Whether this install has ever found Gboard's voice key; until then its absence proves nothing. */
     private var voiceKeySeen = false
@@ -54,6 +58,7 @@ class DictationService : AccessibilityService() {
 
     override fun onDestroy() {
         contentResolver.unregisterContentObserver(imeObserver)
+        handler.removeCallbacks(reread)
         if (::overlay.isInitialized) overlay.remove()
         super.onDestroy()
     }
@@ -111,7 +116,7 @@ class DictationService : AccessibilityService() {
             imeTreeLoggedFor = ime.id
             Log.i(TAG, "voice key not found; IME descriptions: ${MicLocator.descriptions(root)}")
         }
-        overlay.show(mic ?: fallbackBounds(ime))
+        show(mic ?: fallbackBounds(ime))
         val placement = when {
             overlay.isDragged -> "shown-dragged"
             mic != null -> "shown-on-node $mic"
@@ -122,7 +127,28 @@ class DictationService : AccessibilityService() {
         return "$placement language=${english ?: "unresolved"} $fieldShape"
     }
 
+    // The keyboard slides in over a few hundred ms, so the button waits at the last settled spot
+    // until the bounds stop changing; a dragged button ignores the microphone.
+    private fun show(bounds: Rect) {
+        if (overlay.isDragged) {
+            placement.reset()
+            overlay.show(bounds)
+            return
+        }
+        val read = Bounds(bounds.left, bounds.top, bounds.right, bounds.bottom)
+        val wanted = placement.read(SystemClock.uptimeMillis(), read, overlay.rememberedBounds())
+        wanted.show?.let { overlay.show(Rect(it.left, it.top, it.right, it.bottom)) }
+        wanted.persist?.let(overlay::remember)
+        wanted.settle?.let {
+            Log.i(TAG, "settle remembered=${it.remembered} reads=${it.reads} settled_ms=${it.settledMs} moved_px=${it.movedPx}")
+        }
+        handler.removeCallbacks(reread)
+        if (wanted.reread) handler.postDelayed(reread, REREAD_MS)
+    }
+
     private fun removed(reason: String): String {
+        handler.removeCallbacks(reread)
+        placement.reset()
         overlay.remove()
         return "removed: $reason"
     }
@@ -138,6 +164,7 @@ class DictationService : AccessibilityService() {
     companion object {
         const val TAG = "SttButton"
         private const val FALLBACK_DP = 48
+        private const val REREAD_MS = 100L
         private const val KEY_VOICE_KEY_SEEN = "voice_key_seen"
     }
 }
