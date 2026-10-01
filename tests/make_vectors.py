@@ -12,6 +12,7 @@ from pathlib import Path
 import numpy as np
 
 from stt_button import asr, config
+from stt_button.bubble import Bubble
 from stt_button.cleaner import live_chunks, skips_cleaner
 
 FIXTURE = Path(__file__).parent / "fixtures" / "pipeline_vectors.json"
@@ -79,6 +80,33 @@ SKIP_TEXTS = ["", "Yes.", "meet Tuesday, actually no, Wednesday", "Dinner is at 
               "Not apples, pears?", "555-010 no 555-010-7896", "Tuesday? Actually make that Wednesday"]
 
 
+BUBBLE_SEQUENCES = {
+    "slice_drops_preview_words": [
+        ["preview", [["meet", 0.4], ["me", 0.9], ["at", 1.5], ["noon", 2.1], ["okay", 3.2]]],
+        ["slice", 2.5, "Meet me at noon."],
+        ["preview", [["meet", 0.4], ["me", 0.9], ["at", 1.5], ["noon", 2.1], ["okay", 3.2], ["thanks", 3.9]]],
+    ],
+    "chunk_replaces_its_sentences": [
+        ["slice", 10.0, "First thing. Second thing. Third thing."],
+        ["chunk", "First thing. Second thing.", "1. First\n2. Second"],
+        ["slice", 20.0, "Fourth thing."],
+        ["preview", [["fifth", 21.0]]],
+    ],
+    "empty_cleaned_chunk": [
+        ["slice", 5.0, "Um. Hello there."],
+        ["chunk", "Um.", ""],
+    ],
+}
+
+
+def replay_bubble(events: list[list]) -> list[list[str]]:
+    bubble, shown = Bubble(), []
+    for kind, *args in events:
+        {"preview": bubble.preview, "slice": bubble.slice_landed, "chunk": bubble.chunk_cleaned}[kind](*args)
+        shown.append(list(bubble.text()))
+    return shown
+
+
 def vectors() -> dict:
     cfg = config.load()
     slicer = []
@@ -95,6 +123,7 @@ def vectors() -> dict:
                                "chunks": live_chunks(text, words, lo, hi, final)})
     return {
         "slicer": slicer,
+        "bubble": [{"name": n, "events": e, "after_each": replay_bubble(e)} for n, e in BUBBLE_SEQUENCES.items()],
         "live_chunks": chunks,
         "skips_cleaner": {
             "skip_max_words": cfg["skip_max_words"],

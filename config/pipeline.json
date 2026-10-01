@@ -27,6 +27,7 @@
     "instead"
   ],
   "recognizer": "unified",
+  "preview_model": "fc-stream480",
   "cleaner": "s1-mini",
   "cleaners": {
     "s1-mini": {

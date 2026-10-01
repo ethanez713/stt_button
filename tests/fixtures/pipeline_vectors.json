@@ -431,6 +431,158 @@
    ]
   }
  ],
+ "bubble": [
+  {
+   "name": "slice_drops_preview_words",
+   "events": [
+    [
+     "preview",
+     [
+      [
+       "meet",
+       0.4
+      ],
+      [
+       "me",
+       0.9
+      ],
+      [
+       "at",
+       1.5
+      ],
+      [
+       "noon",
+       2.1
+      ],
+      [
+       "okay",
+       3.2
+      ]
+     ]
+    ],
+    [
+     "slice",
+     2.5,
+     "Meet me at noon."
+    ],
+    [
+     "preview",
+     [
+      [
+       "meet",
+       0.4
+      ],
+      [
+       "me",
+       0.9
+      ],
+      [
+       "at",
+       1.5
+      ],
+      [
+       "noon",
+       2.1
+      ],
+      [
+       "okay",
+       3.2
+      ],
+      [
+       "thanks",
+       3.9
+      ]
+     ]
+    ]
+   ],
+   "after_each": [
+    [
+     "",
+     "meet me at noon okay"
+    ],
+    [
+     "Meet me at noon.",
+     "okay"
+    ],
+    [
+     "Meet me at noon.",
+     "okay thanks"
+    ]
+   ]
+  },
+  {
+   "name": "chunk_replaces_its_sentences",
+   "events": [
+    [
+     "slice",
+     10.0,
+     "First thing. Second thing. Third thing."
+    ],
+    [
+     "chunk",
+     "First thing. Second thing.",
+     "1. First\n2. Second"
+    ],
+    [
+     "slice",
+     20.0,
+     "Fourth thing."
+    ],
+    [
+     "preview",
+     [
+      [
+       "fifth",
+       21.0
+      ]
+     ]
+    ]
+   ],
+   "after_each": [
+    [
+     "First thing. Second thing. Third thing.",
+     ""
+    ],
+    [
+     "1. First\n2. Second\n\nThird thing.",
+     ""
+    ],
+    [
+     "1. First\n2. Second\n\nThird thing. Fourth thing.",
+     ""
+    ],
+    [
+     "1. First\n2. Second\n\nThird thing. Fourth thing.",
+     "fifth"
+    ]
+   ]
+  },
+  {
+   "name": "empty_cleaned_chunk",
+   "events": [
+    [
+     "slice",
+     5.0,
+     "Um. Hello there."
+    ],
+    [
+     "chunk",
+     "Um.",
+     ""
+    ]
+   ],
+   "after_each": [
+    [
+     "Um. Hello there.",
+     ""
+    ],
+    [
+     "Hello there.",
+     ""
+    ]
+   ]
+  }
+ ],
  "live_chunks": [
   {
    "name": "mixed_sentences",

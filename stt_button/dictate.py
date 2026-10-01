@@ -121,8 +121,10 @@ def work(pcm: Path) -> None:
     import threading
 
     from stt_button.asr import Recognizer
+    from stt_button.bubble import SharedBubble
     from stt_button.cleaner import Cleaner
     from stt_button.live import LiveTake
+    from stt_button.preview import Preview
 
     cfg = config.load()
     take_id = pcm.stem
@@ -157,7 +159,9 @@ def work(pcm: Path) -> None:
             model.release()
 
     try:
-        live = LiveTake(Recognizer(), get_cleaner, cfg)
+        bubble = SharedBubble(pcm.with_suffix(".bubble.json"))
+        Preview(bubble, PcmTail(pcm).read, lambda: STOP_FLAG.exists() or CANCEL_FLAG.exists()).start()
+        live = LiveTake(Recognizer(), get_cleaner, cfg, bubble)
         tail = PcmTail(pcm)
         deadline = time.monotonic() + cfg["take_cap_s"] + ORPHAN_GRACE_S
         while not (STOP_FLAG.exists() or CANCEL_FLAG.exists()) and time.monotonic() < deadline:
@@ -167,15 +171,18 @@ def work(pcm: Path) -> None:
         stopped = time.monotonic()
         if CANCEL_FLAG.exists():
             pcm.unlink(missing_ok=True)
+            bubble.path.unlink(missing_ok=True)
             return
         live.mark_stop()
         live.feed(tail.read())
         result = live.finish()
+        bubble.flush()
         release_cleaner()
         write_result({"status": "text", "text": result.cleaned})
         stop_to_result_ms = int((time.monotonic() - stopped) * 1000)
         # Released before the bookkeeping below, so the next take can start at once.
         release_take(os.getpid())
+        bubble.path.unlink(missing_ok=True)
 
         audio_s = pcm_to_wav(pcm, DICTATION / f"{take_id}.wav")
         pcm.unlink()

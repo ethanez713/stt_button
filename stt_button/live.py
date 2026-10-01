@@ -9,7 +9,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from stt_button.asr import Slicer, join_slices
+from stt_button.asr import SAMPLE_RATE, Slicer, join_slices
 from stt_button.cleaner import live_chunks, skips_cleaner
 
 
@@ -36,7 +36,8 @@ class LiveTake:
     """recognizer.recognize(samples) -> text; get_cleaner() -> a cleaner with count_tokens and
     clean_chunk, called at the first clean so the caller can still be loading it."""
 
-    def __init__(self, recognizer, get_cleaner: Callable[[], object], cfg: dict):
+    def __init__(self, recognizer, get_cleaner: Callable[[], object], cfg: dict, bubble=None):
+        self.bubble = bubble
         self.recognizer = recognizer
         self.get_cleaner = get_cleaner
         self.cfg = cfg
@@ -91,6 +92,7 @@ class LiveTake:
                 break
             self.cleaned_chunks[chunk] = cleaned[0]
             self.idle_chunks.add(chunk)
+            self._announce(chunk)
         return bool(chunks)
 
     def mark_stop(self) -> None:
@@ -113,6 +115,8 @@ class LiveTake:
         started = time.monotonic()
         self.texts.append(self.recognizer.recognize(self.slicer.samples[start:end]))
         self.asr_ms += _ms(started)
+        if self.bubble:
+            self.bubble.slice_landed(end / SAMPLE_RATE, self.texts[-1])
 
     def _clean_closed(self, final: bool) -> list[str]:
         raw = self.raw
@@ -126,4 +130,9 @@ class LiveTake:
                 started = time.monotonic()
                 self.cleaned_chunks[chunk] = cleaner.clean_chunk(chunk)[0]
                 self.clean_ms += _ms(started)
+                self._announce(chunk)
         return chunks
+
+    def _announce(self, chunk: str) -> None:
+        if self.bubble:
+            self.bubble.chunk_cleaned(chunk, self.cleaned_chunks[chunk])

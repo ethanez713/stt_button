@@ -76,7 +76,9 @@ class HotkeyWindow : Form {
     readonly BlockingCollection<Action> wslQueue = new BlockingCollection<Action>();
     readonly System.Windows.Forms.Timer capTimer = new System.Windows.Forms.Timer { Interval = TAKE_CAP_MS };
     readonly System.Windows.Forms.Timer micIdleTimer = new System.Windows.Forms.Timer { Interval = MIC_WARM_MS };
+    readonly System.Windows.Forms.Timer bubbleTimer = new System.Windows.Forms.Timer { Interval = 150 };
     string takePath;
+    string bubblePath, bubbleShown;
     bool busy;
     IntPtr target;
     DateTime stoppedAt;
@@ -91,6 +93,7 @@ class HotkeyWindow : Form {
         new Thread(() => { foreach (Action command in wslQueue.GetConsumingEnumerable()) command(); }) { IsBackground = true }.Start();
         capTimer.Tick += (s, e) => { if (takePath != null) Stop(); };
         micIdleTimer.Tick += (s, e) => { micIdleTimer.Stop(); mic.Close(); Log("mic closed after idle"); };
+        bubbleTimer.Tick += (s, e) => PollBubble();
     }
 
     protected override void SetVisibleCore(bool value) { base.SetVisibleCore(false); }
@@ -123,6 +126,9 @@ class HotkeyWindow : Form {
             return;
         }
         takePath = path;
+        bubblePath = Path.ChangeExtension(path, ".bubble.json");
+        bubbleShown = null;
+        bubbleTimer.Start();
         indicator.ShowText("● Recording");
         capTimer.Start();
         RunWsl("start '" + WslPath(path) + "'", result => {
@@ -137,9 +143,11 @@ class HotkeyWindow : Form {
         busy = true;
         stoppedAt = DateTime.Now;
         micIdleTimer.Start();
-        indicator.ShowText("… Transcribing");
+        bubbleShown = null;
+        if (!PollBubble()) indicator.ShowText("… Transcribing");
         RunWsl("stop", result => {
             busy = false;
+            EndBubble();
             string status = Field(result, "status");
             string text = Field(result, "text");
             Log(string.Format("result status={0} chars={1} stop_to_text_ms={2:0}", status, text == null ? 0 : text.Length,
@@ -166,6 +174,7 @@ class HotkeyWindow : Form {
     }
 
     void Abort(string message) {
+        EndBubble();
         capTimer.Stop();
         mic.EndTake();
         if (takePath != null) File.Delete(takePath);
@@ -173,6 +182,37 @@ class HotkeyWindow : Form {
         micIdleTimer.Start();
         indicator.Flash(message);
         RunWsl("cancel", result => { });
+    }
+
+    // The WSL worker rewrites this file with what has been heard so far; a read that collides with
+    // a rewrite is skipped and retried on the next tick.
+    bool PollBubble() {
+        if (bubblePath == null) return false;
+        string json;
+        try {
+            json = File.ReadAllText(bubblePath, Encoding.UTF8);
+        } catch (IOException) {
+            return bubbleShown != null;
+        }
+        if (json == bubbleShown) return true;
+        Dictionary<string, object> parts;
+        try {
+            parts = new JavaScriptSerializer().Deserialize<Dictionary<string, object>>(json);
+        } catch (Exception) {
+            return bubbleShown != null;
+        }
+        string settled = Field(parts, "settled") ?? "", preview = Field(parts, "preview") ?? "";
+        if (settled.Length + preview.Length == 0) return false;
+        bubbleShown = json;
+        bool recording = takePath != null;
+        indicator.ShowBubble(recording ? "\u25CF" : "\u2026", recording ? Color.FromArgb(255, 99, 99) : Color.Gray, settled, preview);
+        return true;
+    }
+
+    void EndBubble() {
+        bubbleTimer.Stop();
+        bubblePath = null;
+        bubbleShown = null;
     }
 
     static string WslPath(string windowsPath) {
@@ -287,6 +327,7 @@ class HotkeyWindow : Form {
 class Indicator : Form {
     const int WS_EX_TOPMOST = 0x8, WS_EX_TRANSPARENT = 0x20, WS_EX_TOOLWINDOW = 0x80, WS_EX_NOACTIVATE = 0x08000000;
     readonly Label label = new Label();
+    readonly BubbleView view = new BubbleView { Visible = false };
     readonly System.Windows.Forms.Timer hideTimer = new System.Windows.Forms.Timer { Interval = 2500 };
 
     public Indicator() {
@@ -300,6 +341,7 @@ class Indicator : Form {
         label.AutoSize = true;
         label.Padding = new Padding(12, 6, 12, 6);
         Controls.Add(label);
+        Controls.Add(view);
         AutoSize = true;
         AutoSizeMode = AutoSizeMode.GrowAndShrink;
         hideTimer.Tick += (s, e) => { hideTimer.Stop(); Hide(); };
@@ -317,8 +359,28 @@ class Indicator : Form {
 
     public void ShowText(string text) {
         hideTimer.Stop();
+        view.Visible = false;
+        label.Visible = true;
+        AutoSize = true;
         label.Text = text;
         Show();
+        Place();
+    }
+
+    // Up to four lines of what has been heard: settled text in white, the streaming preview gray.
+    public void ShowBubble(string status, Color statusColor, string settled, string preview) {
+        hideTimer.Stop();
+        Size size = view.Compose(status, statusColor, settled, preview);
+        label.Visible = false;
+        AutoSize = false;
+        view.Visible = true;
+        view.Size = size;
+        ClientSize = size;
+        Show();
+        Place();
+    }
+
+    void Place() {
         Rectangle area = Screen.PrimaryScreen.WorkingArea;
         Location = new Point(area.Left + (area.Width - Width) / 2, area.Bottom - Height - 24);
     }
@@ -326,6 +388,61 @@ class Indicator : Form {
     public void Flash(string text) {
         ShowText(text);
         hideTimer.Start();
+    }
+}
+
+class BubbleView : Control {
+    const int MAX_WIDTH = 640, MAX_LINES = 4, PAD_X = 12, PAD_Y = 8;
+    static readonly Font font = new Font("Segoe UI", 11f);
+    static readonly Color Settled = Color.White, Preview = Color.FromArgb(150, 150, 150);
+    struct Piece { public string Text; public Color Color; public int X; }
+    List<List<Piece>> lines = new List<List<Piece>>();
+    int lineHeight;
+
+    public BubbleView() {
+        DoubleBuffered = true;
+        BackColor = Color.FromArgb(32, 32, 32);
+    }
+
+    static int Measure(string text) {
+        return TextRenderer.MeasureText(text, font, new Size(int.MaxValue, 0), TextFormatFlags.NoPadding).Width;
+    }
+
+    // Flows the words into lines of at most MAX_WIDTH, keeps the last MAX_LINES, and returns the size they need.
+    public Size Compose(string status, Color statusColor, string settled, string preview) {
+        var words = new List<KeyValuePair<string, Color>> { new KeyValuePair<string, Color>(status, statusColor) };
+        foreach (string word in settled.Replace("\r", "").Replace("\n", " \n ").Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries))
+            words.Add(new KeyValuePair<string, Color>(word, Settled));
+        foreach (string word in preview.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries))
+            words.Add(new KeyValuePair<string, Color>(word, Preview));
+
+        int space = Measure("a a") - 2 * Measure("a");
+        lineHeight = TextRenderer.MeasureText("Ag", font, new Size(int.MaxValue, 0), TextFormatFlags.NoPadding).Height;
+        var flowed = new List<List<Piece>> { new List<Piece>() };
+        int x = 0, widest = 0;
+        foreach (var word in words) {
+            if (word.Key == "\n") {
+                if (flowed[flowed.Count - 1].Count > 0) { flowed.Add(new List<Piece>()); x = 0; }
+                continue;
+            }
+            int width = Measure(word.Key);
+            if (x > 0 && x + space + width > MAX_WIDTH - 2 * PAD_X) { flowed.Add(new List<Piece>()); x = 0; }
+            if (x > 0) x += space;
+            flowed[flowed.Count - 1].Add(new Piece { Text = word.Key, Color = word.Value, X = x });
+            x += width;
+            widest = Math.Max(widest, x);
+        }
+        if (flowed.Count > MAX_LINES) flowed = flowed.GetRange(flowed.Count - MAX_LINES, MAX_LINES);
+        lines = flowed;
+        Invalidate();
+        return new Size(Math.Max(widest, 120) + 2 * PAD_X, lines.Count * lineHeight + 2 * PAD_Y);
+    }
+
+    protected override void OnPaint(PaintEventArgs e) {
+        for (int i = 0; i < lines.Count; i++)
+            foreach (Piece piece in lines[i])
+                TextRenderer.DrawText(e.Graphics, piece.Text, font, new Point(PAD_X + piece.X, PAD_Y + i * lineHeight),
+                    piece.Color, TextFormatFlags.NoPadding);
     }
 }
 
