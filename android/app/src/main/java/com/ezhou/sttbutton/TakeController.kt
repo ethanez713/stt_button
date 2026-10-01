@@ -36,6 +36,7 @@ class TakeController(private val service: DictationService, private val overlay:
     ) {
         @Volatile var stopRequested = false
         @Volatile var aborted = false
+        @Volatile var stopTrigger = TRIGGER_STOP
         var stoppedAtMs = 0L
     }
 
@@ -53,6 +54,11 @@ class TakeController(private val service: DictationService, private val overlay:
             current.take.state == TakeState.OPEN -> stop(current)
             else -> Unit
         }
+    }
+
+    /** The keyboard has been gone long enough that the user is no longer dictating into it. */
+    fun onKeyboardGone() {
+        run?.takeIf { it.take.state == TakeState.OPEN }?.let { stop(it, TRIGGER_KEYBOARD) }
     }
 
     private fun start() {
@@ -96,8 +102,9 @@ class TakeController(private val service: DictationService, private val overlay:
         overlay.setMode(ButtonMode.RECORDING)
     }
 
-    private fun stop(current: Run) {
+    private fun stop(current: Run, trigger: String = TRIGGER_STOP) {
         if (!current.take.requestStop()) return
+        current.stopTrigger = trigger
         handler.removeCallbacks(capRunnable)
         overlay.setMode(ButtonMode.BUSY)
         current.stoppedAtMs = SystemClock.elapsedRealtime()
@@ -132,7 +139,7 @@ class TakeController(private val service: DictationService, private val overlay:
             if (!current.aborted) {
                 current.live.markStop()
                 val result = current.live.finish()
-                handler.post { insert(current, result, TRIGGER_STOP, current.stoppedAtMs) }
+                handler.post { insert(current, result, current.stopTrigger, current.stoppedAtMs) }
             }
         } catch (e: Throwable) {
             Log.e(tag, "take failed", e)
@@ -147,7 +154,7 @@ class TakeController(private val service: DictationService, private val overlay:
     /** Inserts one segment: the pause's text while the take stays open, or the last one at the stop. */
     private fun insert(current: Run, result: LiveResult, trigger: String, triggerAtMs: Long) {
         val take = current.take
-        val last = trigger == TRIGGER_STOP
+        val last = trigger != TRIGGER_PAUSE
         if (take.finished || (last && take.state != TakeState.STOPPING)) return
         if (result.cleaned.isBlank()) {
             if (!last) return
@@ -271,6 +278,7 @@ class TakeController(private val service: DictationService, private val overlay:
         private const val IDLE_POLL_MS = 25L
         private const val TRIGGER_PAUSE = "pause"
         private const val TRIGGER_STOP = "stop"
+        private const val TRIGGER_KEYBOARD = "keyboard"
         private const val BUBBLE_MS = 100L
     }
 }

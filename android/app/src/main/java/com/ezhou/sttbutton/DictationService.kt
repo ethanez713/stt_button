@@ -28,6 +28,10 @@ class DictationService : AccessibilityService() {
     private val placement = MicPlacement()
     private val handler = Handler(Looper.getMainLooper())
     private val reread = Runnable { reconcile() }
+    private val keyboardWatch = KeyboardWatch(KEYBOARD_GONE_MS)
+    private val keyboardCheck = Runnable {
+        if (keyboardWatch.due(hasKeyboardWindow(), controller.hasOpenTake, SystemClock.uptimeMillis())) controller.onKeyboardGone()
+    }
     private val imePrefs by lazy { getSharedPreferences("ime", MODE_PRIVATE) }
     /** Whether this install has ever found Gboard's voice key; until then its absence proves nothing. */
     private var voiceKeySeen = false
@@ -123,12 +127,19 @@ class DictationService : AccessibilityService() {
         }
     }
 
+    private fun hasKeyboardWindow() = windows.any { it.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD }
+
     private fun place(): String {
         ModelFiles.missing(filesDir).takeIf { it.isNotEmpty() }?.let { return removed("model files missing: ${it.size}") }
         if (overlay.isHidden) return removed("hidden from the drop zone")
         if (english == false) return removed("keyboard not English")
         val ime = windows.firstOrNull { it.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD }
-            ?: return removed("no keyboard window", keepWhileTaking = true)
+        keyboardWatch.due(ime != null, controller.hasOpenTake, SystemClock.uptimeMillis())
+        handler.removeCallbacks(keyboardCheck)
+        if (ime == null) {
+            if (controller.hasOpenTake) handler.postDelayed(keyboardCheck, KEYBOARD_GONE_MS)
+            return removed("no keyboard window", keepWhileTaking = true)
+        }
         bubble.setAnchor(Rect().also(ime::getBoundsInScreen))
         val field = findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
         if (field != null) {
@@ -198,6 +209,7 @@ class DictationService : AccessibilityService() {
         const val TAG = "SttButton"
         private const val FALLBACK_DP = 48
         private const val REREAD_MS = 100L
+        private const val KEYBOARD_GONE_MS = 700L
         private const val KEY_VOICE_KEY_SEEN = "voice_key_seen"
     }
 }
