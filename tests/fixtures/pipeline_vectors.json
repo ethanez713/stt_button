@@ -1094,6 +1094,72 @@
    "casual": "Version 2.5"
   }
  ],
+ "spoken": [
+  {
+   "text": "He said quote hello world, unquote and left",
+   "spoken": "He said \"hello world\" and left"
+  },
+  {
+   "text": "He said quote unquote hello, and left",
+   "spoken": "He said \"hello\", and left"
+  },
+  {
+   "text": "Look at the architecture parentheses, which is decompiled and available close parentheses To see how it works question mark.",
+   "spoken": "Look at the architecture (which is decompiled and available) To see how it works?"
+  },
+  {
+   "text": "set x open parenthesis y close parenthesis.",
+   "spoken": "set x (y)."
+  },
+  {
+   "text": "Is it ready, question mark yes it is",
+   "spoken": "Is it ready? Yes it is"
+  },
+  {
+   "text": "wow exclamation point that is great",
+   "spoken": "wow! That is great"
+  },
+  {
+   "text": "first item new line second item new paragraph third thing",
+   "spoken": "first item\nsecond item\n\nThird thing"
+  },
+  {
+   "text": "a quote from the contractor",
+   "spoken": "a quote from the contractor"
+  },
+  {
+   "text": "a period of time",
+   "spoken": "a period of time"
+  },
+  {
+   "text": "unquote that",
+   "spoken": "unquote that"
+  },
+  {
+   "text": "open quote only here",
+   "spoken": "open quote only here"
+  },
+  {
+   "text": "close paren stray",
+   "spoken": ") stray"
+  },
+  {
+   "text": "She said open quote word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word end quote",
+   "spoken": "She said open quote word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word end quote"
+  },
+  {
+   "text": "the end. Quote of the day question mark",
+   "spoken": "the end. Quote of the day?"
+  },
+  {
+   "text": "Question mark",
+   "spoken": "?"
+  },
+  {
+   "text": "",
+   "spoken": ""
+  }
+ ],
  "skips_cleaner": {
   "skip_max_words": 40,
   "self_correction_cues": [

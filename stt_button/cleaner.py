@@ -6,6 +6,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from stt_button import config
+from stt_button.spoken import spoken_punctuation
 
 # What Qwen3's chat template emits for an assistant turn with enable_thinking=False. Rendering it
 # by hand keeps the prompt independent of how a binding passes template kwargs.
@@ -170,6 +171,7 @@ class Cleaner:
     def clean_chunk(self, chunk: str, cancelled: Callable[[], bool] | None = None) -> tuple[str, int] | None:
         """The cleaned text of one chunk and the tokens generated, or None when cancelled() turned
         true while generating."""
+        chunk = spoken_punctuation(chunk)
         prompt = render_prompt(self.spec["system_prompt"], user_turn(self.spec["control_line"], chunk))
         limit = max_new_tokens(self.count_tokens(chunk), self.spec["max_new_tokens_ratio"],
                                self.spec["max_new_tokens_pad"])
@@ -181,7 +183,7 @@ class Cleaner:
         replaces the configured chunk size, which experiments use to compare against a whole pass."""
         started = time.monotonic()
         if skip and skips_cleaner(raw, self.cfg):
-            return Cleaned(casual(raw, self.cfg), int((time.monotonic() - started) * 1000), 0, 0, 0)
+            return Cleaned(casual(spoken_punctuation(raw), self.cfg), int((time.monotonic() - started) * 1000), 0, 0, 0)
         outputs = []
         in_tokens = out_tokens = 0
         chunks = live_chunks(raw, self.count_tokens, min_tokens or self.cfg["chunk_min_tokens"],

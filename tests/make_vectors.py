@@ -14,6 +14,7 @@ import numpy as np
 from stt_button import asr, config
 from stt_button.bubble import Bubble
 from stt_button.cleaner import casual, live_chunks, matched_cue, skips_cleaner
+from stt_button.spoken import spoken_punctuation
 
 FIXTURE = Path(__file__).parent / "fixtures" / "pipeline_vectors.json"
 SR = asr.SAMPLE_RATE
@@ -84,6 +85,26 @@ CASUAL_TEXTS = ["Okay, I'm down.", "I'm down, I think I'm free tomorrow", "Is it
                 "Wait...", "Okay. Wait, what?", "Hi, there!", "ok.  ", "a, " * 41, "", "Version 2.5."]
 
 
+SPOKEN_TEXTS = [
+    "He said quote hello world, unquote and left",
+    "He said quote unquote hello, and left",
+    "Look at the architecture parentheses, which is decompiled and available close parentheses To see how it works question mark.",
+    "set x open parenthesis y close parenthesis.",
+    "Is it ready, question mark yes it is",
+    "wow exclamation point that is great",
+    "first item new line second item new paragraph third thing",
+    "a quote from the contractor",
+    "a period of time",
+    "unquote that",
+    "open quote only here",
+    "close paren stray",
+    "She said open quote " + "word " * 35 + "end quote",
+    "the end. Quote of the day question mark",
+    "Question mark",
+    "",
+]
+
+
 BUBBLE_SEQUENCES = {
     "slice_drops_preview_words": [
         ["preview", [["meet", 0.4], ["me", 0.9], ["at", 1.5], ["noon", 2.1], ["okay", 3.2]]],
@@ -130,6 +151,7 @@ def vectors() -> dict:
         "bubble": [{"name": n, "events": e, "after_each": replay_bubble(e)} for n, e in BUBBLE_SEQUENCES.items()],
         "live_chunks": chunks,
         "casual": [{"text": t, "casual": casual(t, cfg)} for t in CASUAL_TEXTS],
+        "spoken": [{"text": t, "spoken": spoken_punctuation(t)} for t in SPOKEN_TEXTS],
         "skips_cleaner": {
             "skip_max_words": cfg["skip_max_words"],
             "self_correction_cues": cfg["self_correction_cues"],

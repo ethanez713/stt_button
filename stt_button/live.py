@@ -11,6 +11,7 @@ import numpy as np
 
 from stt_button.asr import SAMPLE_RATE, Slicer, join_slices
 from stt_button.cleaner import casual, live_chunks, matched_cue, skips_cleaner
+from stt_button.spoken import spoken_punctuation
 
 
 @dataclass
@@ -105,7 +106,7 @@ class LiveTake:
         self._pending = []
         raw = self.raw
         if skips_cleaner(raw, self.cfg):
-            return LiveResult(raw, casual(raw, self.cfg), 0, "raw", self.asr_ms - self._stop_asr_ms, 0)
+            return LiveResult(raw, casual(spoken_punctuation(raw), self.cfg), 0, "raw", self.asr_ms - self._stop_asr_ms, 0)
         chunks = self._clean_closed(final=True)
         cleaned = "\n\n".join(o for o in (self.cleaned_chunks[c] for c in chunks) if o)
         return LiveResult(raw, casual(cleaned, self.cfg), len(chunks), "chunks", self.asr_ms - self._stop_asr_ms,
