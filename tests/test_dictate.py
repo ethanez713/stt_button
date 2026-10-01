@@ -1,4 +1,5 @@
 import os
+import time
 import wave
 
 import numpy as np
@@ -126,12 +127,18 @@ class UppercaseCleaner:
 
     def __init__(self):
         self.calls = []
+        self.completed = []
 
     def count_tokens(self, text):
         return len(text.split())
 
-    def clean_chunk(self, chunk):
+    def clean_chunk(self, chunk, cancelled=None):
         self.calls.append(chunk)
+        for _ in range(5 if cancelled else 0):
+            time.sleep(0.03)
+            if cancelled():
+                return None
+        self.completed.append(chunk)
         return chunk.upper(), 1
 
 
@@ -174,3 +181,66 @@ def test_given_a_five_word_take_when_finished_then_it_is_raw_and_the_cleaner_is_
     result = take.finish()
 
     assert (result.cleaned, result.chunks, result.clean_mode) == ("Meet at noon, okay.", 0, "raw")
+
+
+def spoken_then_silent(speech_s, silence_s):
+    from tests import make_vectors
+
+    return make_vectors.to_float(make_vectors.pcm_signal(
+        [["silence", 0.3], ["noise", speech_s, 8000], ["silence", silence_s]]))
+
+
+def idle_take(cleaner, *texts):
+    from stt_button.live import LiveTake
+
+    take = LiveTake(ScriptedRecognizer(*texts), lambda: cleaner, live_cfg())
+    take.feed(spoken_then_silent(3, 3))
+    return take
+
+
+def test_given_a_pause_when_idle_then_the_stop_finds_the_remainder_already_cleaned():
+    cleaner = UppercaseCleaner()
+    take = idle_take(cleaner, labelled("a", 3), "")
+    assert cleaner.calls == [" ".join(labelled("a", 3).split(" ")[:18])]
+
+    assert take.idle_step(lambda: np.zeros(0, dtype=np.float32))
+    take.mark_stop()
+    result = take.finish()
+
+    assert len(cleaner.calls) == 2
+    assert (result.chunks, result.idle_cleans, result.idle_hits) == (2, 1, 1)
+    assert result.cleaned == "\n\n".join(c.upper() for c in cleaner.calls)
+
+
+def test_given_speech_during_an_idle_clean_when_polled_then_it_is_cancelled_and_the_text_is_unchanged():
+    cleaner = UppercaseCleaner()
+    take = idle_take(cleaner, labelled("a", 3), labelled("b", 1))
+    speech = spoken_then_silent(1, 0)
+
+    take.idle_step(lambda: speech)
+    assert cleaner.completed == cleaner.calls[:1]
+    assert len(cleaner.calls) == 2
+    take.mark_stop()
+    result = take.finish()
+
+    assert result.raw == labelled("a", 3) + " " + labelled("b", 1)
+    assert result.cleaned.count("\n\n") == result.chunks - 1
+    assert result.idle_hits == 0
+    assert len(cleaner.completed) == len(set(cleaner.completed))
+
+
+def test_given_everything_cleaned_when_idle_again_then_the_cleaner_is_not_called():
+    cleaner = UppercaseCleaner()
+    take = idle_take(cleaner, labelled("a", 3), "")
+    take.idle_step(lambda: np.zeros(0, dtype=np.float32))
+    calls = len(cleaner.calls)
+
+    assert not take.idle_step(lambda: np.zeros(0, dtype=np.float32))
+    assert len(cleaner.calls) == calls
+
+
+def test_given_a_short_take_when_idle_then_nothing_is_cleaned():
+    cleaner = UppercaseCleaner()
+    take = idle_take(cleaner, "Meet at noon, okay.", "")
+    assert not take.idle_step(lambda: np.zeros(0, dtype=np.float32))
+    assert cleaner.calls == []

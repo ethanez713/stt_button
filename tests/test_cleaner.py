@@ -130,7 +130,7 @@ class StubCleaner(cleaner.Cleaner):
     def count_tokens(self, text):
         return words(text)
 
-    def _generate(self, prompt, max_tokens):
+    def _generate(self, prompt, max_tokens, cancelled=None):
         chunk = prompt.split("\n")[-6]
         self.generated.append(chunk)
         return chunk.upper(), 1

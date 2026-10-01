@@ -162,7 +162,8 @@ def work(pcm: Path) -> None:
         deadline = time.monotonic() + cfg["take_cap_s"] + ORPHAN_GRACE_S
         while not (STOP_FLAG.exists() or CANCEL_FLAG.exists()) and time.monotonic() < deadline:
             live.feed(tail.read())
-            time.sleep(POLL_S)
+            if not live.idle_step(tail.read):
+                time.sleep(POLL_S)
         stopped = time.monotonic()
         if CANCEL_FLAG.exists():
             pcm.unlink(missing_ok=True)
@@ -185,6 +186,7 @@ def work(pcm: Path) -> None:
                 "audio_s": round(audio_s, 2), "asr_ms_after_stop": result.asr_ms_after_stop,
                 "clean_ms": live.clean_ms, "clean_ms_after_stop": result.clean_ms_after_stop,
                 "stop_to_result_ms": stop_to_result_ms, "clean_mode": result.clean_mode, "chunks": result.chunks,
+                "idle_cleans": result.idle_cleans, "idle_hits": result.idle_hits,
                 "cleaner_backend": loaded.get("backend"),
                 "raw": result.raw, "cleaned": result.cleaned,
             }, ensure_ascii=False) + "\n")

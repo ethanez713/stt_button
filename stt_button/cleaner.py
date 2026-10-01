@@ -110,6 +110,21 @@ def _ollama(body: dict, timeout: float = 120) -> dict:
         return json.load(response)
 
 
+def _ollama_stream(body: dict, cancelled: Callable[[], bool], timeout: float = 120) -> tuple[str, int] | None:
+    """Generate while checking cancelled() after each token; closing the connection stops Ollama."""
+    request = urllib.request.Request(OLLAMA_URL, json.dumps({**body, "stream": True}).encode(),
+                                     {"Content-Type": "application/json"})
+    text, tokens = "", 0
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        for line in response:
+            if cancelled():
+                return None
+            part = json.loads(line)
+            text += part["response"]
+            tokens = part.get("eval_count", tokens + 1)
+    return text, tokens
+
+
 class Cleaner:
     """A loaded cleaner. backend "llama" runs llama.cpp on the CPU in this process, as the phone
     does; "ollama" runs the same GGUF on the local Ollama server's GPU, sending the same rendered
@@ -143,13 +158,14 @@ class Cleaner:
     def count_tokens(self, text: str) -> int:
         return len(self._llm.tokenize(text.encode(), add_bos=False, special=False))
 
-    def clean_chunk(self, chunk: str) -> tuple[str, int]:
-        """The cleaned text of one chunk and the tokens generated."""
+    def clean_chunk(self, chunk: str, cancelled: Callable[[], bool] | None = None) -> tuple[str, int] | None:
+        """The cleaned text of one chunk and the tokens generated, or None when cancelled() turned
+        true while generating."""
         prompt = render_prompt(self.spec["system_prompt"], user_turn(self.spec["control_line"], chunk))
         limit = max_new_tokens(self.count_tokens(chunk), self.spec["max_new_tokens_ratio"],
                                self.spec["max_new_tokens_pad"])
-        text, n_out = self._generate(prompt, limit)
-        return text.strip(), n_out
+        generated = self._generate(prompt, limit, cancelled)
+        return None if generated is None else (generated[0].strip(), generated[1])
 
     def clean(self, raw: str, skip: bool = True, min_tokens: int | None = None) -> Cleaned:
         """skip=False cleans even a take the skip rule would insert as recognized; min_tokens
@@ -170,21 +186,34 @@ class Cleaner:
         return Cleaned("\n\n".join(o for o in outputs if o), int((time.monotonic() - started) * 1000),
                        len(chunks), in_tokens, out_tokens)
 
-    def _generate(self, prompt: str, max_tokens: int) -> tuple[str, int]:
+    def _generate(self, prompt: str, max_tokens: int,
+                  cancelled: Callable[[], bool] | None = None) -> tuple[str, int] | None:
         # Both backends decode greedily with repeat_penalty 1.0: the bindings default to 1.1, and
-        # the model cards specify plain greedy decoding.
+        # the model cards specify plain greedy decoding. Only a cancellable call streams.
         if self.backend == "ollama":
-            reply = _ollama({
+            body = {
                 "model": self.ollama_model, "prompt": prompt, "raw": True, "stream": False,
                 "keep_alive": OLLAMA_KEEP_ALIVE,
                 "options": {"temperature": 0, "repeat_penalty": 1.0, "num_predict": max_tokens,
                             "num_ctx": 4096, "stop": [END_OF_TURN]},
-            })
+            }
+            if cancelled is not None:
+                return _ollama_stream(body, cancelled)
+            reply = _ollama(body)
             return reply["response"], reply.get("eval_count", 0)
         tokens = self._llm.tokenize(prompt.encode(), add_bos=False, special=True)
-        result = self._llm.create_completion(tokens, max_tokens=max_tokens, temperature=0.0,
-                                             repeat_penalty=1.0, stop=[END_OF_TURN])
-        return result["choices"][0]["text"], result["usage"]["completion_tokens"]
+        if cancelled is None:
+            result = self._llm.create_completion(tokens, max_tokens=max_tokens, temperature=0.0,
+                                                 repeat_penalty=1.0, stop=[END_OF_TURN])
+            return result["choices"][0]["text"], result["usage"]["completion_tokens"]
+        text, count = "", 0
+        for part in self._llm.create_completion(tokens, max_tokens=max_tokens, temperature=0.0,
+                                                repeat_penalty=1.0, stop=[END_OF_TURN], stream=True):
+            if cancelled():
+                return None
+            text += part["choices"][0]["text"]
+            count += 1
+        return text, count
 
 
 def clean(raw: str, cleaner: str | None = None) -> Cleaned:
