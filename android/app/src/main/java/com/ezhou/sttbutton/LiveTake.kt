@@ -122,7 +122,7 @@ class LiveTake(
     private fun complete(slices: List<IntArray>): LiveResult {
         for (slice in slices) recognize(slice)
         val raw = raw
-        if (skips()) return result(raw, Pipeline.casual(raw, cfg, judged), 0, "raw", 0)
+        if (skips()) return result(raw, Pipeline.casual(Spoken.convert(raw), cfg, judged), 0, "raw", 0)
         val chunks = cleanClosed(final = true)
         val cleaned = chunks.map { cleanedChunks.getValue(it) }.filter { it.isNotEmpty() }.joinToString("\n\n")
         return result(raw, Pipeline.casual(cleaned, cfg, judged), chunks.size, "chunks", chunks.count { it in idleChunks })

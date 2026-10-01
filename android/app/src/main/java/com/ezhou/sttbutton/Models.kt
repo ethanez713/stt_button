@@ -57,7 +57,8 @@ class LlamaChunkCleaner(private val llama: LlamaCleaner, private val cfg: Pipeli
     override fun clean(chunk: String): ChunkResult? {
         cancelRequested = false
         val started = System.nanoTime()
-        val text = llama.clean(Pipeline.promptFor(cfg, chunk), Pipeline.maxNewTokens(cfg, countTokens(chunk)))
+        val spoken = Spoken.convert(chunk)
+        val text = llama.clean(Pipeline.promptFor(cfg, spoken), Pipeline.maxNewTokens(cfg, countTokens(spoken)))
         if (text != null) {
             val stats = llama.stats()
             Log.i(DictationService.TAG, "chunk clean ms=${(System.nanoTime() - started) / 1_000_000} " +
@@ -67,7 +68,7 @@ class LlamaChunkCleaner(private val llama: LlamaCleaner, private val cfg: Pipeli
         if (cancelRequested) return null
         // The prompt did not fit or decoding failed: the recognized words are kept rather than lost.
         Log.e(DictationService.TAG, "clean failed for a ${countTokens(chunk)}-token chunk; keeping it as recognized")
-        return ChunkResult(chunk, 0)
+        return ChunkResult(spoken, 0)
     }
 
     override fun cancel() {

@@ -68,6 +68,13 @@ class PipelineVectorsTest {
     }
 
     @Test
+    fun given_spoken_vectors_when_converted_then_text_matches_the_host() {
+        for (case in Fixtures.objects(Fixtures.vectors.getJSONArray("spoken"))) {
+            assertEquals(case.getString("text"), case.getString("spoken"), Spoken.convert(case.getString("text")))
+        }
+    }
+
+    @Test
     fun given_the_prompt_when_rendered_then_it_is_the_training_format() {
         val prompt = Pipeline.promptFor(Fixtures.config, "um so hi")
         assertTrue(prompt.startsWith("<|im_start|>system\nYou are a text normalizer"))
