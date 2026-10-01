@@ -146,3 +146,15 @@ def test_skipped_take_is_returned_as_recognized_without_generating():
     stub = StubCleaner()
     result = stub.clean("Hi there")
     assert (result.text, result.chunks, stub.generated) == ("Hi there", 0, [])
+
+
+@pytest.mark.parametrize("text, expected", [
+    ("Okay, I'm down.", "Okay I'm down"),
+    ("Is it out?", "Is it out?"),
+    ("It cost 1,000 dollars, I think.", "It cost 1,000 dollars I think"),
+    ("Wait...", "Wait..."),
+    ("Okay. Wait, what?", "Okay. Wait what?"),
+    ("a, " * 41, "a, " * 41),
+])
+def test_casual_rule(text, expected):
+    assert cleaner.casual(text, CFG) == expected

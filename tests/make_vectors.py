@@ -13,7 +13,7 @@ import numpy as np
 
 from stt_button import asr, config
 from stt_button.bubble import Bubble
-from stt_button.cleaner import live_chunks, skips_cleaner
+from stt_button.cleaner import casual, live_chunks, skips_cleaner
 
 FIXTURE = Path(__file__).parent / "fixtures" / "pipeline_vectors.json"
 SR = asr.SAMPLE_RATE
@@ -80,6 +80,10 @@ SKIP_TEXTS = ["", "Yes.", "meet Tuesday, actually no, Wednesday", "Dinner is at 
               "Not apples, pears?", "555-010 no 555-010-7896", "Tuesday? Actually make that Wednesday"]
 
 
+CASUAL_TEXTS = ["Okay, I'm down.", "I'm down, I think I'm free tomorrow", "Is it the full release?", "It cost 1,000 dollars, I think.",
+                "Wait...", "Okay. Wait, what?", "Hi, there!", "ok.  ", "a, " * 41, "", "Version 2.5."]
+
+
 BUBBLE_SEQUENCES = {
     "slice_drops_preview_words": [
         ["preview", [["meet", 0.4], ["me", 0.9], ["at", 1.5], ["noon", 2.1], ["okay", 3.2]]],
@@ -125,6 +129,7 @@ def vectors() -> dict:
         "slicer": slicer,
         "bubble": [{"name": n, "events": e, "after_each": replay_bubble(e)} for n, e in BUBBLE_SEQUENCES.items()],
         "live_chunks": chunks,
+        "casual": [{"text": t, "casual": casual(t, cfg)} for t in CASUAL_TEXTS],
         "skips_cleaner": {
             "skip_max_words": cfg["skip_max_words"],
             "self_correction_cues": cfg["self_correction_cues"],

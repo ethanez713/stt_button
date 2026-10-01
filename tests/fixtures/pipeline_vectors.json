@@ -1048,6 +1048,52 @@
    "chunks": []
   }
  ],
+ "casual": [
+  {
+   "text": "Okay, I'm down.",
+   "casual": "Okay I'm down"
+  },
+  {
+   "text": "I'm down, I think I'm free tomorrow",
+   "casual": "I'm down I think I'm free tomorrow"
+  },
+  {
+   "text": "Is it the full release?",
+   "casual": "Is it the full release?"
+  },
+  {
+   "text": "It cost 1,000 dollars, I think.",
+   "casual": "It cost 1,000 dollars I think"
+  },
+  {
+   "text": "Wait...",
+   "casual": "Wait..."
+  },
+  {
+   "text": "Okay. Wait, what?",
+   "casual": "Okay. Wait what?"
+  },
+  {
+   "text": "Hi, there!",
+   "casual": "Hi there!"
+  },
+  {
+   "text": "ok.  ",
+   "casual": "ok  "
+  },
+  {
+   "text": "a, a, a, a, a, a, a, a, a, a, a, a, a, a, a, a, a, a, a, a, a, a, a, a, a, a, a, a, a, a, a, a, a, a, a, a, a, a, a, a, a, ",
+   "casual": "a, a, a, a, a, a, a, a, a, a, a, a, a, a, a, a, a, a, a, a, a, a, a, a, a, a, a, a, a, a, a, a, a, a, a, a, a, a, a, a, a, "
+  },
+  {
+   "text": "",
+   "casual": ""
+  },
+  {
+   "text": "Version 2.5.",
+   "casual": "Version 2.5"
+  }
+ ],
  "skips_cleaner": {
   "skip_max_words": 40,
   "self_correction_cues": [

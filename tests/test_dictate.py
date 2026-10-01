@@ -180,7 +180,7 @@ def test_given_a_five_word_take_when_finished_then_it_is_raw_and_the_cleaner_is_
     take.feed(speech_like(3))
     result = take.finish()
 
-    assert (result.cleaned, result.chunks, result.clean_mode) == ("Meet at noon, okay.", 0, "raw")
+    assert (result.cleaned, result.chunks, result.clean_mode) == ("Meet at noon okay", 0, "raw")
 
 
 def spoken_then_silent(speech_s, silence_s):

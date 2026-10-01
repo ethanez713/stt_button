@@ -89,6 +89,15 @@ def skips_cleaner(text: str, cfg: dict) -> bool:
     return len(text.split()) <= cfg["skip_max_words"] and not has_self_correction(text, cfg["self_correction_cues"])
 
 
+def casual(text: str, cfg: dict) -> str:
+    """Short takes are messages, where the commas and the final period are noise: drop them
+    (commas inside numbers stay), and leave everything else as it was."""
+    if len(text.split()) > cfg["skip_max_words"]:
+        return text
+    text = re.sub(r"(?<![0-9]),|,(?![0-9])", "", text)
+    return re.sub(r"(?<!\.)\.(\s*)$", r"\1", text)
+
+
 def _split_words(sentence: str, count_tokens: Callable[[str], int], limit: int) -> list[str]:
     parts = []
     current = ""
@@ -172,7 +181,7 @@ class Cleaner:
         replaces the configured chunk size, which experiments use to compare against a whole pass."""
         started = time.monotonic()
         if skip and skips_cleaner(raw, self.cfg):
-            return Cleaned(raw, int((time.monotonic() - started) * 1000), 0, 0, 0)
+            return Cleaned(casual(raw, self.cfg), int((time.monotonic() - started) * 1000), 0, 0, 0)
         outputs = []
         in_tokens = out_tokens = 0
         chunks = live_chunks(raw, self.count_tokens, min_tokens or self.cfg["chunk_min_tokens"],
@@ -183,7 +192,8 @@ class Cleaner:
             in_tokens += self.count_tokens(chunk)
             out_tokens += n_out
         # A chunk boundary is a sentence end; a paragraph break there cannot glue a list onto prose.
-        return Cleaned("\n\n".join(o for o in outputs if o), int((time.monotonic() - started) * 1000),
+        text = "\n\n".join(o for o in outputs if o)
+        return Cleaned(casual(text, self.cfg) if skip else text, int((time.monotonic() - started) * 1000),
                        len(chunks), in_tokens, out_tokens)
 
     def _generate(self, prompt: str, max_tokens: int,

@@ -88,10 +88,10 @@ class LiveTake(
     fun finish(): LiveResult {
         for (slice in takePending() + slicer.finish()) recognize(slice)
         val raw = raw
-        if (Pipeline.skipsCleaner(raw, cfg)) return result(raw, raw, 0, "raw", 0)
+        if (Pipeline.skipsCleaner(raw, cfg)) return result(raw, Pipeline.casual(raw, cfg), 0, "raw", 0)
         val chunks = cleanClosed(final = true)
         val cleaned = chunks.map { cleanedChunks.getValue(it) }.filter { it.isNotEmpty() }.joinToString("\n\n")
-        return result(raw, cleaned, chunks.size, "chunks", chunks.count { it in idleChunks })
+        return result(raw, Pipeline.casual(cleaned, cfg), chunks.size, "chunks", chunks.count { it in idleChunks })
     }
 
     private fun result(raw: String, cleaned: String, chunks: Int, mode: String, idleHits: Int) = LiveResult(

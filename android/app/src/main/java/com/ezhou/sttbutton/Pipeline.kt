@@ -26,6 +26,8 @@ object Pipeline {
     private const val END_OF_TURN = "<|im_end|>"
     private val SENTENCE_BREAK = Regex("(?<=[.!?])\\s+")
     private val WHITESPACE = Regex("\\s+")
+    private val COMMA_OUTSIDE_NUMBER = Regex("(?<![0-9]),|,(?![0-9])")
+    private val FINAL_PERIOD = Regex("(?<!\\.)\\.(\\s*)$")
     private val NOT_SPOKEN = Regex("[^\\p{L}\\p{N}_\\s]")
 
     fun renderPrompt(systemPrompt: String, userTurn: String): String =
@@ -53,6 +55,11 @@ object Pipeline {
 
     fun skipsCleaner(text: String, cfg: PipelineConfig): Boolean =
         wordCount(text) <= cfg.skipMaxWords && !hasSelfCorrection(text, cfg.selfCorrectionCues)
+
+    /** Mirrors `stt_button.cleaner.casual`. */
+    fun casual(text: String, cfg: PipelineConfig): String =
+        if (wordCount(text) > cfg.skipMaxWords) text
+        else FINAL_PERIOD.replace(COMMA_OUTSIDE_NUMBER.replace(text, ""), "$1")
 
     /** Mirrors `stt_button.cleaner.live_chunks`. */
     fun liveChunks(text: String, countTokens: (String) -> Int, minTokens: Int, maxTokens: Int, final: Boolean): List<String> {

@@ -68,7 +68,7 @@ class LiveTakeTest {
         take.addSamples(tone(3))
         val result = take.finish()
 
-        assertEquals("Meet at noon, okay.", result.cleaned)
+        assertEquals("Meet at noon okay", result.cleaned)
         assertEquals(0, result.chunks)
         assertEquals("raw", result.cleanMode)
     }

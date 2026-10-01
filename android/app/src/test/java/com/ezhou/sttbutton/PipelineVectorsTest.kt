@@ -59,6 +59,13 @@ class PipelineVectorsTest {
     }
 
     @Test
+    fun given_casual_vectors_when_applied_then_text_matches_the_host() {
+        for (case in Fixtures.objects(Fixtures.vectors.getJSONArray("casual"))) {
+            assertEquals(case.getString("text"), case.getString("casual"), Pipeline.casual(case.getString("text"), Fixtures.config))
+        }
+    }
+
+    @Test
     fun given_the_prompt_when_rendered_then_it_is_the_training_format() {
         val prompt = Pipeline.promptFor(Fixtures.config, "um so hi")
         assertTrue(prompt.startsWith("<|im_start|>system\nYou are a text normalizer"))
