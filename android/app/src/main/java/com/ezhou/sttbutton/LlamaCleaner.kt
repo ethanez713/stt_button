@@ -1,0 +1,28 @@
+package com.ezhou.sttbutton
+
+/** S1-mini through llama.cpp with prompt-lookup decoding. [clean] blocks; [cancel] may come from any thread. */
+class LlamaCleaner(modelPath: String, threads: Int = THREADS) : AutoCloseable {
+    private val handle = LlamaNative.load(modelPath, threads)
+
+    init {
+        require(handle != 0L) { "cannot load $modelPath" }
+    }
+
+    fun countTokens(text: String): Int = LlamaNative.countTokens(handle, text.toByteArray())
+
+    /** Null when cancelled. */
+    fun clean(prompt: String, maxTokens: Int): String? =
+        LlamaNative.clean(handle, prompt.toByteArray(), maxTokens)?.toString(Charsets.UTF_8)
+
+    fun cancel() = LlamaNative.cancel(handle)
+
+    fun stats(): Stats = LlamaNative.lastStats(handle).let { Stats(it[0], it[1], it[2]) }
+
+    override fun close() = LlamaNative.release(handle)
+
+    data class Stats(val outTokens: Int, val drafted: Int, val accepted: Int)
+
+    companion object {
+        const val THREADS = 6
+    }
+}

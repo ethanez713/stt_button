@@ -95,6 +95,7 @@ class DictationService : AccessibilityService() {
     }
 
     private fun place(): String {
+        ModelFiles.missing(filesDir).takeIf { it.isNotEmpty() }?.let { return removed("model files missing: ${it.size}") }
         if (overlay.isHidden) return removed("hidden from the drop zone")
         if (english == false) return removed("keyboard not English")
         val ime = windows.firstOrNull { it.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD }

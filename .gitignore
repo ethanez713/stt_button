@@ -16,3 +16,7 @@ venv/
 
 # Host recordings and experiment outputs are personal audio/text
 data/
+
+# Fetched by android/fetch_native.sh
+android/app/src/main/jniLibs/
+android/app/.cxx/

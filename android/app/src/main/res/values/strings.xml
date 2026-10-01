@@ -8,6 +8,7 @@
     <string name="unhide">Show the button again</string>
     <string name="zone_reset">Reset</string>
     <string name="zone_hide">Hide</string>
+    <string name="licenses">Models: Parakeet Unified EN 0.6B by NVIDIA, NVIDIA Open Model License (use and redistribution with the license and this notice kept). Live preview: NVIDIA stt_en_fastconformer_hybrid_large_streaming_multi, converted for sherpa-onnx, CC-BY-4.0. Cleanup: S1-mini by Superwhisper, Apache-2.0, kept under the name S1-mini. Runtimes: sherpa-onnx and ONNX Runtime, llama.cpp (MIT).</string>
     <string name="service_on">Accessibility service: on</string>
     <string name="service_off">Accessibility service: off</string>
 </resources>

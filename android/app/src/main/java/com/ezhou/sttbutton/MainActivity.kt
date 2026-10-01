@@ -35,6 +35,7 @@ class MainActivity : Activity() {
             addView(TextView(context).apply { setText(R.string.restricted_settings_hint) })
             addView(TextView(context).apply { setText(R.string.drag_hint) })
             addView(unhide)
+            addView(TextView(context).apply { setText(R.string.licenses) })
         })
     }
 
