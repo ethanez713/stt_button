@@ -117,58 +117,61 @@ def release_take(pid: int, pidfile: Path = PIDFILE, flags: tuple[Path, ...] = (S
 
 
 def work(pcm: Path) -> None:
-    import gc
     import os
     import threading
 
-    from stt_button.asr import Recognizer, Slicer, join_slices
+    from stt_button.asr import Recognizer
     from stt_button.cleaner import Cleaner
+    from stt_button.live import LiveTake
 
     cfg = config.load()
     take_id = pcm.stem
-    # Unlike the phone, the desktop has RAM to spare, so the cleaner loads alongside the recognizer
-    # while the user talks instead of after the stop; that load was ~2 s of every stop's wait.
-    cleaner: dict = {}
+    loaded: dict = {}
 
     def load_cleaner():
         # The GPU through Ollama is ~4x the CPU here when the laptop is in its performance mode;
         # the in-process CPU backend covers Ollama being down.
         try:
-            cleaner["model"] = Cleaner(backend="ollama")
-        except OSError as err:
-            print(f"Ollama unavailable ({err}); cleaning on the CPU", file=sys.stderr)
-            cleaner["model"] = Cleaner()
+            try:
+                loaded["model"] = Cleaner(backend="ollama")
+            except OSError as err:
+                print(f"Ollama unavailable ({err}); cleaning on the CPU", file=sys.stderr)
+                loaded["model"] = Cleaner()
+        except Exception as err:
+            loaded["error"] = err
 
     loading = threading.Thread(target=load_cleaner, daemon=True)
     loading.start()
+
+    def get_cleaner():
+        loading.join()
+        if "error" in loaded:
+            raise loaded["error"]
+        return loaded["model"]
+
+    def release_cleaner():
+        loading.join()
+        model = loaded.pop("model", None)
+        if model is not None:
+            loaded["backend"] = model.backend
+            model.release()
+
     try:
-        recognizer = Recognizer()
-        slicer = Slicer(cfg["slice_max_s"], cfg["slice_search_s"])
+        live = LiveTake(Recognizer(), get_cleaner, cfg)
         tail = PcmTail(pcm)
-        texts = []
         deadline = time.monotonic() + cfg["take_cap_s"] + ORPHAN_GRACE_S
         while not (STOP_FLAG.exists() or CANCEL_FLAG.exists()) and time.monotonic() < deadline:
-            texts += [recognizer.recognize(slicer.samples[a:b]) for a, b in slicer.feed(tail.read())]
+            live.feed(tail.read())
             time.sleep(POLL_S)
         stopped = time.monotonic()
         if CANCEL_FLAG.exists():
             pcm.unlink(missing_ok=True)
-            release_take(os.getpid())
             return
-        slices = slicer.feed(tail.read()) + slicer.finish()
-        texts += [recognizer.recognize(slicer.samples[a:b]) for a, b in slices]
-        raw = join_slices(texts)
-        asr_ms = int((time.monotonic() - stopped) * 1000)
-        del recognizer
-        gc.collect()
-
-        cleaned, clean_ms = "", 0
-        if raw:
-            loading.join()
-            result = cleaner["model"].clean(raw)
-            cleaned, clean_ms = result.text, result.elapsed_ms
-            cleaner["model"].release()
-        write_result({"status": "text", "text": cleaned})
+        live.mark_stop()
+        live.feed(tail.read())
+        result = live.finish()
+        release_cleaner()
+        write_result({"status": "text", "text": result.cleaned})
         stop_to_result_ms = int((time.monotonic() - stopped) * 1000)
         # Released before the bookkeeping below, so the next take can start at once.
         release_take(os.getpid())
@@ -179,15 +182,17 @@ def work(pcm: Path) -> None:
         with LOG.open("a") as log:
             log.write(json.dumps({
                 "id": take_id, "ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-                "audio_s": round(audio_s, 2), "asr_ms_after_stop": asr_ms, "clean_ms": clean_ms,
-                "stop_to_result_ms": stop_to_result_ms,
-                "cleaner_backend": cleaner["model"].backend if "model" in cleaner else None,
-                "raw": raw, "cleaned": cleaned,
+                "audio_s": round(audio_s, 2), "asr_ms_after_stop": result.asr_ms_after_stop,
+                "clean_ms": live.clean_ms, "clean_ms_after_stop": result.clean_ms_after_stop,
+                "stop_to_result_ms": stop_to_result_ms, "clean_mode": result.clean_mode, "chunks": result.chunks,
+                "cleaner_backend": loaded.get("backend"),
+                "raw": result.raw, "cleaned": result.cleaned,
             }, ensure_ascii=False) + "\n")
     except Exception as err:
         write_result({"status": "error", "error": f"{type(err).__name__}: {err}"})
         raise
     finally:
+        release_cleaner()
         release_take(os.getpid())
 
 

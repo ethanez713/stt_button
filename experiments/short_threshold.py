@@ -46,12 +46,12 @@ def main() -> int:
     from stt_button.cleaner import Cleaner
 
     cleaner = Cleaner()
-    cleaner.clean("Warm up.")
+    cleaner.clean("Warm up.", skip=False)
     rows = []
     for i in ids:
         raw = (asr_dir / f"{i}.txt").read_text().strip()
         started = time.monotonic()
-        cleaned = cleaner.clean(raw).text
+        cleaned = cleaner.clean(raw, skip=False, min_tokens=config.load()["chunk_max_tokens"]).text
         ms = int((time.monotonic() - started) * 1000)
         if not (clean_dir / f"{i}.txt").exists():
             (clean_dir / f"{i}.txt").write_text(cleaned + "\n")

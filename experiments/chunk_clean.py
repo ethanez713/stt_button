@@ -78,11 +78,11 @@ def generate(texts: dict[str, str], ks: list[int]) -> None:
     try:
         for name, text, missing_whole, missing_k in pending:
             if missing_whole:
-                write_text(whole_path(name), cleaner.clean(text).text)
+                write_text(whole_path(name), cleaner.clean(text, skip=False, min_tokens=config.load()["chunk_max_tokens"]).text)
                 print(f"  {name} whole", flush=True)
             for k in missing_k:
                 chunks = cut_chunks(text, cleaner.count_tokens, k)
-                cleaned = [cleaner.clean(chunk).text for chunk in chunks]
+                cleaned = [cleaner.clean_chunk(chunk)[0] for chunk in chunks]
                 write_text(chunk_path(k, name), " ".join(part for part in cleaned if part))
                 print(f"  {name} chunk{k}: {len(chunks)} chunk(s)", flush=True)
     finally:

@@ -111,3 +111,66 @@ def test_given_a_write_that_ends_mid_sample_when_tailed_then_the_half_sample_wai
 
 def test_given_no_file_yet_when_tailed_then_empty(tmp_path):
     assert dictate.PcmTail(tmp_path / "missing.pcm").read().size == 0
+
+
+class ScriptedRecognizer:
+    def __init__(self, *texts):
+        self.texts = list(texts)
+
+    def recognize(self, samples):
+        return self.texts.pop(0)
+
+
+class UppercaseCleaner:
+    backend = "stub"
+
+    def __init__(self):
+        self.calls = []
+
+    def count_tokens(self, text):
+        return len(text.split())
+
+    def clean_chunk(self, chunk):
+        self.calls.append(chunk)
+        return chunk.upper(), 1
+
+
+def labelled(prefix, count):
+    return " ".join(" ".join([f"{prefix}{i}"] * 9) + "." for i in range(1, count + 1))
+
+
+def live_cfg():
+    from stt_button import config
+
+    return {**config.load(), "chunk_min_tokens": 15, "skip_max_words": 5}
+
+
+def test_given_a_three_slice_take_when_fed_then_chunks_are_cleaned_before_the_stop_and_joined_by_blank_lines():
+    from stt_button.live import LiveTake
+
+    cleaner = UppercaseCleaner()
+    slices = [labelled("a", 3), labelled("b", 3), labelled("c", 1)]
+    take = LiveTake(ScriptedRecognizer(*slices), lambda: cleaner, live_cfg())
+
+    take.feed(speech_like(65))
+    assert len(cleaner.calls) == 2
+    take.mark_stop()
+    result = take.finish()
+
+    assert len(cleaner.calls) == 4
+    assert result.chunks == 4 and result.clean_mode == "chunks"
+    assert result.cleaned == "\n\n".join(c.upper() for c in cleaner.calls)
+    assert result.raw == " ".join(slices)
+
+
+def test_given_a_five_word_take_when_finished_then_it_is_raw_and_the_cleaner_is_never_asked_for():
+    from stt_button.live import LiveTake
+
+    def forbidden():
+        raise AssertionError("the cleaner must not be touched")
+
+    take = LiveTake(ScriptedRecognizer("Meet at noon, okay."), forbidden, live_cfg())
+    take.feed(speech_like(3))
+    result = take.finish()
+
+    assert (result.cleaned, result.chunks, result.clean_mode) == ("Meet at noon, okay.", 0, "raw")

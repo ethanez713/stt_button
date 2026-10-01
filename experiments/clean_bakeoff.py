@@ -28,6 +28,7 @@ class OllamaCleaner:
     def __init__(self):
         cfg = config.load()
         self.spec = cfg["cleaners"][self.name]
+        self.chunk_min_tokens = cfg["chunk_min_tokens"]
         self.chunk_max_tokens = cfg["chunk_max_tokens"]
 
     @staticmethod
@@ -36,7 +37,7 @@ class OllamaCleaner:
 
     def clean(self, raw: str) -> cleaner.Cleaned:
         started = time.monotonic()
-        chunks = cleaner.chunk_transcript(raw, self.count_tokens, self.chunk_max_tokens)
+        chunks = cleaner.live_chunks(raw, self.count_tokens, self.chunk_min_tokens, self.chunk_max_tokens, final=True)
         outputs, in_tokens, out_tokens = [], 0, 0
         for chunk in chunks:
             n_in = self.count_tokens(chunk)

@@ -11,7 +11,6 @@ times are the phone's, from the speeds measured in docs/plans/results/09 and 10:
 """
 
 import argparse
-import re
 import statistics
 import sys
 
@@ -19,7 +18,7 @@ import numpy as np
 
 from experiments import paths
 from stt_button import config
-from stt_button.cleaner import split_sentences
+from stt_button.cleaner import skips_cleaner, split_sentences
 
 SAMPLE_RATE = 16000
 # Phone, 6 threads: decode seconds per audio window (results/10, step 7).
@@ -28,8 +27,6 @@ CLEANER_LOAD_S = 1.06
 PROMPT_TOKENS = 78
 PREFILL_TOK_S = 320
 DECODE_TOK_S = 127  # prompt lookup, best-of-3 median
-SKIP_MAX_WORDS = 40
-SELF_CORRECTION = re.compile(r"\b(actually,? no|scratch that|no,? wait|wait,? no|i mean)\b", re.I)
 
 
 def asr_s(audio_s: float) -> float:
@@ -39,10 +36,6 @@ def asr_s(audio_s: float) -> float:
 def clean_s(tokens: int) -> float:
     """Output length tracks input length for this cleaner."""
     return (PROMPT_TOKENS + tokens) / PREFILL_TOK_S + tokens / DECODE_TOK_S
-
-
-def skips_cleaner(text: str) -> bool:
-    return len(text.split()) <= SKIP_MAX_WORDS and not SELF_CORRECTION.search(text)
 
 
 def as_written(slices: list[tuple[float, float, str]], count) -> float:
@@ -71,7 +64,7 @@ def live(slices: list[tuple[float, float, str]], count, k: int) -> float:
     start, stop, last_text = slices[-1]
     done = max(worker_free, stop) + asr_s(stop - start)
     rest = " ".join(pending + committed + [last_text]).strip()
-    if rest and not skips_cleaner(whole):
+    if rest and not skips_cleaner(whole, config.load()):
         done += clean_s(count(rest))
     return done - stop
 
@@ -96,7 +89,7 @@ def main() -> int:
         slices = [(a / SAMPLE_RATE, b / SAMPLE_RATE, recognizer.recognize(samples[a:b]))
                   for a, b in slice_bounds(samples, cfg["slice_max_s"], cfg["slice_search_s"])]
         whole = " ".join(t for _, _, t in slices)
-        rows.append({"id": meta["id"], "short": skips_cleaner(whole), "audio_s": slices[-1][1],
+        rows.append({"id": meta["id"], "short": skips_cleaner(whole, cfg), "audio_s": slices[-1][1],
                      "written": as_written(slices, count), **{k: live(slices, count, k) for k in args.k}})
 
     for label, group in (("all", rows), ("skipped short", [r for r in rows if r["short"]]),

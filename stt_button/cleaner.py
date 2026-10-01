@@ -45,29 +45,48 @@ def split_sentences(text: str) -> list[str]:
     return [s for s in re.split(r"(?<=[.!?])\s+", text.strip()) if s]
 
 
-def chunk_transcript(text: str, count_tokens: Callable[[str], int], limit: int) -> list[str]:
-    """Fewest in-order chunks of whole sentences, each within limit tokens.
-
-    A sentence longer than the limit on its own is split at word boundaries.
-    """
+def _pieces(sentences: list[str], count_tokens: Callable[[str], int], max_tokens: int) -> list[str]:
     pieces = []
-    for sentence in split_sentences(text):
-        if count_tokens(sentence) <= limit:
+    for sentence in sentences:
+        if count_tokens(sentence) <= max_tokens:
             pieces.append(sentence)
         else:
-            pieces.extend(_split_words(sentence, count_tokens, limit))
+            pieces.extend(_split_words(sentence, count_tokens, max_tokens))
+    return pieces
+
+
+def live_chunks(text: str, count_tokens: Callable[[str], int], min_tokens: int, max_tokens: int,
+                final: bool) -> list[str]:
+    """Chunks of whole sentences, each closed once it holds min_tokens or more.
+
+    A sentence over max_tokens is split at word boundaries first. With final=False the last
+    sentence is withheld, since the next slice may continue it, and an unclosed remainder is not
+    returned; the chunks are then a prefix of what final=True returns for any longer text that
+    starts with the same words.
+    """
+    sentences = split_sentences(text)
+    if not final:
+        sentences = sentences[:-1]
     chunks = []
     current = ""
-    for piece in pieces:
-        candidate = f"{current} {piece}" if current else piece
-        if current and count_tokens(candidate) > limit:
+    for piece in _pieces(sentences, count_tokens, max_tokens):
+        current = f"{current} {piece}" if current else piece
+        if count_tokens(current) >= min_tokens:
             chunks.append(current)
-            current = piece
-        else:
-            current = candidate
-    if current:
+            current = ""
+    if final and current:
         chunks.append(current)
     return chunks
+
+
+def has_self_correction(text: str, cues: list[str]) -> bool:
+    spoken = re.sub(r"[^\w\s]", "", text.lower())
+    return any(re.search(r"(?<![a-z])" + r"\s+".join(map(re.escape, cue.split())) + r"(?![a-z])", spoken)
+               for cue in cues)
+
+
+def skips_cleaner(text: str, cfg: dict) -> bool:
+    return len(text.split()) <= cfg["skip_max_words"] and not has_self_correction(text, cfg["self_correction_cues"])
 
 
 def _split_words(sentence: str, count_tokens: Callable[[str], int], limit: int) -> list[str]:
@@ -103,7 +122,7 @@ class Cleaner:
         cfg = config.load()
         self.name = name or cfg["cleaner"]
         self.spec = cfg["cleaners"][self.name]
-        self.chunk_max_tokens = cfg["chunk_max_tokens"]
+        self.cfg = cfg
         model = config.model_dir() / self.spec["model"]
         if not model.is_file():
             raise FileNotFoundError(f"cleaner model missing: {model}")
@@ -124,23 +143,32 @@ class Cleaner:
     def count_tokens(self, text: str) -> int:
         return len(self._llm.tokenize(text.encode(), add_bos=False, special=False))
 
-    def clean(self, raw: str) -> Cleaned:
+    def clean_chunk(self, chunk: str) -> tuple[str, int]:
+        """The cleaned text of one chunk and the tokens generated."""
+        prompt = render_prompt(self.spec["system_prompt"], user_turn(self.spec["control_line"], chunk))
+        limit = max_new_tokens(self.count_tokens(chunk), self.spec["max_new_tokens_ratio"],
+                               self.spec["max_new_tokens_pad"])
+        text, n_out = self._generate(prompt, limit)
+        return text.strip(), n_out
+
+    def clean(self, raw: str, skip: bool = True, min_tokens: int | None = None) -> Cleaned:
+        """skip=False cleans even a take the skip rule would insert as recognized; min_tokens
+        replaces the configured chunk size, which experiments use to compare against a whole pass."""
         started = time.monotonic()
+        if skip and skips_cleaner(raw, self.cfg):
+            return Cleaned(raw, int((time.monotonic() - started) * 1000), 0, 0, 0)
         outputs = []
         in_tokens = out_tokens = 0
-        chunks = chunk_transcript(raw, self.count_tokens, self.chunk_max_tokens)
+        chunks = live_chunks(raw, self.count_tokens, min_tokens or self.cfg["chunk_min_tokens"],
+                             self.cfg["chunk_max_tokens"], final=True)
         for chunk in chunks:
-            prompt = render_prompt(self.spec["system_prompt"], user_turn(self.spec["control_line"], chunk))
-            n_in = self.count_tokens(chunk)
-            limit = max_new_tokens(n_in, self.spec["max_new_tokens_ratio"], self.spec["max_new_tokens_pad"])
-            text, n_out = self._generate(prompt, limit)
-            outputs.append(text.strip())
-            in_tokens += n_in
+            text, n_out = self.clean_chunk(chunk)
+            outputs.append(text)
+            in_tokens += self.count_tokens(chunk)
             out_tokens += n_out
         # A chunk boundary is a sentence end; a paragraph break there cannot glue a list onto prose.
         return Cleaned("\n\n".join(o for o in outputs if o), int((time.monotonic() - started) * 1000),
                        len(chunks), in_tokens, out_tokens)
-
 
     def _generate(self, prompt: str, max_tokens: int) -> tuple[str, int]:
         # Both backends decode greedily with repeat_penalty 1.0: the bindings default to 1.1, and

@@ -1,0 +1,679 @@
+{
+ "slicer": [
+  {
+   "name": "pauses_inside_search_window",
+   "segments": [
+    [
+     "noise",
+     27,
+     8000
+    ],
+    [
+     "silence",
+     0.2
+    ],
+    [
+     "noise",
+     29.8,
+     8000
+    ],
+    [
+     "silence",
+     0.2
+    ],
+    [
+     "noise",
+     17.8,
+     8000
+    ]
+   ],
+   "slice_max_s": 30,
+   "search_s": 5,
+   "bounds": [
+    [
+     0,
+     432800
+    ],
+    [
+     432800,
+     912000
+    ],
+    [
+     912000,
+     1200000
+    ]
+   ]
+  },
+  {
+   "name": "no_pause_at_all",
+   "segments": [
+    [
+     "noise",
+     95,
+     8000
+    ]
+   ],
+   "slice_max_s": 30,
+   "search_s": 5,
+   "bounds": [
+    [
+     0,
+     401123
+    ],
+    [
+     401123,
+     807968
+    ],
+    [
+     807968,
+     1244965
+    ],
+    [
+     1244965,
+     1520000
+    ]
+   ]
+  },
+  {
+   "name": "exactly_one_slice",
+   "segments": [
+    [
+     "noise",
+     30,
+     8000
+    ]
+   ],
+   "slice_max_s": 30,
+   "search_s": 5,
+   "bounds": [
+    [
+     0,
+     480000
+    ]
+   ]
+  },
+  {
+   "name": "empty",
+   "segments": [
+    [
+     "silence",
+     0
+    ]
+   ],
+   "slice_max_s": 30,
+   "search_s": 5,
+   "bounds": []
+  },
+  {
+   "name": "short_slice_limit",
+   "segments": [
+    [
+     "noise",
+     9,
+     8000
+    ],
+    [
+     "silence",
+     0.3
+    ],
+    [
+     "noise",
+     11,
+     8000
+    ]
+   ],
+   "slice_max_s": 8,
+   "search_s": 2,
+   "bounds": [
+    [
+     0,
+     97390
+    ],
+    [
+     97390,
+     198213
+    ],
+    [
+     198213,
+     324800
+    ]
+   ]
+  }
+ ],
+ "live_chunks": [
+  {
+   "name": "mixed_sentences",
+   "text": "word word word word word word last. word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last? word word word word word word word word word word word last. word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last! word word word word word word word word last. word word word word word word word word word word word word word word word word word word word word word word word word word word word last. word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last.",
+   "min_tokens": 40,
+   "max_tokens": 1000,
+   "final": false,
+   "chunks": [
+    "word word word word word word last. word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last? word word word word word word word word word word word last.",
+    "word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last!"
+   ]
+  },
+  {
+   "name": "mixed_sentences",
+   "text": "word word word word word word last. word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last? word word word word word word word word word word word last. word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last! word word word word word word word word last. word word word word word word word word word word word word word word word word word word word word word word word word word word word last. word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last.",
+   "min_tokens": 40,
+   "max_tokens": 1000,
+   "final": true,
+   "chunks": [
+    "word word word word word word last. word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last? word word word word word word word word word word word last.",
+    "word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last!",
+    "word word word word word word word word last. word word word word word word word word word word word word word word word word word word word word word word word word word word word last. word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last."
+   ]
+  },
+  {
+   "name": "mixed_sentences",
+   "text": "word word word word word word last. word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last? word word word word word word word word word word word last. word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last! word word word word word word word word last. word word word word word word word word word word word word word word word word word word word word word word word word word word word last. word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last.",
+   "min_tokens": 128,
+   "max_tokens": 1000,
+   "final": false,
+   "chunks": [
+    "word word word word word word last. word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last? word word word word word word word word word word word last. word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last! word word word word word word word word last. word word word word word word word word word word word word word word word word word word word word word word word word word word word last."
+   ]
+  },
+  {
+   "name": "mixed_sentences",
+   "text": "word word word word word word last. word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last? word word word word word word word word word word word last. word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last! word word word word word word word word last. word word word word word word word word word word word word word word word word word word word word word word word word word word word last. word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last.",
+   "min_tokens": 128,
+   "max_tokens": 1000,
+   "final": true,
+   "chunks": [
+    "word word word word word word last. word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last? word word word word word word word word word word word last. word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last! word word word word word word word word last. word word word word word word word word word word word word word word word word word word word word word word word word word word word last.",
+    "word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last."
+   ]
+  },
+  {
+   "name": "mixed_sentences",
+   "text": "word word word word word word last. word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last? word word word word word word word word word word word last. word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last! word word word word word word word word last. word word word word word word word word word word word word word word word word word word word word word word word word word word word last. word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last.",
+   "min_tokens": 10,
+   "max_tokens": 10,
+   "final": false,
+   "chunks": [
+    "word word word word word word last. word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "last? word word word word word word word word word word",
+    "word last. word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word last! word word word word word word word word last.",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word"
+   ]
+  },
+  {
+   "name": "mixed_sentences",
+   "text": "word word word word word word last. word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last? word word word word word word word word word word word last. word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last! word word word word word word word word last. word word word word word word word word word word word word word word word word word word word word word word word word word word word last. word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last.",
+   "min_tokens": 10,
+   "max_tokens": 10,
+   "final": true,
+   "chunks": [
+    "word word word word word word last. word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "last? word word word word word word word word word word",
+    "word last. word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word last! word word word word word word word word last.",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word last. word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word last."
+   ]
+  },
+  {
+   "name": "long_and_short",
+   "text": "word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last. word word last. word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last. word word word word word word word word word word word word word word word word word word word last. word word word word last. word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last. word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last. word word word last.",
+   "min_tokens": 40,
+   "max_tokens": 1000,
+   "final": false,
+   "chunks": [
+    "word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last.",
+    "word word last. word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last.",
+    "word word word word word word word word word word word word word word word word word word word last. word word word word last. word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last.",
+    "word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last."
+   ]
+  },
+  {
+   "name": "long_and_short",
+   "text": "word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last. word word last. word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last. word word word word word word word word word word word word word word word word word word word last. word word word word last. word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last. word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last. word word word last.",
+   "min_tokens": 40,
+   "max_tokens": 1000,
+   "final": true,
+   "chunks": [
+    "word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last.",
+    "word word last. word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last.",
+    "word word word word word word word word word word word word word word word word word word word last. word word word word last. word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last.",
+    "word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last.",
+    "word word word last."
+   ]
+  },
+  {
+   "name": "long_and_short",
+   "text": "word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last. word word last. word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last. word word word word word word word word word word word word word word word word word word word last. word word word word last. word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last. word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last. word word word last.",
+   "min_tokens": 128,
+   "max_tokens": 1000,
+   "final": false,
+   "chunks": [
+    "word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last. word word last. word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last.",
+    "word word word word word word word word word word word word word word word word word word word last. word word word word last. word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last. word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last."
+   ]
+  },
+  {
+   "name": "long_and_short",
+   "text": "word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last. word word last. word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last. word word word word word word word word word word word word word word word word word word word last. word word word word last. word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last. word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last. word word word last.",
+   "min_tokens": 128,
+   "max_tokens": 1000,
+   "final": true,
+   "chunks": [
+    "word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last. word word last. word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last.",
+    "word word word word word word word word word word word word word word word word word word word last. word word word word last. word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last. word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last.",
+    "word word word last."
+   ]
+  },
+  {
+   "name": "long_and_short",
+   "text": "word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last. word word last. word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last. word word word word word word word word word word word word word word word word word word word last. word word word word last. word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last. word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last. word word word last.",
+   "min_tokens": 10,
+   "max_tokens": 10,
+   "final": false,
+   "chunks": [
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word last.",
+    "word word last. word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word last.",
+    "word word word word word word word word word word",
+    "word word word word word word word word word last.",
+    "word word word word last. word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word last.",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word last."
+   ]
+  },
+  {
+   "name": "long_and_short",
+   "text": "word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last. word word last. word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last. word word word word word word word word word word word word word word word word word word word last. word word word word last. word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last. word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last. word word word last.",
+   "min_tokens": 10,
+   "max_tokens": 10,
+   "final": true,
+   "chunks": [
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word last.",
+    "word word last. word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word last.",
+    "word word word word word word word word word word",
+    "word word word word word word word word word last.",
+    "word word word word last. word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word last.",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word last.",
+    "word word word last."
+   ]
+  },
+  {
+   "name": "no_final_punctuation",
+   "text": "so um word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last. and then word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last. word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last. word word word word word word word word word word word last. word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last.",
+   "min_tokens": 40,
+   "max_tokens": 1000,
+   "final": false,
+   "chunks": [
+    "so um word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last.",
+    "and then word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last. word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last."
+   ]
+  },
+  {
+   "name": "no_final_punctuation",
+   "text": "so um word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last. and then word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last. word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last. word word word word word word word word word word word last. word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last.",
+   "min_tokens": 40,
+   "max_tokens": 1000,
+   "final": true,
+   "chunks": [
+    "so um word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last.",
+    "and then word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last. word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last.",
+    "word word word word word word word word word word word last. word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last."
+   ]
+  },
+  {
+   "name": "no_final_punctuation",
+   "text": "so um word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last. and then word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last. word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last. word word word word word word word word word word word last. word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last.",
+   "min_tokens": 128,
+   "max_tokens": 1000,
+   "final": false,
+   "chunks": [
+    "so um word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last. and then word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last. word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last."
+   ]
+  },
+  {
+   "name": "no_final_punctuation",
+   "text": "so um word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last. and then word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last. word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last. word word word word word word word word word word word last. word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last.",
+   "min_tokens": 128,
+   "max_tokens": 1000,
+   "final": true,
+   "chunks": [
+    "so um word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last. and then word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last. word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last.",
+    "word word word word word word word word word word word last. word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last."
+   ]
+  },
+  {
+   "name": "no_final_punctuation",
+   "text": "so um word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last. and then word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last. word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last. word word word word word word word word word word word last. word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last.",
+   "min_tokens": 10,
+   "max_tokens": 10,
+   "final": false,
+   "chunks": [
+    "so um word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word last. and then word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word last. word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "last. word word word word word word word word word word"
+   ]
+  },
+  {
+   "name": "no_final_punctuation",
+   "text": "so um word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last. and then word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last. word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last. word word word word word word word word word word word last. word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last.",
+   "min_tokens": 10,
+   "max_tokens": 10,
+   "final": true,
+   "chunks": [
+    "so um word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word last. and then word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word last. word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "last. word word word word word word word word word word",
+    "word last. word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word word word word word word last."
+   ]
+  },
+  {
+   "name": "one_overlong_sentence",
+   "text": "word word last. word word word word word word word word word word word word word word word word word word word word word word word word last. word word last.",
+   "min_tokens": 40,
+   "max_tokens": 1000,
+   "final": false,
+   "chunks": []
+  },
+  {
+   "name": "one_overlong_sentence",
+   "text": "word word last. word word word word word word word word word word word word word word word word word word word word word word word word last. word word last.",
+   "min_tokens": 40,
+   "max_tokens": 1000,
+   "final": true,
+   "chunks": [
+    "word word last. word word word word word word word word word word word word word word word word word word word word word word word word last. word word last."
+   ]
+  },
+  {
+   "name": "one_overlong_sentence",
+   "text": "word word last. word word word word word word word word word word word word word word word word word word word word word word word word last. word word last.",
+   "min_tokens": 128,
+   "max_tokens": 1000,
+   "final": false,
+   "chunks": []
+  },
+  {
+   "name": "one_overlong_sentence",
+   "text": "word word last. word word word word word word word word word word word word word word word word word word word word word word word word last. word word last.",
+   "min_tokens": 128,
+   "max_tokens": 1000,
+   "final": true,
+   "chunks": [
+    "word word last. word word word word word word word word word word word word word word word word word word word word word word word word last. word word last."
+   ]
+  },
+  {
+   "name": "one_overlong_sentence",
+   "text": "word word last. word word word word word word word word word word word word word word word word word word word word word word word word last. word word last.",
+   "min_tokens": 10,
+   "max_tokens": 10,
+   "final": false,
+   "chunks": [
+    "word word last. word word word word word word word word word word",
+    "word word word word word word word word word word"
+   ]
+  },
+  {
+   "name": "one_overlong_sentence",
+   "text": "word word last. word word word word word word word word word word word word word word word word word word word word word word word word last. word word last.",
+   "min_tokens": 10,
+   "max_tokens": 10,
+   "final": true,
+   "chunks": [
+    "word word last. word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word last. word word last."
+   ]
+  },
+  {
+   "name": "blank",
+   "text": "   ",
+   "min_tokens": 40,
+   "max_tokens": 1000,
+   "final": false,
+   "chunks": []
+  },
+  {
+   "name": "blank",
+   "text": "   ",
+   "min_tokens": 40,
+   "max_tokens": 1000,
+   "final": true,
+   "chunks": []
+  },
+  {
+   "name": "blank",
+   "text": "   ",
+   "min_tokens": 128,
+   "max_tokens": 1000,
+   "final": false,
+   "chunks": []
+  },
+  {
+   "name": "blank",
+   "text": "   ",
+   "min_tokens": 128,
+   "max_tokens": 1000,
+   "final": true,
+   "chunks": []
+  },
+  {
+   "name": "blank",
+   "text": "   ",
+   "min_tokens": 10,
+   "max_tokens": 10,
+   "final": false,
+   "chunks": []
+  },
+  {
+   "name": "blank",
+   "text": "   ",
+   "min_tokens": 10,
+   "max_tokens": 10,
+   "final": true,
+   "chunks": []
+  }
+ ],
+ "skips_cleaner": {
+  "skip_max_words": 40,
+  "self_correction_cues": [
+   "actually",
+   "sorry",
+   "i mean",
+   "i meant",
+   "scratch that",
+   "never mind",
+   "make that",
+   "make it",
+   "no",
+   "not",
+   "wait",
+   "oops",
+   "rather",
+   "correction",
+   "i said",
+   "instead"
+  ],
+  "cases": [
+   {
+    "text": "",
+    "skipped": true
+   },
+   {
+    "text": "Yes.",
+    "skipped": true
+   },
+   {
+    "text": "meet Tuesday, actually no, Wednesday",
+    "skipped": false
+   },
+   {
+    "text": "Dinner is at seven I mean eight",
+    "skipped": false
+   },
+   {
+    "text": "a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a ",
+    "skipped": false
+   },
+   {
+    "text": "a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a ",
+    "skipped": true
+   },
+   {
+    "text": "this is a cannot be rather odd",
+    "skipped": false
+   },
+   {
+    "text": "the knot was nothing",
+    "skipped": true
+   },
+   {
+    "text": "Okay. Wait, what?",
+    "skipped": false
+   },
+   {
+    "text": "Not apples, pears?",
+    "skipped": false
+   },
+   {
+    "text": "555-010 no 555-010-7896",
+    "skipped": false
+   },
+   {
+    "text": "Tuesday? Actually make that Wednesday",
+    "skipped": false
+   }
+  ]
+ }
+}

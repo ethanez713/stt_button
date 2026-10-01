@@ -24,10 +24,10 @@ def main() -> int:
     outputs, timings = {}, {}
     for backend in ("llama", "ollama"):
         cleaner = Cleaner(backend=backend)
-        cleaner.clean("Warm up.")
+        cleaner.clean("Warm up.", skip=False)
         outputs[backend], timings[backend] = {}, []
         for name, text in transcripts.items():
-            result = cleaner.clean(text)
+            result = cleaner.clean(text, skip=False, min_tokens=config.load()["chunk_max_tokens"])
             outputs[backend][name] = result.text
             timings[backend].append((result.in_tokens, result.elapsed_ms))
         cleaner.release()
