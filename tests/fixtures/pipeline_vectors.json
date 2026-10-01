@@ -29,6 +29,7 @@
    ],
    "slice_max_s": 30,
    "search_s": 5,
+   "pause": {},
    "bounds": [
     [
      0,
@@ -55,6 +56,7 @@
    ],
    "slice_max_s": 30,
    "search_s": 5,
+   "pause": {},
    "bounds": [
     [
      0,
@@ -85,6 +87,7 @@
    ],
    "slice_max_s": 30,
    "search_s": 5,
+   "pause": {},
    "bounds": [
     [
      0,
@@ -102,6 +105,7 @@
    ],
    "slice_max_s": 30,
    "search_s": 5,
+   "pause": {},
    "bounds": []
   },
   {
@@ -124,6 +128,7 @@
    ],
    "slice_max_s": 8,
    "search_s": 2,
+   "pause": {},
    "bounds": [
     [
      0,
@@ -136,6 +141,292 @@
     [
      198213,
      324800
+    ]
+   ]
+  },
+  {
+   "name": "pause_cuts_at_the_middle",
+   "segments": [
+    [
+     "silence",
+     0.3
+    ],
+    [
+     "noise",
+     3,
+     8000
+    ],
+    [
+     "silence",
+     1.5
+    ],
+    [
+     "noise",
+     4,
+     8000
+    ],
+    [
+     "silence",
+     1.0
+    ],
+    [
+     "noise",
+     2,
+     8000
+    ]
+   ],
+   "slice_max_s": 30,
+   "search_s": 5,
+   "pause": {
+    "pause_s": 0.8,
+    "slice_min_s": 2,
+    "pause_margin_db": 10
+   },
+   "bounds": [
+    [
+     0,
+     54400
+    ],
+    [
+     54400,
+     147200
+    ],
+    [
+     147200,
+     188800
+    ]
+   ]
+  },
+  {
+   "name": "pause_inside_slice_min",
+   "segments": [
+    [
+     "silence",
+     0.3
+    ],
+    [
+     "noise",
+     0.5,
+     8000
+    ],
+    [
+     "silence",
+     1.0
+    ],
+    [
+     "noise",
+     3,
+     8000
+    ]
+   ],
+   "slice_max_s": 30,
+   "search_s": 5,
+   "pause": {
+    "pause_s": 0.8,
+    "slice_min_s": 2,
+    "pause_margin_db": 10
+   },
+   "bounds": [
+    [
+     0,
+     76800
+    ]
+   ]
+  },
+  {
+   "name": "all_silence",
+   "segments": [
+    [
+     "silence",
+     10
+    ]
+   ],
+   "slice_max_s": 30,
+   "search_s": 5,
+   "pause": {
+    "pause_s": 0.8,
+    "slice_min_s": 2,
+    "pause_margin_db": 10
+   },
+   "bounds": [
+    [
+     0,
+     160000
+    ]
+   ]
+  },
+  {
+   "name": "leading_silence",
+   "segments": [
+    [
+     "silence",
+     3
+    ],
+    [
+     "noise",
+     2,
+     8000
+    ],
+    [
+     "silence",
+     2
+    ],
+    [
+     "noise",
+     1,
+     8000
+    ]
+   ],
+   "slice_max_s": 30,
+   "search_s": 5,
+   "pause": {
+    "pause_s": 0.8,
+    "slice_min_s": 2,
+    "pause_margin_db": 10
+   },
+   "bounds": [
+    [
+     0,
+     86400
+    ],
+    [
+     86400,
+     128000
+    ]
+   ]
+  },
+  {
+   "name": "short_gap_then_hard_cut",
+   "segments": [
+    [
+     "silence",
+     0.3
+    ],
+    [
+     "noise",
+     29,
+     8000
+    ],
+    [
+     "silence",
+     0.5
+    ],
+    [
+     "noise",
+     10,
+     8000
+    ],
+    [
+     "silence",
+     1.0
+    ],
+    [
+     "noise",
+     3,
+     8000
+    ]
+   ],
+   "slice_max_s": 30,
+   "search_s": 5,
+   "pause": {
+    "pause_s": 0.8,
+    "slice_min_s": 2,
+    "pause_margin_db": 10
+   },
+   "bounds": [
+    [
+     0,
+     54400
+    ],
+    [
+     54400,
+     469600
+    ],
+    [
+     469600,
+     700800
+    ]
+   ]
+  },
+  {
+   "name": "long_silence_cuts_once",
+   "segments": [
+    [
+     "silence",
+     0.3
+    ],
+    [
+     "noise",
+     3,
+     8000
+    ],
+    [
+     "silence",
+     5
+    ],
+    [
+     "noise",
+     3,
+     8000
+    ]
+   ],
+   "slice_max_s": 30,
+   "search_s": 5,
+   "pause": {
+    "pause_s": 0.8,
+    "slice_min_s": 2,
+    "pause_margin_db": 10
+   },
+   "bounds": [
+    [
+     0,
+     54400
+    ],
+    [
+     54400,
+     180800
+    ]
+   ]
+  },
+  {
+   "name": "quiet_speech_over_a_noise_floor",
+   "segments": [
+    [
+     "noise",
+     2,
+     300
+    ],
+    [
+     "noise",
+     2,
+     3000
+    ],
+    [
+     "noise",
+     1.5,
+     300
+    ],
+    [
+     "noise",
+     2,
+     3000
+    ]
+   ],
+   "slice_max_s": 30,
+   "search_s": 5,
+   "pause": {
+    "pause_s": 0.8,
+    "slice_min_s": 2,
+    "pause_margin_db": 10
+   },
+   "bounds": [
+    [
+     0,
+     70400
+    ],
+    [
+     70400,
+     120000
     ]
    ]
   }

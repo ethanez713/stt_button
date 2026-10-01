@@ -35,7 +35,7 @@ class LiveTake:
         self.recognizer = recognizer
         self.get_cleaner = get_cleaner
         self.cfg = cfg
-        self.slicer = Slicer(cfg["slice_max_s"], cfg["slice_search_s"])
+        self.slicer = Slicer.from_config(cfg)
         self.texts: list[str] = []
         self.cleaned_chunks: dict[str, str] = {}
         self.asr_ms = 0

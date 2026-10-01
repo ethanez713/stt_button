@@ -60,3 +60,44 @@ def test_read_wav_scales_and_rejects_wrong_rate(tmp_path):
         w.writeframes(b"\0\0")
     with pytest.raises(ValueError):
         asr.read_wav(bad)
+
+
+def vector_cases():
+    from tests import make_vectors
+
+    return [(name, segments, slice_max_s, search_s, (pause[0] if pause else {}))
+            for name, (segments, slice_max_s, search_s, *pause) in make_vectors.SLICER_CASES.items()]
+
+
+@pytest.mark.parametrize("name, segments, slice_max_s, search_s, options", vector_cases())
+@pytest.mark.parametrize("piece", [777, 1600, 4000, 48000])
+def test_pieces_cut_exactly_where_the_whole_signal_does(name, segments, slice_max_s, search_s, options, piece):
+    from tests import make_vectors
+
+    audio = make_vectors.to_float(make_vectors.pcm_signal(segments))
+    slicer = asr.Slicer(slice_max_s, search_s, **options)
+    streamed = [cut for start in range(0, len(audio), piece) for cut in slicer.feed(audio[start:start + piece])]
+    streamed += slicer.finish()
+
+    assert streamed == asr.slice_bounds(audio, slice_max_s, search_s, **options)
+
+
+def test_pause_state_follows_the_audio():
+    from tests import make_vectors
+
+    pause = make_vectors.PAUSE
+    slicer = asr.Slicer(30, 5, **pause)
+    audio = make_vectors.to_float(make_vectors.pcm_signal(
+        [["silence", 3], ["noise", 1, 8000], ["silence", 0.5], ["silence", 0.5]]))
+
+    slicer.feed(audio[:int(4.5 * SR)])
+    assert not slicer.paused
+    assert slicer.last_speech_end == 4 * SR
+    slicer.feed(audio[int(4.5 * SR):])
+    assert slicer.paused
+
+
+def test_without_pause_s_nothing_is_ever_paused():
+    slicer = asr.Slicer(30, 5)
+    slicer.feed(np.zeros(10 * SR, dtype=np.float32))
+    assert not slicer.paused and slicer.last_speech_end is None

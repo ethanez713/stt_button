@@ -44,6 +44,8 @@ def words(text: str) -> int:
     return len(text.split())
 
 
+PAUSE = {"pause_s": 0.8, "slice_min_s": 2, "pause_margin_db": 10}
+
 SLICER_CASES = {
     "pauses_inside_search_window": ([["noise", 27, 8000], ["silence", 0.2], ["noise", 29.8, 8000],
                                      ["silence", 0.2], ["noise", 17.8, 8000]], 30, 5),
@@ -51,6 +53,16 @@ SLICER_CASES = {
     "exactly_one_slice": ([["noise", 30, 8000]], 30, 5),
     "empty": ([["silence", 0]], 30, 5),
     "short_slice_limit": ([["noise", 9, 8000], ["silence", 0.3], ["noise", 11, 8000]], 8, 2),
+    "pause_cuts_at_the_middle": ([["silence", 0.3], ["noise", 3, 8000], ["silence", 1.5], ["noise", 4, 8000], ["silence", 1.0],
+                                  ["noise", 2, 8000]], 30, 5, PAUSE),
+    "pause_inside_slice_min": ([["silence", 0.3], ["noise", 0.5, 8000], ["silence", 1.0], ["noise", 3, 8000]], 30, 5, PAUSE),
+    "all_silence": ([["silence", 10]], 30, 5, PAUSE),
+    "leading_silence": ([["silence", 3], ["noise", 2, 8000], ["silence", 2], ["noise", 1, 8000]], 30, 5, PAUSE),
+    "short_gap_then_hard_cut": ([["silence", 0.3], ["noise", 29, 8000], ["silence", 0.5], ["noise", 10, 8000], ["silence", 1.0],
+                                 ["noise", 3, 8000]], 30, 5, PAUSE),
+    "long_silence_cuts_once": ([["silence", 0.3], ["noise", 3, 8000], ["silence", 5], ["noise", 3, 8000]], 30, 5, PAUSE),
+    "quiet_speech_over_a_noise_floor": ([["noise", 2, 300], ["noise", 2, 3000], ["noise", 1.5, 300],
+                                         ["noise", 2, 3000]], 30, 5, PAUSE),
 }
 
 CHUNK_TEXTS = {
@@ -70,11 +82,11 @@ SKIP_TEXTS = ["", "Yes.", "meet Tuesday, actually no, Wednesday", "Dinner is at 
 def vectors() -> dict:
     cfg = config.load()
     slicer = []
-    for name, (segments, slice_max_s, search_s) in SLICER_CASES.items():
-        pcm = pcm_signal(segments)
-        bounds = asr.slice_bounds(to_float(pcm), slice_max_s, search_s)
+    for name, (segments, slice_max_s, search_s, *pause) in SLICER_CASES.items():
+        pause = pause[0] if pause else {}
+        bounds = asr.slice_bounds(to_float(pcm_signal(segments)), slice_max_s, search_s, **pause)
         slicer.append({"name": name, "segments": segments, "slice_max_s": slice_max_s, "search_s": search_s,
-                       "bounds": [list(b) for b in bounds]})
+                       "pause": pause, "bounds": [list(b) for b in bounds]})
     chunks = []
     for name, text in CHUNK_TEXTS.items():
         for lo, hi in ((40, cfg["chunk_max_tokens"]), (cfg["chunk_min_tokens"], cfg["chunk_max_tokens"]), (10, 10)):
