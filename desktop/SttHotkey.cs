@@ -229,7 +229,14 @@ class HotkeyWindow : Form {
         restore.Tick += (s, e) => {
             restore.Stop();
             try {
-                if (saved != null) Clipboard.SetDataObject(saved, true); else Clipboard.Clear();
+                if (saved != null) {
+                    // Without these, the restore re-enters Win+V history as a duplicate of the old clip.
+                    saved.SetData("CanIncludeInClipboardHistory", new MemoryStream(BitConverter.GetBytes(0)));
+                    saved.SetData("CanUploadToCloudClipboard", new MemoryStream(BitConverter.GetBytes(0)));
+                    Clipboard.SetDataObject(saved, true);
+                } else {
+                    Clipboard.Clear();
+                }
             } catch (ExternalException) { }
         };
         restore.Start();
