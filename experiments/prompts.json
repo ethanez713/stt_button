@@ -49,6 +49,12 @@
     {"id": "s21", "text": "Explain why you'll miss standup tomorrow."},
     {"id": "s22", "text": "Give someone directions to your place from the station."},
     {"id": "s23", "text": "Summarize your day in two or three sentences."},
-    {"id": "s24", "text": "Ask a friend for a book recommendation and say what you liked last."}
+    {"id": "s24", "text": "Ask a friend for a book recommendation and say what you liked last."},
+    {"id": "s25", "text": "Say you'll meet on Tuesday, then change it to Wednesday mid-message, however you'd naturally correct yourself."},
+    {"id": "s26", "text": "Say dinner is at seven, then correct it to eight, however you'd naturally correct yourself."},
+    {"id": "s27", "text": "Ask someone to grab apples, then change your mind to pears, however you'd naturally correct yourself."},
+    {"id": "s28", "text": "Say you'll be there in ten minutes, then correct it to twenty, however you'd naturally correct yourself."},
+    {"id": "s29", "text": "Tell someone the meeting is in room four, then correct it to room five, however you'd naturally correct yourself."},
+    {"id": "s30", "text": "Give someone a phone number, misspeaking one digit and fixing it, however you'd naturally correct yourself."}
   ]
 }
