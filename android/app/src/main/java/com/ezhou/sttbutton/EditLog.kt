@@ -10,8 +10,10 @@ class EditLog(private val file: File) {
         file.parentFile?.mkdirs()
     }
 
-    fun write(event: String, id: String, vararg fields: Pair<String, Any?>) = synchronized(this) {
-        val line = JSONObject().put("event", event).put("id", id).put("ts", Instant.now().toString())
+    fun write(event: String, id: String, vararg fields: Pair<String, Any?>, tsMs: Long? = null) = synchronized(this) {
+        val ts = if (tsMs == null) Instant.now() else Instant.ofEpochMilli(tsMs)
+        val line = JSONObject().put("event", event).put("ts", ts.toString())
+        if (id.isNotEmpty()) line.put("id", id)
         for ((key, value) in fields) line.put(key, value ?: JSONObject.NULL)
         file.appendText(line.toString() + "\n")
     }

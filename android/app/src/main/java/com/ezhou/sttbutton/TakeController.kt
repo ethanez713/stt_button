@@ -29,7 +29,10 @@ class TakeController(private val service: DictationService, private val overlay:
     private var tracker: FieldTracker? = null
     private val capRunnable = Runnable { run?.let(::stop) }
 
-    private class Run(val take: Take, val pcm: File, val models: Models, val live: LiveTake, val recorder: Recorder) {
+    private class Run(
+        val take: Take, val pcm: File, val models: Models, val live: LiveTake, val recorder: Recorder,
+        val cost: TakeCost, val sampler: CostSampler,
+    ) {
         @Volatile var stopRequested = false
         @Volatile var aborted = false
         var stoppedAtMs = 0L
@@ -70,7 +73,8 @@ class TakeController(private val service: DictationService, private val overlay:
         val live = LiveTake(models.recognizer, models::cleaner, cfg, prepareCleaner = models::prepareCleaner)
         val pcm = File(takesDir, "${take.id}.pcm")
         val recorder = Recorder(pcm) { samples, length -> live.addSamples(samples, length) }
-        val current = Run(take, pcm, models, live, recorder)
+        val cost = TakeCost(AndroidCostProbe(service)).also { it.start() }
+        val current = Run(take, pcm, models, live, recorder, cost, CostSampler(cost))
         try {
             recorder.start()
         } catch (e: Exception) {
@@ -141,6 +145,7 @@ class TakeController(private val service: DictationService, private val overlay:
         }
         val outcome = inserter.insert(field, result.cleaned)
         take.markInserted()
+        current.sampler.stop()
         log.write("insert", take.id,
             "pkg" to take.pkg, "raw" to result.raw, "cleaned" to result.cleaned, "text_before" to outcome.textBefore,
             "insert_path" to outcome.path, "landed" to outcome.landed,
@@ -150,12 +155,14 @@ class TakeController(private val service: DictationService, private val overlay:
             "clean_mode" to result.cleanMode, "chunks" to result.chunks,
             "idle_cleans" to result.idleCleans, "idle_hits" to result.idleHits, "cue" to result.cue,
             "asr_ms_after_stop" to result.asrMsAfterStop, "clean_ms_after_stop" to result.cleanMsAfterStop,
-            "stop_to_insert_ms" to SystemClock.elapsedRealtime() - current.stoppedAtMs)
+            "stop_to_insert_ms" to SystemClock.elapsedRealtime() - current.stoppedAtMs,
+            *current.cost.lap().toTypedArray())
         tracker = FieldTracker(take.id, field, inserter.textOf(field))
         release(current)
     }
 
     private fun release(current: Run) {
+        current.sampler.stop()
         if (run === current) run = null
         overlay.setMode(ButtonMode.IDLE)
         service.stopService(Intent(service, RecordingService::class.java))
@@ -168,6 +175,12 @@ class TakeController(private val service: DictationService, private val overlay:
         }
         tracker?.onEvent(event)
     }
+
+    fun onTrimMemory(level: Int) {
+        run?.cost?.noteTrim(level)
+    }
+
+    fun logProcessExits() = ExitReasons.record(service, log, File(service.filesDir, "logs/edits.jsonl"))
 
     fun shutdown() {
         discard(DiscardReason.ERROR)

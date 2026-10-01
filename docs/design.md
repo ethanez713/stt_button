@@ -125,7 +125,7 @@ A path is skipped when it is unavailable (a null connection, an unreadable clip)
 Append-only JSONL under the app's files dir, `logs/edits.jsonl`. One segment that is inserted (a take with no pause has one):
 
 ```
-{"event":"insert","id":"<uuid>","ts":"<iso8601>","pkg":"<package>","raw":"...","cleaned":"...","text_before":"...","asr_ms":0,"clean_ms":0,"asr_backend":"cpu","clean_backend":"cpu","audio_ms":0,"in_tokens":0,"out_tokens":0,"charge_uah":0,"plugged":false,"battery_pct":0,"clean_mode":"chunks","chunks":0,"idle_cleans":0,"idle_hits":0,"cue":null,"segment":0,"trigger":"stop","stop_to_insert_ms":0,"peak_pss_kb":0,"avail_mem_min_kb":0,"low_memory":false,"trim_level_max":0,"cpu_ms":0,"thermal_max":0}
+{"event":"insert","id":"<uuid>","ts":"<iso8601>","pkg":"<package>","raw":"...","cleaned":"...","text_before":"...","asr_ms":0,"clean_ms":0,"asr_backend":"cpu","clean_backend":"cpu","audio_ms":0,"in_tokens":0,"out_tokens":0,"charge_uah":0,"counter_used_uah":0,"plugged":false,"battery_pct":0,"clean_mode":"chunks","chunks":0,"idle_cleans":0,"idle_hits":0,"cue":null,"segment":0,"trigger":"stop","stop_to_insert_ms":0,"peak_pss_kb":0,"avail_mem_min_kb":0,"low_memory":false,"trim_level_max":0,"cpu_ms":0,"thermal_max":0}
 {"event":"edit","id":"<same uuid>","ts":"<iso8601>","text_after":"..."}
 ```
 

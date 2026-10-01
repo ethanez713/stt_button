@@ -46,7 +46,10 @@ class DictationService : AccessibilityService() {
             onTap = { controller.onTap() },
             onPlacementChanged = ::reconcile,
         )
-        controller = TakeController(this, overlay).also { it.deleteLeftovers() }
+        controller = TakeController(this, overlay).also {
+            it.deleteLeftovers()
+            it.logProcessExits()
+        }
         for (key in listOf(Settings.Secure.SELECTED_INPUT_METHOD_SUBTYPE, Settings.Secure.DEFAULT_INPUT_METHOD)) {
             contentResolver.registerContentObserver(Settings.Secure.getUriFor(key), false, imeObserver)
         }
@@ -73,6 +76,11 @@ class DictationService : AccessibilityService() {
     }
 
     override fun onInterrupt() = Unit
+
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        if (::controller.isInitialized) controller.onTrimMemory(level)
+    }
 
     override fun onDestroy() {
         contentResolver.unregisterContentObserver(imeObserver)

@@ -188,3 +188,52 @@ class TestBoundaryPunct:
         from experiments.boundary_punct import boundary_counts
         counts = boundary_counts(["send it to", "Paris today"], "send it to Paris today")
         assert counts["caps"] == 0 and counts["j_harms"] == 1
+
+
+class TestPhoneUsage:
+    @staticmethod
+    def insert(i, **over):
+        base = {"event": "insert", "id": f"t{i}", "cleaned": f"text {i}", "asr_backend": "cpu", "clean_backend": "cpu",
+                "audio_ms": 60_000, "asr_ms": 6000, "clean_ms": 500, "out_tokens": 50, "charge_uah": 20_000,
+                "counter_used_uah": 19_000, "plugged": False, "battery_pct": 80, "peak_pss_kb": 2_000_000,
+                "avail_mem_min_kb": 900_000, "low_memory": False, "trim_level_max": 0, "cpu_ms": 30_000,
+                "thermal_max": 0, "clean_mode": "chunks", "stop_to_insert_ms": 800, "cue": None}
+        return {**base, **over}
+
+    def test_plugged_takes_are_excluded_and_groups_use_medians(self):
+        from experiments import phone_usage
+        lines = [self.insert(1), self.insert(2, charge_uah=40_000), self.insert(3, charge_uah=60_000),
+                 self.insert(4, plugged=True, charge_uah=1)]
+        report = phone_usage.summarize(lines, capacity_mah=5000)
+        assert "4 inserts, 1 excluded as plugged" in report
+        assert "cpu/cpu: 3 takes" in report
+        assert "charge_uah per audio minute: 40000" in report
+        assert "battery % per 10 min: 8.00" in report
+        assert "asr_ms per audio second: 100.0" in report
+
+    def test_a_missing_field_shows_as_a_null_count_not_a_clean_table(self):
+        from experiments import phone_usage
+        lines = [self.insert(1), self.insert(2, charge_uah=None), {**self.insert(3), "thermal_max": None}]
+        report = phone_usage.summarize(lines)
+        assert "lines lacking a field: charge_uah 1, thermal_max 1" in report
+
+    def test_an_exit_after_an_unfinished_start_is_a_died_take(self):
+        from experiments import phone_usage
+        lines = [
+            {"event": "start", "id": "a"}, self.insert("a", id="a"),
+            {"event": "start", "id": "b"},
+            {"event": "exit", "reason": "LOW_MEMORY", "pss_kb": 3_100_000, "description": "lmkd"},
+            {"event": "start", "id": "c"}, {"event": "discard", "id": "c", "reason": "language"},
+        ]
+        assert [(s["id"], e["reason"]) for s, e in phone_usage.died_takes(lines)] == [("b", "LOW_MEMORY")]
+        report = phone_usage.summarize(lines)
+        assert "take b died: LOW_MEMORY" in report and "process exits: LOW_MEMORY 1" in report
+
+    def test_cues_and_edited_inserts_are_counted(self):
+        from experiments import phone_usage
+        lines = [self.insert(1, cue="actually"), self.insert(2, cue="actually"), self.insert(3, cue="make it"),
+                 {"event": "edit", "id": "t1", "text_after": "text 1 and more"},
+                 {"event": "edit", "id": "t2", "text_after": "something else"}]
+        report = phone_usage.summarize(lines)
+        assert "cue matches: actually 2, make it 1" in report
+        assert "edited afterwards: 1 of 2" in report
