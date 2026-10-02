@@ -3,8 +3,9 @@ package com.ezhou.sttbutton
 import android.text.InputType
 
 /**
- * Fields the button stays off. Only a positive identification hides it: a node that reports no
- * input type or no editability still gets the button, because web fields often report neither.
+ * Which fields get the button. A field's kind hides it only on a positive identification: a node
+ * that reports no input type or no editability still gets the button, because web fields often
+ * report neither.
  */
 object FieldPolicy {
     private val PASSWORD_VARIATIONS = setOf(
@@ -24,4 +25,13 @@ object FieldPolicy {
             else -> null
         }
     }
+
+    /**
+     * Whether the editor the keyboard is attached to stands in for a focused field the service
+     * could not read. It has to belong to the focused window: on the way out of an app the
+     * keyboard stays attached to the app left behind for up to a second, and a window without an
+     * editor reports one of TYPE_NULL.
+     */
+    fun editorIsField(inputStarted: Boolean, inputType: Int, editorPackage: String?, focusedPackage: String?): Boolean =
+        inputStarted && inputType != InputType.TYPE_NULL && editorPackage != null && editorPackage == focusedPackage
 }

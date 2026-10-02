@@ -26,6 +26,8 @@ class BubbleOverlay(private val context: Context) {
     private var anchor: Rect? = null
     private var content = BubbleContent("", "")
 
+    val isShowing: Boolean get() = view != null
+
     fun setAnchor(imeBounds: Rect) {
         if (anchor == imeBounds) return
         anchor = Rect(imeBounds)

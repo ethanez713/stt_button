@@ -84,6 +84,26 @@ class FieldPolicyTest {
     @Test
     fun given_dateField_when_checked_then_excluded() =
         assertEquals("date field", FieldPolicy.exclusion(false, InputType.TYPE_CLASS_DATETIME))
+
+    @Test
+    fun given_editorOfTheFocusedWindow_when_noFieldNodeIsRead_then_itCountsAsTheField() =
+        assertTrue(FieldPolicy.editorIsField(true, InputType.TYPE_CLASS_TEXT, "com.android.chrome", "com.android.chrome"))
+
+    @Test
+    fun given_editorOfTheAppLeftBehind_when_theLauncherHasFocus_then_noField() =
+        assertFalse(FieldPolicy.editorIsField(true, InputType.TYPE_CLASS_TEXT, "com.android.chrome", "com.sec.android.app.launcher"))
+
+    @Test
+    fun given_editorOfTheAppLeftBehind_when_noWindowHasFocus_then_noField() =
+        assertFalse(FieldPolicy.editorIsField(true, InputType.TYPE_CLASS_TEXT, "com.android.chrome", null))
+
+    @Test
+    fun given_windowWithoutAnEditor_when_itStartsInput_then_noField() =
+        assertFalse(FieldPolicy.editorIsField(true, InputType.TYPE_NULL, "com.sec.android.app.launcher", "com.sec.android.app.launcher"))
+
+    @Test
+    fun given_finishedInput_when_checked_then_noField() =
+        assertFalse(FieldPolicy.editorIsField(false, InputType.TYPE_CLASS_TEXT, "com.android.chrome", "com.android.chrome"))
 }
 
 class MicLocatorTest {

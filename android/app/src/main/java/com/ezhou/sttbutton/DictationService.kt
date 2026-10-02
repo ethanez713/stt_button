@@ -11,11 +11,12 @@ import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
+import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
 
 /**
- * Shows the button unless something positively rules it out; an unresolved keyboard language or
- * an unreadable field is not a reason to hide it.
+ * Keeps the button on screen exactly while Gboard's microphone is there to be used: the keyboard is
+ * up on a panel that has the voice key, and it is typing into a field of the focused window.
  */
 class DictationService : AccessibilityService() {
     private lateinit var overlay: Overlay
@@ -28,10 +29,6 @@ class DictationService : AccessibilityService() {
     private val placement = MicPlacement()
     private val handler = Handler(Looper.getMainLooper())
     private val reread = Runnable { reconcile() }
-    private val keyboardWatch = KeyboardWatch(KEYBOARD_GONE_MS)
-    private val keyboardCheck = Runnable {
-        if (keyboardWatch.due(hasKeyboardWindow(), controller.isRecording, SystemClock.uptimeMillis())) controller.onKeyboardGone()
-    }
     private val imePrefs by lazy { getSharedPreferences("ime", MODE_PRIVATE) }
     /** Whether this install has ever found Gboard's voice key; until then its absence proves nothing. */
     private var voiceKeySeen = false
@@ -93,8 +90,8 @@ class DictationService : AccessibilityService() {
         if (event.eventType and FIELD_EVENTS == 0) reconcile()
     }
 
-    /** A take ended or stopped recording, which changes whether the button should be on screen. */
-    fun takeChanged() = reconcile()
+    /** A take changed state or its button has been away a while; either changes what belongs on screen. */
+    fun recheck() = reconcile()
 
     fun focusedField(): AccessibilityNodeInfo? = findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
 
@@ -150,33 +147,32 @@ class DictationService : AccessibilityService() {
     }
 
     private fun reconcile() {
-        if (!::overlay.isInitialized) return
+        if (!::controller.isInitialized) return
         val state = place()
         if (state != lastState) {
             Log.i(TAG, state)
             lastState = state
         }
+        controller.onButtonShown(overlay.isShowing)
     }
-
-    private fun hasKeyboardWindow() = windows.any { it.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD }
 
     private fun place(): String {
         ModelFiles.missing(filesDir).takeIf { it.isNotEmpty() }?.let { return removed("model files missing: ${it.size}") }
         if (overlay.isHidden) return removed("hidden from the drop zone")
         if (english == false) return removed("keyboard not English")
         val ime = windows.firstOrNull { it.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD }
-        // Window events can arrive faster than the grace period, so the posted check alone may never run.
-        if (keyboardWatch.due(ime != null, controller.isRecording, SystemClock.uptimeMillis())) controller.onKeyboardGone()
-        handler.removeCallbacks(keyboardCheck)
-        if (ime == null) {
-            if (controller.isRecording) handler.postDelayed(keyboardCheck, KEYBOARD_GONE_MS)
-            return removed("no keyboard window", keepWhileTaking = true)
-        }
+            ?: return removed("no keyboard window")
         bubble.setAnchor(Rect().also(ime::getBoundsInScreen))
         val field = findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
-        if (field != null) {
-            if (field.packageName == packageName && field.viewIdResourceName != TRY_FIELD_ID) return removed("own app", keepWhileTaking = true)
-            FieldPolicy.exclusion(field.isPassword, field.inputType)?.let { return removed(it, keepWhileTaking = true) }
+        val fieldShape = if (field != null) {
+            if (field.packageName == packageName && field.viewIdResourceName != TRY_FIELD_ID) return removed("own app")
+            FieldPolicy.exclusion(field.isPassword, field.inputType)?.let { return removed(it) }
+            "pkg=${field.packageName} editable=${field.isEditable} inputType=0x${field.inputType.toString(16)}"
+        } else {
+            // On the way out of an app the keyboard outlives the field, still showing its microphone.
+            val editor = unreadField() ?: return removed("no text field")
+            FieldPolicy.exclusion(password = false, editor.inputType)?.let { return removed(it) }
+            "editor pkg=${editor.packageName} inputType=0x${editor.inputType.toString(16)}"
         }
         val root = ime.root
         val mic = root?.let(MicLocator::find)
@@ -185,7 +181,7 @@ class DictationService : AccessibilityService() {
             imePrefs.edit().putBoolean(KEY_VOICE_KEY_SEEN, true).apply()
         }
         // A readable keyboard without the voice key it has shown before is on another panel.
-        if (mic == null && root != null && voiceKeySeen) return removed("keyboard panel without a voice key", keepWhileTaking = true)
+        if (mic == null && root != null && voiceKeySeen) return removed("keyboard panel without a voice key")
         if (mic == null && root != null && imeTreeLoggedFor != ime.id) {
             imeTreeLoggedFor = ime.id
             Log.i(TAG, "voice key not found; IME descriptions: ${MicLocator.descriptions(root)}")
@@ -196,9 +192,14 @@ class DictationService : AccessibilityService() {
             mic != null -> "shown-on-node $mic"
             else -> "shown-fallback"
         }
-        val fieldShape = field?.let { "pkg=${it.packageName} editable=${it.isEditable} inputType=0x${it.inputType.toString(16)}" }
-            ?: "no focused node"
         return "$placement language=${english ?: "unresolved"} $fieldShape"
+    }
+
+    /** The editor the keyboard is typing into when its field has no accessibility node, or null when there is none. */
+    private fun unreadField(): EditorInfo? {
+        val input = inputMethod ?: return null
+        val editor = input.currentInputEditorInfo ?: return null
+        return editor.takeIf { FieldPolicy.editorIsField(input.currentInputStarted, it.inputType, it.packageName, activePackage()) }
     }
 
     // The keyboard slides in over a few hundred ms, so the button waits at the last settled spot
@@ -220,10 +221,7 @@ class DictationService : AccessibilityService() {
         if (wanted.reread) handler.postDelayed(reread, REREAD_MS)
     }
 
-    // The button stays up while a take records so it can be tapped to stop, whatever the keyboard is doing.
-    // Once the take has stopped it finishes in the background, and the button goes with the keyboard.
-    private fun removed(reason: String, keepWhileTaking: Boolean = false): String {
-        if (keepWhileTaking && controller.isRecording) return "kept for the open take: $reason"
+    private fun removed(reason: String): String {
         handler.removeCallbacks(reread)
         placement.reset()
         overlay.remove()
@@ -244,7 +242,6 @@ class DictationService : AccessibilityService() {
         private const val FALLBACK_DP = 48
         private const val TRY_FIELD_ID = "com.ezhou.sttbutton:id/try_field"
         private const val REREAD_MS = 100L
-        private const val KEYBOARD_GONE_MS = 700L
         private const val KEY_VOICE_KEY_SEEN = "voice_key_seen"
         private const val FIELD_EVENTS = AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED or AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED
     }

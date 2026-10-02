@@ -39,6 +39,8 @@ class TakeController(private val service: DictationService, private val overlay:
     private var parked: Models? = null
     private var shutDown = false
     private val releaseParked = Runnable { releaseParkedNow() }
+    private val hiddenWatch = HiddenWatch(HIDDEN_GRACE_MS)
+    private val hiddenCheck = Runnable { service.recheck() }
 
     private class Run(
         val take: Take, val pcm: File, val models: Models, val live: LiveTake, val recorder: Recorder,
@@ -82,9 +84,25 @@ class TakeController(private val service: DictationService, private val overlay:
         }
     }
 
-    /** The keyboard has been gone long enough that the user is no longer dictating into it. */
-    fun onKeyboardGone() {
-        run?.takeIf { it.take.state == TakeState.OPEN }?.let { stop(it, TRIGGER_KEYBOARD) }
+    /**
+     * Called with every placement. A take records only while its button is on screen: the bubble
+     * leaves with the button, and a button that stays away for [HIDDEN_GRACE_MS] stops the take
+     * as a tap would.
+     */
+    fun onButtonShown(shown: Boolean) {
+        handler.removeCallbacks(hiddenCheck)
+        if (!shown) bubble.hide()
+        val current = run?.takeIf { it.take.state == TakeState.OPEN }
+        val wait = hiddenWatch.stopInMs(shown, current != null, SystemClock.uptimeMillis())
+        if (current == null) return
+        when (wait) {
+            null -> if (!bubble.isShowing) {
+                bubble.show()
+                scheduleBubble()
+            }
+            0L -> stop(current, TRIGGER_KEYBOARD)
+            else -> handler.postDelayed(hiddenCheck, wait)
+        }
     }
 
     private fun start() {
@@ -149,7 +167,7 @@ class TakeController(private val service: DictationService, private val overlay:
         current.stopRequested = true
         service.watchSelectionChanges(false)
         if (trigger == TRIGGER_KEYBOARD || trigger == TRIGGER_PACKAGE) bubble.hide()
-        service.takeChanged()
+        service.recheck()
     }
 
     fun discard(reason: DiscardReason) {
@@ -288,7 +306,7 @@ class TakeController(private val service: DictationService, private val overlay:
         overlay.setMode(ButtonMode.IDLE)
         service.watchSelectionChanges(false)
         service.stopService(Intent(service, RecordingService::class.java))
-        service.takeChanged()
+        service.recheck()
     }
 
     fun onAccessibilityEvent(event: AccessibilityEvent) {
@@ -407,5 +425,6 @@ class TakeController(private val service: DictationService, private val overlay:
         private const val TRIGGER_FIELD_LOST = "field_lost"
         private const val BUBBLE_MS = 100L
         private const val WARM_MS = 30_000L
+        private const val HIDDEN_GRACE_MS = 700L
     }
 }
