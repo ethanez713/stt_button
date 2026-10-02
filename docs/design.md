@@ -116,7 +116,7 @@ After insertion, each take's PCM file is encoded losslessly to `files/recordings
 
 ### Insertion
 
-The utterance is inserted at the caret. Characters already in the field stay. A selection is collapsed to its end before the insert, so highlighted text is kept. The paths, in order:
+The utterance is inserted at the caret. Characters already in the field stay. A take's first insert is led by a space when the character before the caret is neither white space nor an opening bracket or quote. A selection is collapsed to its end before the insert, so highlighted text is kept. The paths, in order:
 
 1. `commitText` on `AccessibilityService.getInputMethod()`'s current connection.
 2. Clipboard: save the current clip, paste at the caret, restore the saved clip. If the service cannot read the current clip, this path is skipped rather than overwriting the user's clipboard.

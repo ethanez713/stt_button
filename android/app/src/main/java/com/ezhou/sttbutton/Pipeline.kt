@@ -37,6 +37,7 @@ object Pipeline {
     private const val CONTEXT_LEAD_S = 0.1
     const val SENTENCE_MARKS = ".,?!;:"
     val SENTENCE_ENDS = listOf(".", "?", "!")
+    private const val OPENING_MARKS = "([{\u201C\u2018"
     private val SENTENCE_ENDS_ASKED = listOf("?", "!")
 
     fun renderPrompt(systemPrompt: String, userTurn: String): String =
@@ -73,6 +74,16 @@ object Pipeline {
     fun trailingMark(text: String): String = TRAILING_MARK.find(text)?.value ?: ""
 
     fun withoutTrailingMark(text: String): String = TRAILING_MARK.replace(text, "")
+
+    /**
+     * What a take's first insert starts with: a space when the character before the caret is neither
+     * white space nor an opening bracket or quote, so dictation after existing text does not run into it.
+     */
+    fun takeOpener(before: String, caret: Int): String {
+        val at = if (caret in 0..before.length) caret else before.length
+        val previous = before.getOrNull(at - 1) ?: return ""
+        return if (previous.isWhitespace() || previous in OPENING_MARKS) "" else " "
+    }
 
     /** Mirrors `stt_button.asr.settled_mark`. */
     fun settledMark(sliceMark: String, contextMark: String): String =

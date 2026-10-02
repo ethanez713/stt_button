@@ -107,6 +107,24 @@ class PipelineVectorsTest {
     }
 
     @Test
+    fun given_text_that_ends_in_a_word_or_a_mark_before_the_caret_when_a_take_opens_then_a_space_leads_it() {
+        assertEquals(" ", Pipeline.takeOpener("short takes", 11))
+        assertEquals(" ", Pipeline.takeOpener("(This is the gate test)", 23))
+        assertEquals(" ", Pipeline.takeOpener("one two", 3))
+        assertEquals(" ", Pipeline.takeOpener("no caret", -1))
+    }
+
+    @Test
+    fun given_an_empty_field_white_space_or_an_open_bracket_before_the_caret_when_a_take_opens_then_nothing_leads_it() {
+        assertEquals("", Pipeline.takeOpener("", 0))
+        assertEquals("", Pipeline.takeOpener("one two", 0))
+        assertEquals("", Pipeline.takeOpener("one ", 4))
+        assertEquals("", Pipeline.takeOpener("one\n", 4))
+        assertEquals("", Pipeline.takeOpener("see (", 5))
+        assertEquals("", Pipeline.takeOpener("one two", 4))
+    }
+
+    @Test
     fun given_a_cleaned_first_word_that_matches_a_lower_case_raw_one_when_continued_then_it_is_lowercased() {
         assertEquals("have some", Pipeline.continueSentence("Have some", "have some monitoring"))
         assertEquals("Have some", Pipeline.continueSentence("Have some", "Have some monitoring"))

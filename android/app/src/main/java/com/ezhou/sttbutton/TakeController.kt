@@ -173,7 +173,8 @@ class TakeController(private val service: DictationService, private val overlay:
             return
         }
         val segment = take.segmentsInserted
-        val outcome = inserter.insert(field, text)
+        val opener = if (segment == 0) Pipeline.takeOpener(inserter.textOf(field), field.textSelectionEnd) else ""
+        val outcome = inserter.insert(field, opener + text)
         if (last) {
             take.markInserted()
             current.sampler.stop()
