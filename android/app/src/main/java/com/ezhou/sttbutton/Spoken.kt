@@ -37,6 +37,14 @@ object Spoken {
 
     private class Item(val kind: String, val a: String, val b: String = "")
 
+    /** Mirrors `stt_button.spoken.keep_spoken_ending`. */
+    fun keepSpokenEnding(chunk: String, cleaned: String): String {
+        val spoken = convert(chunk).trimEnd()
+        val mark = spoken.lastOrNull()
+        return if (spoken != chunk.trimEnd() && (mark == '?' || mark == '!') && cleaned.trimEnd().endsWith(".")) cleaned.trimEnd().dropLast(1) + mark
+        else cleaned
+    }
+
     fun convert(text: String): String {
         val elements = parse(text)
         if (elements.none { it.kind in COMMAND_KINDS }) return text

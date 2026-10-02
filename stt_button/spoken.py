@@ -143,6 +143,15 @@ def _render(items: list[tuple]) -> str:
     return "".join(out)
 
 
+def keep_spoken_ending(chunk: str, cleaned: str) -> str:
+    """A question or exclamation mark the speaker dictated at the end of a chunk outranks the full
+    stop the cleaner prefers there ("ask if anyone wants it sooner question mark")."""
+    spoken = spoken_punctuation(chunk).rstrip()
+    if spoken != chunk.rstrip() and spoken[-1:] in ("?", "!") and cleaned.rstrip().endswith("."):
+        return cleaned.rstrip()[:-1] + spoken[-1]
+    return cleaned
+
+
 def spoken_punctuation(text: str) -> str:
     elements = _parse(text)
     if not any(kind in _COMMAND_KINDS for kind, *_ in elements):

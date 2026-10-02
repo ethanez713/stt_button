@@ -7932,6 +7932,43 @@
    "drift": []
   }
  ],
+ "spoken_ending": [
+  {
+   "chunk": "then ask if anyone wants it sooner question mark",
+   "cleaned": "Then ask if anyone wants it sooner.",
+   "kept": "Then ask if anyone wants it sooner?"
+  },
+  {
+   "chunk": "wow exclamation point",
+   "cleaned": "Wow.",
+   "kept": "Wow!"
+  },
+  {
+   "chunk": "is it ready question mark yes it is",
+   "cleaned": "Is it ready? Yes, it is.",
+   "kept": "Is it ready? Yes, it is."
+  },
+  {
+   "chunk": "Is it ready?",
+   "cleaned": "Is it ready.",
+   "kept": "Is it ready."
+  },
+  {
+   "chunk": "it is ready",
+   "cleaned": "It is ready.",
+   "kept": "It is ready."
+  },
+  {
+   "chunk": "sooner question mark",
+   "cleaned": "Sooner?",
+   "kept": "Sooner?"
+  },
+  {
+   "chunk": "",
+   "cleaned": "",
+   "kept": ""
+  }
+ ],
  "spoken": [
   {
    "text": "He said quote hello world, unquote and left",

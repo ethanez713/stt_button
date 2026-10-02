@@ -285,10 +285,11 @@ class LiveTake(
             drifts++
             Spoken.convert(chunk)
         }
-        cleanedChunks[chunk] = text
+        val kept = Spoken.keepSpokenEnding(chunk, text)
+        cleanedChunks[chunk] = kept
         inTokens += cleaner.countTokens(chunk)
         outTokens += cleaned.outTokens
-        sink?.chunkCleaned(chunk, text)
+        sink?.chunkCleaned(chunk, kept)
     }
 
     private fun elapsedMs(since: Long) = (System.nanoTime() - since) / 1_000_000

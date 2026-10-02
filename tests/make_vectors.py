@@ -15,7 +15,7 @@ from stt_button import asr, config
 from stt_button.asr import context_audio, settled_mark, split_at_junction
 from stt_button.bubble import Bubble
 from stt_button.cleaner import casual, fact_drift, join_cleaned, live_chunks, opens_with_cue, matched_cue, skips_cleaner
-from stt_button.spoken import spoken_punctuation
+from stt_button.spoken import keep_spoken_ending, spoken_punctuation
 
 FIXTURE = Path(__file__).parent / "fixtures" / "pipeline_vectors.json"
 SR = asr.SAMPLE_RATE
@@ -226,6 +226,15 @@ def vectors() -> dict:
         "settled_mark": [{"slice": s, "context": c, "mark": settled_mark(s, c)}
                          for s in ("", ".", ",", "?", "!") for c in ("", ".", ",", "?", "!")],
         "fact_drift": [{"raw": r, "cleaned": c, "drift": [list(p) for p in fact_drift(r, c)]} for r, c in DRIFT_CASES],
+        "spoken_ending": [{"chunk": c, "cleaned": o, "kept": keep_spoken_ending(c, o)} for c, o in [
+            ("then ask if anyone wants it sooner question mark", "Then ask if anyone wants it sooner."),
+            ("wow exclamation point", "Wow."),
+            ("is it ready question mark yes it is", "Is it ready? Yes, it is."),
+            ("Is it ready?", "Is it ready."),
+            ("it is ready", "It is ready."),
+            ("sooner question mark", "Sooner?"),
+            ("", ""),
+        ]],
         "spoken": [{"text": t, "spoken": spoken_punctuation(t)} for t in SPOKEN_TEXTS],
         "skips_cleaner": {
             "skip_max_words": cfg["skip_max_words"],

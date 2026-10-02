@@ -58,3 +58,11 @@ def test_given_a_chunk_with_a_command_when_cleaned_then_the_model_sees_the_symbo
     cleaner.clean_chunk("He said quote hi unquote and left")
 
     assert 'He said "hi" and left' in prompts[0]
+
+
+def test_given_a_dictated_question_mark_at_the_end_when_the_cleaner_writes_a_full_stop_then_the_mark_comes_back():
+    from stt_button.spoken import keep_spoken_ending
+
+    assert keep_spoken_ending("ask if anyone wants it sooner question mark", "Ask if anyone wants it sooner.") == "Ask if anyone wants it sooner?"
+    assert keep_spoken_ending("Is it ready?", "Is it ready.") == "Is it ready."
+    assert keep_spoken_ending("is it ready question mark yes it is", "Is it ready? Yes, it is.") == "Is it ready? Yes, it is."

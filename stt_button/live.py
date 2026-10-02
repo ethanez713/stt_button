@@ -11,7 +11,7 @@ import numpy as np
 
 from stt_button.asr import SAMPLE_RATE, TRAILING_MARK, Slicer, context_audio, join_slices, settled_mark
 from stt_button.cleaner import casual, fact_drift, join_cleaned, live_chunks, unresolved_corrections, matched_cue, skips_cleaner
-from stt_button.spoken import spoken_punctuation
+from stt_button.spoken import keep_spoken_ending, spoken_punctuation
 
 
 @dataclass
@@ -172,7 +172,7 @@ class LiveTake:
         if fact_drift(chunk, cleaned):
             self.drifts += 1
             cleaned = spoken_punctuation(chunk)
-        self.cleaned_chunks[chunk] = cleaned
+        self.cleaned_chunks[chunk] = keep_spoken_ending(chunk, cleaned)
 
     def _announce(self, chunk: str) -> None:
         if self.bubble:

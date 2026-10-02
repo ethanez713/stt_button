@@ -59,6 +59,13 @@ class PipelineVectorsTest {
     }
 
     @Test
+    fun given_spoken_ending_vectors_when_kept_then_they_match_the_host() {
+        for (case in Fixtures.objects(Fixtures.vectors.getJSONArray("spoken_ending"))) {
+            assertEquals(case.getString("chunk"), case.getString("kept"), Spoken.keepSpokenEnding(case.getString("chunk"), case.getString("cleaned")))
+        }
+    }
+
+    @Test
     fun given_opener_vectors_when_checked_then_they_match_the_host() {
         for (case in Fixtures.objects(Fixtures.vectors.getJSONArray("opens_with_cue"))) {
             assertEquals(case.getString("sentence"), case.getBoolean("opens"), Pipeline.opensWithCue(case.getString("sentence"), Fixtures.config.selfCorrectionCues))
