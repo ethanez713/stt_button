@@ -48,13 +48,31 @@ class PipelineVectorsTest {
     }
 
     @Test
-    fun given_join_vectors_when_chunked_with_cues_then_chunks_match_the_host() {
-        for (case in Fixtures.objects(Fixtures.vectors.getJSONArray("join_chunks"))) {
+    fun given_correction_vectors_when_text_grows_word_by_word_then_chunks_match_the_host() {
+        for (case in Fixtures.objects(Fixtures.vectors.getJSONArray("correction_chunks"))) {
             val chunks = Pipeline.liveChunks(
                 case.getString("text"), Fixtures::words, case.getInt("min_tokens"), case.getInt("max_tokens"),
                 case.getBoolean("final"), Fixtures.strings(case.getJSONArray("cues")),
             )
-            assertEquals(case.getString("name"), Fixtures.strings(case.getJSONArray("chunks")), chunks)
+            assertEquals(case.getString("name") + ": " + case.getString("text"), Fixtures.strings(case.getJSONArray("chunks")), chunks)
+        }
+    }
+
+    @Test
+    fun given_opener_vectors_when_checked_then_they_match_the_host() {
+        for (case in Fixtures.objects(Fixtures.vectors.getJSONArray("opens_with_cue"))) {
+            assertEquals(case.getString("sentence"), case.getBoolean("opens"), Pipeline.opensWithCue(case.getString("sentence"), Fixtures.config.selfCorrectionCues))
+        }
+    }
+
+    @Test
+    fun given_join_vectors_when_cleaned_chunks_are_joined_then_the_text_matches_the_host() {
+        for (case in Fixtures.objects(Fixtures.vectors.getJSONArray("join_cleaned"))) {
+            val joined = Pipeline.joinCleaned(
+                Fixtures.strings(case.getJSONArray("chunks")), Fixtures.strings(case.getJSONArray("outputs")),
+                Fixtures.strings(case.getJSONArray("cues")),
+            )
+            assertEquals(case.getString("joined"), joined)
         }
     }
 

@@ -30,6 +30,8 @@ object Pipeline {
     private const val END_OF_TURN = "<|im_end|>"
     private val SENTENCE_BREAK = Regex("(?<=[.!?])\\s+")
     private val WHITESPACE = Regex("\\s+")
+    private val OPENING_FILLERS = setOf("uh", "um", "oh", "or", "and", "but", "so", "well", "okay")
+    private const val JUDGEABLE_WORDS = 3
     private val COMMA_OUTSIDE_NUMBER = Regex("(?<![0-9]),|,(?![0-9])")
     private val FINAL_PERIOD = Regex("(?<!\\.)\\.(\\s*)$")
     private val NOT_SPOKEN = Regex("[^\\p{L}\\p{N}_\\s]")
@@ -173,37 +175,75 @@ object Pipeline {
         return if (rawLetter.isLowerCase() && cleaned[first].isUpperCase()) cleaned.replaceRange(first, first + 1, cleaned[first].lowercase()) else cleaned
     }
 
-    /** Mirrors `stt_button.cleaner.join_corrections`. */
-    fun joinCorrections(chunks: List<String>, cues: List<String>, countTokens: (String) -> Int, maxTokens: Int): List<String> {
-        val joined = mutableListOf<String>()
-        for (chunk in chunks) {
-            val first = splitSentences(chunk).firstOrNull().orEmpty()
-            if (joined.isNotEmpty() && matchedCue(first, cues) != null && countTokens("${joined.last()} $chunk") <= 2 * maxTokens) {
-                joined[joined.lastIndex] = "${joined.last()} $chunk"
-            } else {
-                joined += chunk
-            }
-        }
-        return joined
+    private fun spokenWords(text: String): List<String> =
+        NOT_SPOKEN.replace(text.lowercase(), "").trim().split(WHITESPACE).filter { it.isNotEmpty() }
+
+    /** Mirrors `stt_button.cleaner.opens_with_cue`. */
+    fun opensWithCue(sentence: String, cues: List<String>): Boolean {
+        val words = spokenWords(sentence).dropWhile { it in OPENING_FILLERS }
+        return cues.any { cue -> spokenWords(cue).let { it.isNotEmpty() && words.take(it.size) == it } }
     }
+
+    fun isCorrectionUnit(chunk: String, cues: List<String>): Boolean =
+        splitSentences(chunk).drop(1).any { opensWithCue(it, cues) }
 
     /** Mirrors `stt_button.cleaner.live_chunks`. */
     fun liveChunks(
         text: String, countTokens: (String) -> Int, minTokens: Int, maxTokens: Int, final: Boolean, cues: List<String> = emptyList(),
     ): List<String> {
         var sentences = splitSentences(text)
-        if (!final) sentences = sentences.dropLast(1)
+        var withheld: String? = null
+        if (!final) {
+            withheld = sentences.lastOrNull()
+            sentences = sentences.dropLast(1)
+        }
+        val units = mutableListOf<Pair<String, Boolean>>()
+        for (piece in pieces(sentences, countTokens, maxTokens)) {
+            if (cues.isNotEmpty() && units.isNotEmpty() && opensWithCue(piece, cues)) units[units.lastIndex] = "${units.last().first} $piece" to true
+            else units += piece to false
+        }
+        if (cues.isNotEmpty() && !final && units.isNotEmpty() &&
+            (withheld == null || spokenWords(withheld).size < JUDGEABLE_WORDS || opensWithCue(withheld, cues))
+        ) units.removeAt(units.lastIndex)
         val chunks = mutableListOf<String>()
         var current = ""
-        for (piece in pieces(sentences, countTokens, maxTokens)) {
-            current = if (current.isEmpty()) piece else "$current $piece"
+        for ((unit, corrects) in units) {
+            if (corrects) {
+                if (current.isNotEmpty()) chunks += current
+                chunks += unit
+                current = ""
+                continue
+            }
+            current = if (current.isEmpty()) unit else "$current $unit"
             if (countTokens(current) >= minTokens) {
                 chunks += current
                 current = ""
             }
         }
         if (final && current.isNotEmpty()) chunks += current
-        return if (cues.isEmpty()) chunks else joinCorrections(chunks, cues, countTokens, maxTokens)
+        return chunks
+    }
+
+    /** Mirrors `stt_button.cleaner.unresolved_corrections`. */
+    fun unresolvedCorrections(chunks: List<String>, outputs: List<String>, cues: List<String>): Pair<Int, Int> {
+        val units = chunks.zip(outputs).filter { isCorrectionUnit(it.first, cues) }.map { it.second }
+        return units.size to units.count { isCorrectionUnit(it, cues) }
+    }
+
+    /** Mirrors `stt_button.cleaner.join_cleaned`. */
+    fun joinCleaned(chunks: List<String>, outputs: List<String>, cues: List<String>): String {
+        val text = StringBuilder()
+        var inline = false
+        for ((chunk, output) in chunks.zip(outputs)) {
+            val unit = isCorrectionUnit(chunk, cues)
+            if (output.isNotEmpty()) {
+                val afterList = text.toString().substringAfterLast('\n').startsWith("- ")
+                if (text.isNotEmpty()) text.append(if ((inline || unit) && !afterList) " " else "\n\n")
+                text.append(output)
+            }
+            inline = unit
+        }
+        return text.toString()
     }
 
     private fun pieces(sentences: List<String>, countTokens: (String) -> Int, maxTokens: Int): List<String> =

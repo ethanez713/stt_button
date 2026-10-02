@@ -44,6 +44,8 @@ class LiveResult(
     val contextDecodes: Int = 0,
     val contextFallbacks: Int = 0,
     val drifts: Int = 0,
+    val corrections: Int = 0,
+    val correctionsKept: Int = 0,
 )
 
 /**
@@ -161,7 +163,7 @@ class LiveTake(
         return LiveResult(
             result.raw, body, result.chunks, result.cleanMode, result.asrMs, result.cleanMs, result.asrMsAfterStop,
             result.cleanMsAfterStop, result.inTokens, result.outTokens, result.idleCleans, result.idleHits, result.cue,
-            result.audioMs, prefix, contextDecodes, contextFallbacks, result.drifts,
+            result.audioMs, prefix, contextDecodes, contextFallbacks, result.drifts, result.corrections, result.correctionsKept,
         )
     }
 
@@ -170,8 +172,10 @@ class LiveTake(
         val raw = raw
         if (skips()) return result(raw, Pipeline.casual(Spoken.convert(raw), cfg, judged), 0, "raw", 0)
         val chunks = cleanClosed(final = true)
-        val cleaned = chunks.map { cleanedChunks.getValue(it) }.filter { it.isNotEmpty() }.joinToString("\n\n")
-        return result(raw, Pipeline.casual(cleaned, cfg, judged), chunks.size, "chunks", chunks.count { it in idleChunks })
+        val outputs = chunks.map { cleanedChunks.getValue(it) }
+        val cleaned = Pipeline.joinCleaned(chunks, outputs, cfg.selfCorrectionCues)
+        val (corrections, kept) = Pipeline.unresolvedCorrections(chunks, outputs, cfg.selfCorrectionCues)
+        return result(raw, Pipeline.casual(cleaned, cfg, judged), chunks.size, "chunks", chunks.count { it in idleChunks }, corrections, kept)
     }
 
     private fun startNextSegment() {
@@ -192,11 +196,13 @@ class LiveTake(
         segmentsEnded++
     }
 
-    private fun result(raw: String, cleaned: String, chunks: Int, mode: String, idleHits: Int) = LiveResult(
+    private fun result(
+        raw: String, cleaned: String, chunks: Int, mode: String, idleHits: Int, corrections: Int = 0, correctionsKept: Int = 0,
+    ) = LiveResult(
         raw, cleaned, chunks, mode, asrMs, cleanMs, asrMs - stopAsrMs, cleanMs - stopCleanMs,
         inTokens, outTokens, idleCleans, idleHits, Pipeline.matchedCue(judged, cfg.selfCorrectionCues),
         (slicer.sampleCount - segmentStartSample) / (Slicer.SAMPLE_RATE / 1000).toLong(),
-        drifts = drifts,
+        drifts = drifts, corrections = corrections, correctionsKept = correctionsKept,
     )
 
     private fun takePending(): List<IntArray> = synchronized(pending) { pending.toList().also { pending.clear() } }

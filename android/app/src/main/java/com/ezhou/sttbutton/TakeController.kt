@@ -189,7 +189,7 @@ class TakeController(private val service: DictationService, private val overlay:
             "in_tokens" to result.inTokens, "out_tokens" to result.outTokens,
             "clean_mode" to result.cleanMode, "chunks" to result.chunks,
             "idle_cleans" to result.idleCleans, "idle_hits" to result.idleHits, "cue" to result.cue,
-            "context_decodes" to result.contextDecodes, "context_fallbacks" to result.contextFallbacks, "drifts" to result.drifts,
+            "context_decodes" to result.contextDecodes, "context_fallbacks" to result.contextFallbacks, "drifts" to result.drifts, "corrections" to result.corrections, "corrections_kept" to result.correctionsKept,
             "segment" to segment, "trigger" to trigger,
             "asr_ms_after_stop" to result.asrMsAfterStop, "clean_ms_after_stop" to result.cleanMsAfterStop,
             "stop_to_insert_ms" to SystemClock.elapsedRealtime() - triggerAtMs,

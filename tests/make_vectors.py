@@ -14,7 +14,7 @@ import numpy as np
 from stt_button import asr, config
 from stt_button.asr import context_audio, settled_mark, split_at_junction
 from stt_button.bubble import Bubble
-from stt_button.cleaner import casual, fact_drift, live_chunks, matched_cue, skips_cleaner
+from stt_button.cleaner import casual, fact_drift, join_cleaned, live_chunks, opens_with_cue, matched_cue, skips_cleaner
 from stt_button.spoken import spoken_punctuation
 
 FIXTURE = Path(__file__).parent / "fixtures" / "pipeline_vectors.json"
@@ -68,13 +68,26 @@ SLICER_CASES = {
                                          ["noise", 2, 3000]], 30, 5, PAUSE),
 }
 
-JOIN_TEXTS = {
-    "correction_opens_second_chunk": sentence(12) + " " + sentence(12) + " Actually no, make that Wednesday. " + sentence(12),
-    "cue_inside_first_chunk_only": sentence(6) + " Actually, I agree. " + sentence(12) + " " + sentence(12),
-    "cue_in_a_later_sentence_of_a_chunk": sentence(12) + " " + sentence(12) + " " + sentence(3) + " Sorry, I mean that. " + sentence(12),
-    "join_beyond_twice_the_max": sentence(30) + " " + sentence(30) + " Actually scratch that. " + sentence(30),
-    "two_corrections_in_a_row": sentence(12) + " " + sentence(12) + " No wait, that is wrong. " + sentence(12) + " Or rather, never mind. " + sentence(12),
+OPENERS = ["Actually, no, make that Wednesday.", "Uh, or, I mean eight.", "No, five.", "Not apples, pears?",
+           "Also, no need to wait.", "Nothing else.", "Or rather the green one.", "I'm not sure.", "Scratch that, navy.",
+           "So, well, never mind.", "Make sure it works.", ""]
+
+CORRECTION_TEXTS = {
+    "correction_after_a_closed_chunk": sentence(12) + " " + sentence(12) + " Actually no, make that Wednesday. " + sentence(12),
+    "cue_inside_a_sentence": sentence(6) + " This is not a correction at all. " + sentence(12) + " " + sentence(12),
+    "fillers_then_cue": sentence(12) + " Uh, or, I mean the other one. " + sentence(25),
+    "two_corrections_in_a_row": sentence(12) + " " + sentence(5) + " No wait, that is wrong. Sorry, never mind. " + sentence(22),
+    "correction_first": "Actually this opens the take. " + sentence(22) + " Not that, this. " + sentence(3),
+    "short_last_sentence": sentence(22) + " " + sentence(4) + " I",
 }
+
+JOIN_CLEANED_CASES = [
+    (["a b.", "c d.", "e f. Actually g.", "h i."], ["A b.", "C d.", "E g.", "H i."]),
+    (["a.", "e f. Actually g."], ["Pack:\n- X\n- Y", "E g."]),
+    (["um.", "a b.", "c d."], ["", "A b.", "C d."]),
+    (["e f. No, g.", "um."], ["E g.", ""]),
+    ([], []),
+]
 
 CHUNK_TEXTS = {
     "mixed_sentences": " ".join(sentence(n, e) for n, e in
@@ -198,10 +211,15 @@ def vectors() -> dict:
         "slicer": slicer,
         "bubble": [{"name": n, "events": e, "after_each": replay_bubble(e)} for n, e in BUBBLE_SEQUENCES.items()],
         "live_chunks": chunks,
-        "join_chunks": [{"name": n, "text": t, "min_tokens": lo, "max_tokens": hi, "final": final,
-                         "cues": cfg["self_correction_cues"],
-                         "chunks": live_chunks(t, words, lo, hi, final, cues=cfg["self_correction_cues"])}
-                        for n, t in JOIN_TEXTS.items() for lo, hi in ((20, 100), (20, 30)) for final in (False, True)],
+        "correction_chunks": [
+            {"name": n, "text": " ".join(t.split()[:k]), "min_tokens": 20, "max_tokens": 100, "final": final,
+             "cues": cfg["self_correction_cues"],
+             "chunks": live_chunks(" ".join(t.split()[:k]), words, 20, 100, final, cues=cfg["self_correction_cues"])}
+            for n, t in CORRECTION_TEXTS.items() for k in range(1, len(t.split()) + 1) for final in (False, True)
+            if final is False or k == len(t.split())],
+        "opens_with_cue": [{"sentence": s, "opens": opens_with_cue(s, cfg["self_correction_cues"])} for s in OPENERS],
+        "join_cleaned": [{"chunks": c, "outputs": o, "cues": cfg["self_correction_cues"],
+                          "joined": join_cleaned(c, o, cfg["self_correction_cues"])} for c, o in JOIN_CLEANED_CASES],
         "casual": [{"text": t, "casual": casual(t, cfg)} for t in CASUAL_TEXTS],
         "junction": [{**c, "split": list(split_at_junction(c["tokens"], c["times"], c["junction_s"]))} for c in JUNCTION_CASES],
         "context_audio": [context_audio_vector(c) for c in CONTEXT_AUDIO_CASES],

@@ -10,7 +10,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from stt_button.asr import SAMPLE_RATE, TRAILING_MARK, Slicer, context_audio, join_slices, settled_mark
-from stt_button.cleaner import casual, fact_drift, live_chunks, matched_cue, skips_cleaner
+from stt_button.cleaner import casual, fact_drift, join_cleaned, live_chunks, unresolved_corrections, matched_cue, skips_cleaner
 from stt_button.spoken import spoken_punctuation
 
 
@@ -28,6 +28,8 @@ class LiveResult:
     context_decodes: int = 0
     context_fallbacks: int = 0
     drifts: int = 0
+    corrections: int = 0
+    corrections_kept: int = 0
 
 
 IDLE_POLL_S = 0.05
@@ -116,11 +118,13 @@ class LiveTake:
             return LiveResult(raw, casual(spoken_punctuation(raw), self.cfg), 0, "raw", self.asr_ms - self._stop_asr_ms, 0,
                               context_decodes=self.context_decodes, context_fallbacks=self.context_fallbacks)
         chunks = self._clean_closed(final=True)
-        cleaned = "\n\n".join(o for o in (self.cleaned_chunks[c] for c in chunks) if o)
+        outputs = [self.cleaned_chunks[c] for c in chunks]
+        cleaned = join_cleaned(chunks, outputs, self.cfg["self_correction_cues"])
         return LiveResult(raw, casual(cleaned, self.cfg), len(chunks), "chunks", self.asr_ms - self._stop_asr_ms,
                           self.clean_ms - self._stop_clean_ms, self.idle_cleans,
                           sum(c in self.idle_chunks for c in chunks), matched_cue(raw, self.cfg["self_correction_cues"]),
-                          self.context_decodes, self.context_fallbacks, self.drifts)
+                          self.context_decodes, self.context_fallbacks, self.drifts,
+                          *unresolved_corrections(chunks, outputs, self.cfg["self_correction_cues"]))
 
     def _recognize(self, start: int, end: int) -> None:
         started = time.monotonic()

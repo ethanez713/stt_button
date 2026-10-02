@@ -203,7 +203,7 @@ def work(pcm: Path) -> None:
                 "stop_to_result_ms": stop_to_result_ms, "clean_mode": result.clean_mode, "chunks": result.chunks,
                 "idle_cleans": result.idle_cleans, "idle_hits": result.idle_hits, "cue": result.cue,
                 "context_decodes": result.context_decodes, "context_fallbacks": result.context_fallbacks,
-                "drifts": result.drifts,
+                "drifts": result.drifts, "corrections": result.corrections, "corrections_kept": result.corrections_kept,
                 "cleaner_backend": loaded.get("backend"),
                 "raw": result.raw, "cleaned": result.cleaned,
             }, ensure_ascii=False) + "\n")

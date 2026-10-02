@@ -160,20 +160,74 @@ def test_casual_rule(text, expected):
     assert cleaner.casual(text, CFG) == expected
 
 
-def test_given_a_chunk_that_opens_with_a_correction_when_joined_then_it_follows_the_chunk_before_it():
-    cues = ["actually"]
-    text = " ".join(["a b c d e f g h."] * 3 + ["Actually no, make that Wednesday."] + ["x y z."] * 2)
-
-    plain = cleaner.live_chunks(text, len, 8, 100, final=True)
-    joined = cleaner.live_chunks(text, len, 8, 100, final=True, cues=cues)
-
-    assert len(plain) == 5 and len(joined) == 4
-    assert joined[2].endswith("a b c d e f g h. Actually no, make that Wednesday.")
+CUES = ["actually", "i mean", "no", "not"]
 
 
-def test_given_a_join_beyond_twice_the_max_when_checked_then_the_chunks_stay_apart():
-    assert cleaner.join_corrections(["a " * 30 + "b.", "Actually c d."], ["actually"], len, 20) == ["a " * 30 + "b.", "Actually c d."]
+def test_given_a_sentence_that_opens_with_a_cue_when_chunked_then_it_and_the_sentence_before_form_their_own_chunk():
+    text = "a b c d. e f g h. Actually no, make that i. j k l m. n o p q."
+
+    assert cleaner.live_chunks(text, lambda t: len(t.split()), 8, 100, final=True, cues=CUES) == [
+        "a b c d.", "e f g h. Actually no, make that i.", "j k l m. n o p q."]
 
 
-def test_given_a_cue_after_the_first_sentence_when_joined_then_nothing_joins():
-    assert cleaner.join_corrections(["a b.", "c d. Actually e."], ["actually"], len, 100) == ["a b.", "c d. Actually e."]
+def test_given_a_cue_inside_a_sentence_when_chunked_then_no_unit_is_cut():
+    text = "a b c d. e is not f g. h i j k."
+
+    assert cleaner.live_chunks(text, lambda t: len(t.split()), 8, 100, final=True, cues=CUES) == [
+        "a b c d. e is not f g.", "h i j k."]
+
+
+def test_given_fillers_before_the_cue_when_checked_then_the_sentence_still_opens_with_it():
+    assert cleaner.opens_with_cue("Uh, or, I mean eight.", CUES)
+    assert cleaner.opens_with_cue("No, five.", CUES)
+    assert not cleaner.opens_with_cue("Also, no need to wait.", CUES)
+    assert not cleaner.opens_with_cue("Nothing else.", CUES)
+
+
+def test_given_two_corrections_in_a_row_when_chunked_then_they_share_one_unit():
+    text = "a b c d. Actually e. No, f. g h."
+
+    assert cleaner.live_chunks(text, lambda t: len(t.split()), 3, 100, final=True, cues=CUES) == [
+        "a b c d. Actually e. No, f.", "g h."]
+
+
+def test_given_a_withheld_sentence_that_opens_with_a_cue_when_not_final_then_the_sentence_before_waits_for_it():
+    count = lambda t: len(t.split())
+
+    assert cleaner.live_chunks("a b c d. e f g h. Actually no make", count, 4, 100, final=False, cues=CUES) == ["a b c d."]
+    assert cleaner.live_chunks("a b c d. e f g h. And then we go", count, 4, 100, final=False, cues=CUES) == ["a b c d.", "e f g h."]
+    assert cleaner.live_chunks("a b c d. e f g h. I", count, 4, 100, final=False, cues=CUES) == ["a b c d."]
+
+
+@pytest.mark.parametrize("text", [
+    "a b c d. e f g h. Actually no, make that i. j k l m. n o p q. I mean r. s t u v w x y z.",
+    "No, a b. c d e f g. h i. Not j, k. l m n o p q r s t.",
+])
+def test_given_cues_when_text_grows_word_by_word_then_early_chunks_are_a_prefix_of_the_final_ones(text):
+    count = lambda t: len(t.split())
+    words = text.split()
+    full = cleaner.live_chunks(text, count, 6, 100, final=True, cues=CUES)
+    for n in range(1, len(words) + 1):
+        partial = cleaner.live_chunks(" ".join(words[:n]), count, 6, 100, final=False, cues=CUES)
+        assert partial == full[:len(partial)], (n, partial)
+
+
+def test_given_a_correction_unit_when_joined_then_it_sits_inline_and_other_seams_are_paragraph_breaks():
+    chunks = ["a b.", "c d.", "e f. Actually g.", "h i."]
+
+    assert cleaner.join_cleaned(chunks, ["A b.", "C d.", "E g.", "H i."], CUES) == "A b.\n\nC d. E g. H i."
+
+
+def test_given_a_list_before_a_correction_unit_when_joined_then_a_blank_line_keeps_them_apart():
+    assert cleaner.join_cleaned(["a.", "e f. Actually g."], ["Pack:\n- X\n- Y", "E g."], CUES) == "Pack:\n- X\n- Y\n\nE g."
+
+
+def test_given_an_empty_cleaned_chunk_when_joined_then_it_leaves_no_seam():
+    assert cleaner.join_cleaned(["um.", "a b."], ["", "A b."], CUES) == "A b."
+
+
+def test_given_a_correction_the_cleaner_left_standing_when_counted_then_it_is_reported_as_kept():
+    chunks = ["a b.", "Order two. Actually make it three.", "Meet at four. No, five."]
+    outputs = ["A b.", "Order two. Actually, make it three.", "Meet at 5."]
+
+    assert cleaner.unresolved_corrections(chunks, outputs, CUES) == (2, 1)

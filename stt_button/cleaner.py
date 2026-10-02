@@ -57,43 +57,87 @@ def _pieces(sentences: list[str], count_tokens: Callable[[str], int], max_tokens
     return pieces
 
 
-def join_corrections(chunks: list[str], cues: list[str], count_tokens: Callable[[str], int],
-                     max_tokens: int) -> list[str]:
-    """A chunk whose first sentence holds a self-correction cue is joined to the chunk before it,
-    because the correction may reach back into that chunk; a join beyond 2 * max_tokens is not made."""
-    joined: list[str] = []
-    for chunk in chunks:
-        first = split_sentences(chunk)[0] if chunk.strip() else ""
-        if joined and matched_cue(first, cues) and count_tokens(f"{joined[-1]} {chunk}") <= 2 * max_tokens:
-            joined[-1] = f"{joined[-1]} {chunk}"
-        else:
-            joined.append(chunk)
-    return joined
+_OPENING_FILLERS = {"uh", "um", "oh", "or", "and", "but", "so", "well", "okay"}
+_JUDGEABLE_WORDS = 3
+
+
+def _spoken_words(text: str) -> list[str]:
+    return re.sub(r"[^\w\s]", "", text.lower()).split()
+
+
+def opens_with_cue(sentence: str, cues: list[str]) -> bool:
+    """Whether the sentence starts with a self-correction cue, after any filler words: the shape of
+    a correction that reaches back into the sentence before it ("Actually, no, make that Wednesday")."""
+    words = _spoken_words(sentence)
+    while words and words[0] in _OPENING_FILLERS:
+        words = words[1:]
+    return any(words[:len(cue.split())] == cue.split() for cue in cues)
+
+
+def is_correction_unit(chunk: str, cues: list[str]) -> bool:
+    return any(opens_with_cue(sentence, cues) for sentence in split_sentences(chunk)[1:])
+
+
+def unresolved_corrections(chunks: list[str], outputs: list[str], cues: list[str]) -> tuple[int, int]:
+    """(correction units, those whose cleaned text still has a sentence opening with a cue): the
+    second counts corrections the cleaner left standing, plus sentences that only looked like one."""
+    units = [output for chunk, output in zip(chunks, outputs) if is_correction_unit(chunk, cues)]
+    return len(units), sum(any(opens_with_cue(s, cues) for s in split_sentences(o)[1:]) for o in units)
 
 
 def live_chunks(text: str, count_tokens: Callable[[str], int], min_tokens: int, max_tokens: int,
                 final: bool, cues: list[str] | None = None) -> list[str]:
     """Chunks of whole sentences, each closed once it holds min_tokens or more.
 
-    A sentence over max_tokens is split at word boundaries first. With final=False the last
-    sentence is withheld, since the next slice may continue it, and an unclosed remainder is not
-    returned; the chunks are then a prefix of what final=True returns for any longer text that
-    starts with the same words. With cues, a chunk that opens with a correction is joined to the one
-    before it (join_corrections), so the later chunks of a longer text can absorb an earlier one.
+    A sentence over max_tokens is split at word boundaries first. With cues, a sentence that opens
+    with one is a correction: it and the sentence before it form a chunk of their own, because the
+    cleaner resolves a correction more reliably with nothing else around it, and the chunk before
+    closes early. With final=False the last sentence is withheld, since the next slice may continue
+    it, and so is whatever that sentence could still join; an unclosed remainder is not returned.
+    The chunks are then a prefix of what final=True returns for any longer text that starts with the
+    same words.
     """
     sentences = split_sentences(text)
+    withheld = None
     if not final:
-        sentences = sentences[:-1]
+        sentences, withheld = sentences[:-1], (sentences[-1] if sentences else None)
+    units: list[tuple[str, bool]] = []
+    for piece in _pieces(sentences, count_tokens, max_tokens):
+        if cues and units and opens_with_cue(piece, cues):
+            units[-1] = (f"{units[-1][0]} {piece}", True)
+        else:
+            units.append((piece, False))
+    if cues and not final and units and (
+            withheld is None or len(_spoken_words(withheld)) < _JUDGEABLE_WORDS or opens_with_cue(withheld, cues)):
+        units.pop()
     chunks = []
     current = ""
-    for piece in _pieces(sentences, count_tokens, max_tokens):
-        current = f"{current} {piece}" if current else piece
+    for unit, corrects in units:
+        if corrects:
+            chunks += [current, unit] if current else [unit]
+            current = ""
+            continue
+        current = f"{current} {unit}" if current else unit
         if count_tokens(current) >= min_tokens:
             chunks.append(current)
             current = ""
     if final and current:
         chunks.append(current)
-    return join_corrections(chunks, cues, count_tokens, max_tokens) if cues else chunks
+    return chunks
+
+
+def join_cleaned(chunks: list[str], outputs: list[str], cues: list[str]) -> str:
+    """Cleaned chunks as one text. A chunk boundary is a sentence end, and a paragraph break there
+    cannot glue a list onto prose; a correction unit is cut out of the middle of a thought, so it
+    joins its neighbours with a space unless a list ends just before the seam."""
+    text, inline = "", False
+    for chunk, output in zip(chunks, outputs):
+        unit = is_correction_unit(chunk, cues)
+        if output:
+            after_list = text.rsplit("\n", 1)[-1].startswith("- ")
+            text += ("" if not text else " " if (inline or unit) and not after_list else "\n\n") + output
+        inline = unit
+    return text
 
 
 def matched_cue(text: str, cues: list[str]) -> str | None:
@@ -249,8 +293,7 @@ class Cleaner:
             outputs.append(text)
             in_tokens += self.count_tokens(chunk)
             out_tokens += n_out
-        # A chunk boundary is a sentence end; a paragraph break there cannot glue a list onto prose.
-        text = "\n\n".join(o for o in outputs if o)
+        text = join_cleaned(chunks, outputs, self.cfg["self_correction_cues"])
         return Cleaned(casual(text, self.cfg) if skip else text, int((time.monotonic() - started) * 1000),
                        len(chunks), in_tokens, out_tokens)
 
