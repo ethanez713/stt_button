@@ -137,13 +137,13 @@ class LiveTake(
     /**
      * Joins a segment to the text before it. The closing punctuation of a segment ended by a pause is
      * withheld, because whether the pause ended the sentence is only known once the next words are heard;
-     * the next segment then opens with the mark its context decode gave, or the withheld one without it.
+     * the next segment then opens with the withheld mark settled against its context decode's, or the withheld one alone.
      */
     private fun join(result: LiveResult, holdMark: Boolean): LiveResult {
         val earlier = segmentsWithText > 0
-        val mark = if (earlier) leadingMark ?: heldMark else ""
+        val mark = if (earlier) leadingMark?.let { Pipeline.settledMark(heldMark, it) } ?: heldMark else ""
         var body = result.cleaned
-        if (earlier && leadingMark != null && leadingMark !in listOf(".", "?", "!")) body = Pipeline.continueSentence(body, result.raw)
+        if (earlier && leadingMark != null && leadingMark !in Pipeline.SENTENCE_ENDS) body = Pipeline.continueSentence(body, result.raw)
         var prefix = ""
         if (earlier && body.isNotBlank()) {
             val joined = Pipeline.casual(if (mark.isEmpty()) body else "$mark $body", cfg, judged)
@@ -224,7 +224,7 @@ class LiveTake(
             return recognizer.recognize(samples(slice[0], slice[1]))
         }
         if (texts.isEmpty()) leadingMark = mark
-        else if (texts.last().isNotEmpty()) texts[texts.lastIndex] = Pipeline.withoutTrailingMark(texts.last()) + mark
+        else if (texts.last().isNotEmpty()) texts[texts.lastIndex] = Pipeline.withoutTrailingMark(texts.last()) + Pipeline.settledMark(Pipeline.trailingMark(texts.last()), mark)
         return text
     }
 

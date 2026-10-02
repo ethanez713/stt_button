@@ -220,6 +220,13 @@ def split_at_junction(tokens: list[str], timestamps: list[float], junction_s: fl
     return (mark.group() if mark else ""), " ".join(w for w, t in words if t >= junction_s)
 
 
+def settled_mark(slice_mark: str, context_mark: str) -> str:
+    """The mark that closes a slice once the next one is decoded. The context decode hears the words
+    after the pause, so it decides whether the sentence ended; it hears only the sentence's last
+    seconds, so a question or exclamation mark from the slice's own decode outranks its full stop."""
+    return slice_mark if slice_mark in ("?", "!") and context_mark in (".", "?", "!") else context_mark
+
+
 def join_slices(texts: list[str]) -> str:
     return " ".join(t for t in texts if t)
 

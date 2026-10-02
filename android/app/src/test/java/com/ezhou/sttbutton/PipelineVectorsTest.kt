@@ -100,6 +100,13 @@ class PipelineVectorsTest {
     }
 
     @Test
+    fun given_settled_mark_vectors_when_settled_then_the_mark_matches_the_host() {
+        for (case in Fixtures.objects(Fixtures.vectors.getJSONArray("settled_mark"))) {
+            assertEquals(case.getString("mark"), Pipeline.settledMark(case.getString("slice"), case.getString("context")))
+        }
+    }
+
+    @Test
     fun given_a_cleaned_first_word_that_matches_a_lower_case_raw_one_when_continued_then_it_is_lowercased() {
         assertEquals("have some", Pipeline.continueSentence("Have some", "have some monitoring"))
         assertEquals("Have some", Pipeline.continueSentence("Have some", "Have some monitoring"))

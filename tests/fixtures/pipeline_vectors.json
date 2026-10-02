@@ -1243,6 +1243,133 @@
    "junction_s": 4.1
   }
  ],
+ "settled_mark": [
+  {
+   "slice": "",
+   "context": "",
+   "mark": ""
+  },
+  {
+   "slice": "",
+   "context": ".",
+   "mark": "."
+  },
+  {
+   "slice": "",
+   "context": ",",
+   "mark": ","
+  },
+  {
+   "slice": "",
+   "context": "?",
+   "mark": "?"
+  },
+  {
+   "slice": "",
+   "context": "!",
+   "mark": "!"
+  },
+  {
+   "slice": ".",
+   "context": "",
+   "mark": ""
+  },
+  {
+   "slice": ".",
+   "context": ".",
+   "mark": "."
+  },
+  {
+   "slice": ".",
+   "context": ",",
+   "mark": ","
+  },
+  {
+   "slice": ".",
+   "context": "?",
+   "mark": "?"
+  },
+  {
+   "slice": ".",
+   "context": "!",
+   "mark": "!"
+  },
+  {
+   "slice": ",",
+   "context": "",
+   "mark": ""
+  },
+  {
+   "slice": ",",
+   "context": ".",
+   "mark": "."
+  },
+  {
+   "slice": ",",
+   "context": ",",
+   "mark": ","
+  },
+  {
+   "slice": ",",
+   "context": "?",
+   "mark": "?"
+  },
+  {
+   "slice": ",",
+   "context": "!",
+   "mark": "!"
+  },
+  {
+   "slice": "?",
+   "context": "",
+   "mark": ""
+  },
+  {
+   "slice": "?",
+   "context": ".",
+   "mark": "?"
+  },
+  {
+   "slice": "?",
+   "context": ",",
+   "mark": ","
+  },
+  {
+   "slice": "?",
+   "context": "?",
+   "mark": "?"
+  },
+  {
+   "slice": "?",
+   "context": "!",
+   "mark": "?"
+  },
+  {
+   "slice": "!",
+   "context": "",
+   "mark": ""
+  },
+  {
+   "slice": "!",
+   "context": ".",
+   "mark": "!"
+  },
+  {
+   "slice": "!",
+   "context": ",",
+   "mark": ","
+  },
+  {
+   "slice": "!",
+   "context": "?",
+   "mark": "!"
+  },
+  {
+   "slice": "!",
+   "context": "!",
+   "mark": "!"
+  }
+ ],
  "spoken": [
   {
    "text": "He said quote hello world, unquote and left",

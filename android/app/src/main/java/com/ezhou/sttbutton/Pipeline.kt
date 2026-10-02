@@ -36,6 +36,8 @@ object Pipeline {
     private val TRAILING_MARK = Regex("[.,?!;:]$")
     private const val CONTEXT_LEAD_S = 0.1
     const val SENTENCE_MARKS = ".,?!;:"
+    val SENTENCE_ENDS = listOf(".", "?", "!")
+    private val SENTENCE_ENDS_ASKED = listOf("?", "!")
 
     fun renderPrompt(systemPrompt: String, userTurn: String): String =
         "<|im_start|>system\n$systemPrompt$END_OF_TURN\n<|im_start|>user\n$userTurn$END_OF_TURN\n$ASSISTANT_NO_THINK"
@@ -71,6 +73,10 @@ object Pipeline {
     fun trailingMark(text: String): String = TRAILING_MARK.find(text)?.value ?: ""
 
     fun withoutTrailingMark(text: String): String = TRAILING_MARK.replace(text, "")
+
+    /** Mirrors `stt_button.asr.settled_mark`. */
+    fun settledMark(sliceMark: String, contextMark: String): String =
+        if (sliceMark in SENTENCE_ENDS_ASKED && contextMark in SENTENCE_ENDS) sliceMark else contextMark
 
     /** Mirrors `stt_button.asr.context_audio`; [read] returns the samples in [from, to). */
     fun contextAudio(

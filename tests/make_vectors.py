@@ -12,7 +12,7 @@ from pathlib import Path
 import numpy as np
 
 from stt_button import asr, config
-from stt_button.asr import context_audio, split_at_junction
+from stt_button.asr import context_audio, settled_mark, split_at_junction
 from stt_button.bubble import Bubble
 from stt_button.cleaner import casual, live_chunks, matched_cue, skips_cleaner
 from stt_button.spoken import spoken_punctuation
@@ -177,6 +177,8 @@ def vectors() -> dict:
         "casual": [{"text": t, "casual": casual(t, cfg)} for t in CASUAL_TEXTS],
         "junction": [{**c, "split": list(split_at_junction(c["tokens"], c["times"], c["junction_s"]))} for c in JUNCTION_CASES],
         "context_audio": [context_audio_vector(c) for c in CONTEXT_AUDIO_CASES],
+        "settled_mark": [{"slice": s, "context": c, "mark": settled_mark(s, c)}
+                         for s in ("", ".", ",", "?", "!") for c in ("", ".", ",", "?", "!")],
         "spoken": [{"text": t, "spoken": spoken_punctuation(t)} for t in SPOKEN_TEXTS],
         "skips_cleaner": {
             "skip_max_words": cfg["skip_max_words"],

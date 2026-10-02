@@ -1,6 +1,6 @@
 import numpy as np
 
-from stt_button.asr import SAMPLE_RATE, Slicer, context_audio, split_at_junction
+from stt_button.asr import SAMPLE_RATE, Slicer, context_audio, settled_mark, split_at_junction
 
 
 def test_given_context_and_slice_words_when_split_at_the_junction_then_the_context_mark_and_the_slice_text_come_back():
@@ -114,3 +114,18 @@ def test_given_a_closing_mark_rewritten_by_the_next_slice_when_chunked_then_the_
     final = live_chunks(rewritten_join, count, 6, 100, final=True)
 
     assert early and final[:len(early)] == early
+
+
+def test_given_a_question_mark_from_the_slice_when_the_context_decode_ends_the_sentence_then_the_question_mark_stays():
+    assert settled_mark("?", ".") == "?"
+    assert settled_mark("!", ".") == "!"
+
+
+def test_given_a_question_mark_from_the_slice_when_the_context_decode_continues_the_sentence_then_it_goes():
+    assert settled_mark("?", "") == ""
+    assert settled_mark("?", ",") == ","
+
+
+def test_given_a_full_stop_from_the_slice_when_the_context_decode_hears_a_question_then_the_question_mark_wins():
+    assert settled_mark(".", "?") == "?"
+    assert settled_mark("", ".") == "."

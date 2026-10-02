@@ -275,6 +275,20 @@ class LiveTakeTest {
     }
 
     @Test
+    fun given_a_withheld_question_mark_when_the_context_decode_gives_a_full_stop_then_the_question_mark_comes_back() {
+        val (_, second) = segments(MarkedRecognizer("Is it ready?", "." to "Then ship it"), longCasualCfg)
+
+        assertEquals("? ", second.prefix)
+    }
+
+    @Test
+    fun given_a_withheld_question_mark_when_the_context_decode_continues_the_sentence_then_no_mark_comes_back() {
+        val (_, second) = segments(MarkedRecognizer("Is it ready?", "" to "or still building"), longCasualCfg)
+
+        assertEquals(" ", second.prefix)
+    }
+
+    @Test
     fun given_a_comma_after_the_pause_when_the_take_is_casual_then_the_comma_is_dropped() {
         val (_, second) = segments(MarkedRecognizer("Update the plan", "," to "and then"), longCasualCfg)
 

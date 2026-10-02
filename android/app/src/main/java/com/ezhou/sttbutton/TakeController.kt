@@ -172,8 +172,8 @@ class TakeController(private val service: DictationService, private val overlay:
             discard(reason ?: DiscardReason.NO_FIELD)
             return
         }
-        val outcome = inserter.insert(field, text)
         val segment = take.segmentsInserted
+        val outcome = inserter.insert(field, text)
         if (last) {
             take.markInserted()
             current.sampler.stop()

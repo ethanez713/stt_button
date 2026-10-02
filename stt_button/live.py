@@ -9,7 +9,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from stt_button.asr import SAMPLE_RATE, TRAILING_MARK, Slicer, context_audio, join_slices
+from stt_button.asr import SAMPLE_RATE, TRAILING_MARK, Slicer, context_audio, join_slices, settled_mark
 from stt_button.cleaner import casual, live_chunks, matched_cue, skips_cleaner
 from stt_button.spoken import spoken_punctuation
 
@@ -141,7 +141,8 @@ class LiveTake:
             self.context_fallbacks += 1
             return self.recognizer.recognize(self.slicer.samples[start:end])
         if self.texts[-1]:
-            self.texts[-1] = TRAILING_MARK.sub("", self.texts[-1]) + mark
+            own = TRAILING_MARK.search(self.texts[-1])
+            self.texts[-1] = TRAILING_MARK.sub("", self.texts[-1]) + settled_mark(own.group() if own else "", mark)
         return text
 
     def _clean_closed(self, final: bool) -> list[str]:
