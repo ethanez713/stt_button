@@ -36,6 +36,8 @@ class MainActivity : Activity() {
     private lateinit var previewRecording: View
     private lateinit var sizeLabel: TextView
     private lateinit var opacityLabel: TextView
+    private lateinit var gapLabel: TextView
+    private lateinit var gapSlider: SeekBar
     private lateinit var idleSwatches: LinearLayout
     private lateinit var recordingSwatches: LinearLayout
 
@@ -98,10 +100,12 @@ class MainActivity : Activity() {
                 change(style.copy(placement = if (id == over.id) ButtonPlacement.OVER_MIC else ButtonPlacement.LEFT_OF_MIC))
             }
         })
+        gapLabel = text("", 15f).also(content::addView)
+        gapSlider = slider(ButtonStyle.GAP_RANGE, style.gapPx, GAP_STEP) { change(style.copy(gapPx = it)) }.also(content::addView)
         sizeLabel = text("", 15f).also(content::addView)
-        content.addView(slider(ButtonStyle.SIZE_RANGE, style.sizePct) { change(style.copy(sizePct = it)) })
+        content.addView(slider(ButtonStyle.SIZE_RANGE, style.sizePct, SLIDER_STEP) { change(style.copy(sizePct = it)) })
         opacityLabel = text("", 15f).also(content::addView)
-        content.addView(slider(ButtonStyle.OPACITY_RANGE, style.opacityPct) { change(style.copy(opacityPct = it)) })
+        content.addView(slider(ButtonStyle.OPACITY_RANGE, style.opacityPct, SLIDER_STEP) { change(style.copy(opacityPct = it)) })
         content.addView(text(getString(R.string.idle_color), 15f))
         idleSwatches = swatches { change(style.copy(idleRgb = it)) }.also(content::addView)
         content.addView(text(getString(R.string.recording_color), 15f))
@@ -138,6 +142,10 @@ class MainActivity : Activity() {
     }
 
     private fun restyle() {
+        val left = style.placement == ButtonPlacement.LEFT_OF_MIC
+        gapLabel.text = getString(R.string.gap_label, style.gapPx)
+        gapLabel.isEnabled = left
+        gapSlider.isEnabled = left
         sizeLabel.text = getString(R.string.size_label, style.sizePct)
         opacityLabel.text = getString(R.string.opacity_label, style.opacityPct)
         val side = dp(PREVIEW_DP * style.sizePct / 100)
@@ -173,13 +181,13 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun slider(range: IntRange, value: Int, onChange: (Int) -> Unit) = SeekBar(this).apply {
-        max = (range.last - range.first) / SLIDER_STEP
-        progress = (value - range.first) / SLIDER_STEP
+    private fun slider(range: IntRange, value: Int, step: Int, onChange: (Int) -> Unit) = SeekBar(this).apply {
+        max = (range.last - range.first) / step
+        progress = (value - range.first) / step
         setPadding(dp(12), dp(8), dp(12), dp(16))
         setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(bar: SeekBar, progress: Int, fromUser: Boolean) {
-                if (fromUser) onChange(range.first + progress * SLIDER_STEP)
+                if (fromUser) onChange(range.first + progress * step)
             }
             override fun onStartTrackingTouch(bar: SeekBar) = Unit
             override fun onStopTrackingTouch(bar: SeekBar) = Unit
@@ -211,5 +219,6 @@ class MainActivity : Activity() {
         const val PREVIEW_DP = 44
         const val SWATCH_DP = 34
         const val SLIDER_STEP = 5
+        const val GAP_STEP = 2
     }
 }

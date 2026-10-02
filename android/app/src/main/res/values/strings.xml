@@ -22,6 +22,7 @@
     <string name="section_about">About</string>
     <string name="placement_over">On Gboard\'s microphone (replaces Gboard dictation)</string>
     <string name="placement_left">Left of Gboard\'s microphone (keeps both)</string>
+    <string name="gap_label">Gap from the microphone: %1$d px</string>
     <string name="size_label">Size: %1$d%%</string>
     <string name="opacity_label">Opacity: %1$d%%</string>
     <string name="idle_color">Resting color</string>

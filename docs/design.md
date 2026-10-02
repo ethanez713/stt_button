@@ -91,7 +91,7 @@ The accessibility config matches what the overlay and insertion require: `canRet
 
 The button is a `TYPE_ACCESSIBILITY_OVERLAY` added from the accessibility service, `FLAG_NOT_FOCUSABLE` and `FLAG_NOT_TOUCH_MODAL`, without `FLAG_ALT_FOCUSABLE_IM`, so it is drawn above the IME and a tap on it does not steal the cursor. `FLAG_NOT_FOCUSABLE` combined with `FLAG_ALT_FOCUSABLE_IM` would place it behind the keyboard, which is the wrong layer.
 
-The app's screen sets the button's style, kept in the overlay's preferences and applied as it changes: whether it sits on Gboard's microphone, replacing Gboard's dictation, or one microphone width to its left, leaving both; its size as a percentage of the microphone key; its opacity; and its resting and recording colors from a fixed set.
+The app's screen sets the button's style, kept in the overlay's preferences and applied as it changes: whether it sits on Gboard's microphone, replacing Gboard's dictation, or to its left, leaving both, with its right edge a chosen number of pixels (0–200) from the microphone; its size as a percentage (20–150%) of the microphone key; its opacity (5–100%); and its resting and recording colors from a fixed set.
 
 While the subtype is English and the voice-typing node has bounds, the button matches those bounds (`com.google.android.inputmethod.latin`, content description for voice typing), and the bounds are read again on each window change. The tap hits this app and Gboard's own voice typing does not start.
 

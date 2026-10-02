@@ -12,14 +12,24 @@ class ButtonStyleTest {
     }
 
     @Test
-    fun given_left_placement_when_placed_then_the_button_sits_one_microphone_width_to_the_left() {
+    fun given_left_placement_when_placed_then_the_button_ends_where_the_microphone_begins() {
         assertEquals(Bounds(800, 1500, 900, 1600), ButtonStyle(placement = ButtonPlacement.LEFT_OF_MIC).bounds(mic))
+    }
+
+    @Test
+    fun given_a_gap_when_placed_left_then_the_button_ends_that_many_pixels_from_the_microphone() {
+        assertEquals(Bounds(750, 1500, 850, 1600), ButtonStyle(placement = ButtonPlacement.LEFT_OF_MIC, gapPx = 50).bounds(mic))
+    }
+
+    @Test
+    fun given_a_gap_when_placed_over_the_microphone_then_it_is_ignored() {
+        assertEquals(mic, ButtonStyle(gapPx = 80).bounds(mic))
     }
 
     @Test
     fun given_a_size_when_placed_then_the_button_scales_about_the_microphones_centre() {
         assertEquals(Bounds(925, 1525, 975, 1575), ButtonStyle(sizePct = 50).bounds(mic))
-        assertEquals(Bounds(775, 1475, 925, 1625), ButtonStyle(ButtonPlacement.LEFT_OF_MIC, sizePct = 150).bounds(mic))
+        assertEquals(Bounds(750, 1475, 900, 1625), ButtonStyle(ButtonPlacement.LEFT_OF_MIC, sizePct = 150).bounds(mic))
     }
 
     @Test
