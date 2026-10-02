@@ -274,3 +274,12 @@ def test_given_a_clean_that_keeps_the_names_when_finished_then_it_is_kept_and_no
 
     assert result.cleaned == "Put it, on the Ultra please now"
     assert result.drifts == 0
+
+
+def test_given_a_stop_flag_when_asked_then_the_stop_time_is_when_the_flag_was_written(tmp_path):
+    flag = tmp_path / "stop"
+    flag.touch()
+    os.utime(flag, (1000.0, 1000.0))
+
+    assert dictate.stop_requested_at(flag) == 1000.0
+    assert dictate.stop_requested_at(tmp_path / "missing") > 1000.0

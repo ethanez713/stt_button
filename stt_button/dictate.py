@@ -116,6 +116,14 @@ def release_take(pid: int, pidfile: Path = PIDFILE, flags: tuple[Path, ...] = (S
         path.unlink(missing_ok=True)
 
 
+def stop_requested_at(flag: Path = STOP_FLAG) -> float:
+    """When the stop was asked for, not when the worker noticed: an idle clean in progress delays the noticing."""
+    try:
+        return flag.stat().st_mtime
+    except FileNotFoundError:
+        return time.time()
+
+
 def work(pcm: Path) -> None:
     import os
     import threading
@@ -168,7 +176,7 @@ def work(pcm: Path) -> None:
             live.feed(tail.read())
             if not live.idle_step(tail.read):
                 time.sleep(POLL_S)
-        stopped = time.monotonic()
+        stopped = stop_requested_at()
         if CANCEL_FLAG.exists():
             pcm.unlink(missing_ok=True)
             bubble.path.unlink(missing_ok=True)
@@ -179,7 +187,7 @@ def work(pcm: Path) -> None:
         bubble.flush()
         release_cleaner()
         write_result({"status": "text", "text": result.cleaned})
-        stop_to_result_ms = int((time.monotonic() - stopped) * 1000)
+        stop_to_result_ms = int((time.time() - stopped) * 1000)
         # Released before the bookkeeping below, so the next take can start at once.
         release_take(os.getpid())
         bubble.path.unlink(missing_ok=True)
