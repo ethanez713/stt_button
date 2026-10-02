@@ -169,9 +169,10 @@ class HotkeyWindow : Form {
                     indicator.Flash("⚠ paste failed: " + e.Message);
                 }
             } else {
+                Log("result error: " + Field(result, "error"));
                 indicator.Flash("⚠ " + (Field(result, "error") ?? status));
             }
-        });
+        }, 2);
     }
 
     void Cancel() {
@@ -227,11 +228,13 @@ class HotkeyWindow : Form {
         return "/mnt/" + char.ToLowerInvariant(windowsPath[0]) + windowsPath.Substring(2).Replace('\\', '/');
     }
 
-    void RunWsl(string command, Action<Dictionary<string, object>> done) {
+    // A stop is safe to repeat, and wsl.exe can fail to reach a VM that is short of memory: its relay gives
+    // up after 30 s. Without the second try the worker never sees the stop and the take is lost.
+    void RunWsl(string command, Action<Dictionary<string, object>> done, int tries = 1) {
         string script = "cd '" + repo + "' && STT_MODEL_DIR='" + models + "' .venv/bin/python -m stt_button.dictate " + command;
         wslQueue.Add(() => {
-            Dictionary<string, object> result;
-            try {
+            Dictionary<string, object> result = null;
+            for (int attempt = 1; attempt <= tries; attempt++) try {
                 var info = new ProcessStartInfo("wsl.exe", "-e bash -c \"" + script + "\"") {
                     UseShellExecute = false,
                     CreateNoWindow = true,
@@ -245,8 +248,11 @@ class HotkeyWindow : Form {
                     int newline = lastLine.LastIndexOf('\n');
                     if (newline >= 0) lastLine = lastLine.Substring(newline + 1);
                     result = new JavaScriptSerializer().Deserialize<Dictionary<string, object>>(lastLine);
+                    if (result == null) throw new InvalidOperationException("WSL returned nothing");
                 }
+                break;
             } catch (Exception e) {
+                Log(string.Format("wsl {0} failed attempt={1}/{2}: {3}", command.Split(' ')[0], attempt, tries, e.Message));
                 result = new Dictionary<string, object> { { "status", "error" }, { "error", e.Message } };
             }
             BeginInvoke(new Action(() => done(result)));
