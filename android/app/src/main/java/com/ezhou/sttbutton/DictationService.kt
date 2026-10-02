@@ -30,7 +30,7 @@ class DictationService : AccessibilityService() {
     private val reread = Runnable { reconcile() }
     private val keyboardWatch = KeyboardWatch(KEYBOARD_GONE_MS)
     private val keyboardCheck = Runnable {
-        if (keyboardWatch.due(hasKeyboardWindow(), controller.hasOpenTake, SystemClock.uptimeMillis())) controller.onKeyboardGone()
+        if (keyboardWatch.due(hasKeyboardWindow(), controller.isRecording, SystemClock.uptimeMillis())) controller.onKeyboardGone()
     }
     private val imePrefs by lazy { getSharedPreferences("ime", MODE_PRIVATE) }
     /** Whether this install has ever found Gboard's voice key; until then its absence proves nothing. */
@@ -66,18 +66,25 @@ class DictationService : AccessibilityService() {
 
     override fun onAccessibilityEvent(event: AccessibilityEvent) {
         if (::controller.isInitialized) controller.onAccessibilityEvent(event)
-        reconcile()
+        if (event.eventType and FIELD_EVENTS == 0) reconcile()
     }
+
+    /** A take ended or stopped recording, which changes whether the button should be on screen. */
+    fun takeChanged() = reconcile()
 
     fun focusedField(): AccessibilityNodeInfo? = findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
 
     fun activePackage(): String? = rootInActiveWindow?.packageName?.toString()
 
     /** TYPE_VIEW_TEXT_CHANGED is only worth its event traffic while a field this app wrote into is tracked. */
-    fun watchTextChanges(on: Boolean) {
+    fun watchTextChanges(on: Boolean) = watch(AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED, on)
+
+    /** Caret moves matter only while a take is recording into the field. */
+    fun watchSelectionChanges(on: Boolean) = watch(AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED, on)
+
+    private fun watch(eventType: Int, on: Boolean) {
         val info = serviceInfo ?: return
-        info.eventTypes = if (on) info.eventTypes or AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED
-        else info.eventTypes and AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED.inv()
+        info.eventTypes = if (on) info.eventTypes or eventType else info.eventTypes and eventType.inv()
         serviceInfo = info
     }
 
@@ -134,10 +141,11 @@ class DictationService : AccessibilityService() {
         if (overlay.isHidden) return removed("hidden from the drop zone")
         if (english == false) return removed("keyboard not English")
         val ime = windows.firstOrNull { it.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD }
-        keyboardWatch.due(ime != null, controller.hasOpenTake, SystemClock.uptimeMillis())
+        // Window events can arrive faster than the grace period, so the posted check alone may never run.
+        if (keyboardWatch.due(ime != null, controller.isRecording, SystemClock.uptimeMillis())) controller.onKeyboardGone()
         handler.removeCallbacks(keyboardCheck)
         if (ime == null) {
-            if (controller.hasOpenTake) handler.postDelayed(keyboardCheck, KEYBOARD_GONE_MS)
+            if (controller.isRecording) handler.postDelayed(keyboardCheck, KEYBOARD_GONE_MS)
             return removed("no keyboard window", keepWhileTaking = true)
         }
         bubble.setAnchor(Rect().also(ime::getBoundsInScreen))
@@ -188,9 +196,10 @@ class DictationService : AccessibilityService() {
         if (wanted.reread) handler.postDelayed(reread, REREAD_MS)
     }
 
-    // The button stays up for an open take so it can be tapped to stop, whatever the keyboard is doing.
+    // The button stays up while a take records so it can be tapped to stop, whatever the keyboard is doing.
+    // Once the take has stopped it finishes in the background, and the button goes with the keyboard.
     private fun removed(reason: String, keepWhileTaking: Boolean = false): String {
-        if (keepWhileTaking && controller.hasOpenTake) return "kept for the open take: $reason"
+        if (keepWhileTaking && controller.isRecording) return "kept for the open take: $reason"
         handler.removeCallbacks(reread)
         placement.reset()
         overlay.remove()
@@ -211,5 +220,6 @@ class DictationService : AccessibilityService() {
         private const val REREAD_MS = 100L
         private const val KEYBOARD_GONE_MS = 700L
         private const val KEY_VOICE_KEY_SEEN = "voice_key_seen"
+        private const val FIELD_EVENTS = AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED or AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED
     }
 }

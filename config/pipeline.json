@@ -4,6 +4,7 @@
   "slice_search_s": 5,
   "pause_s": 1.6,
   "insert_pause_s": 2,
+  "stop_silence_s": 10,
   "slice_min_s": 2,
   "pause_margin_db": 10,
   "context_s": 4,

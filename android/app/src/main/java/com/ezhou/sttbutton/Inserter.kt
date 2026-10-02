@@ -17,8 +17,16 @@ class Inserter(private val service: AccessibilityService) {
 
     class Outcome(val path: String, val textBefore: String, val landed: Boolean)
 
-    fun insert(field: AccessibilityNodeInfo, text: String): Outcome {
+    /**
+     * With [at], the text goes in at that offset instead of at the caret, and the caret is then put
+     * back at [restore], moved along by the inserted text when it lay after the insertion point.
+     */
+    fun insert(field: AccessibilityNodeInfo, text: String, at: Int? = null, restore: Int? = null): Outcome {
         val before = textOf(field)
+        if (at != null && at in 0..before.length) {
+            setSelection(field, at, at)
+            field.refresh()
+        }
         val path = when {
             viaInputConnection(field, text) -> "commit_text"
             viaClipboard(field, text) -> "clipboard"
@@ -28,6 +36,10 @@ class Inserter(private val service: AccessibilityService) {
             }
         }
         val landed = awaitLanded(field, text)
+        if (at != null && restore != null && restore >= 0) {
+            val caret = if (restore <= at) restore else restore + text.length
+            setSelection(field, caret, caret)
+        }
         if (!landed) Log.w(DictationService.TAG, "insert via $path: read-back does not contain the text")
         return Outcome(path, before, landed)
     }

@@ -79,6 +79,24 @@ class LiveTakeTest {
     }
 
     @Test
+    fun given_speech_then_silence_when_asked_then_the_silence_is_measured_from_the_last_speech() {
+        val take = LiveTake(ScriptedRecognizer("Okay sounds good", "unused"), { UppercaseCleaner() }, cfg)
+        assertEquals(0.0, take.silenceS(), 1e-9)
+
+        feedSegment(take, 1.5, 4.0)
+
+        assertEquals(4.0, take.silenceS(), 0.15)
+    }
+
+    @Test
+    fun given_no_speech_at_all_when_asked_then_the_silence_runs_from_the_start() {
+        val take = LiveTake(ScriptedRecognizer("unused"), { UppercaseCleaner() }, cfg)
+        take.addSamples(ShortArray(3 * Slicer.SAMPLE_RATE))
+
+        assertEquals(3.0, take.silenceS(), 1e-9)
+    }
+
+    @Test
     fun given_a_five_word_take_when_finished_then_it_is_raw_and_the_cleaner_is_never_asked_for() {
         val take = LiveTake(ScriptedRecognizer("Meet at noon, okay."), { error("the cleaner must not be touched") }, cfg)
         take.addSamples(tone(3))

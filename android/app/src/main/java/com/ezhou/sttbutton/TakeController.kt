@@ -43,6 +43,12 @@ class TakeController(private val service: DictationService, private val overlay:
         var stoppedAtMs = 0L
 
         /** Text of segments that found no field to go into, kept for the clipboard at the end of the take. */
+        /** The field the take was started in, and where its next text goes: the caret then, moved on by each insert. */
+        var field: AccessibilityNodeInfo? = null
+        var anchor = -1
+        var userCaret = -1
+        var insertedAtMs = 0L
+
         val unplaced = StringBuilder()
         var unplacedReason: DiscardReason? = null
     }
@@ -53,6 +59,9 @@ class TakeController(private val service: DictationService, private val overlay:
     }
 
     val hasOpenTake: Boolean get() = run != null
+
+    /** A take is open and still listening; after its stop it finishes without the button. */
+    val isRecording: Boolean get() = run?.take?.state == TakeState.OPEN
 
     fun onTap() {
         val current = run
@@ -102,6 +111,9 @@ class TakeController(private val service: DictationService, private val overlay:
             discard(DiscardReason.ERROR)
             return
         }
+        current.field = field
+        current.anchor = field?.textSelectionEnd ?: -1
+        service.watchSelectionChanges(true)
         run = current
         bubble.show()
         thread(name = "take-worker") { work(current) }
@@ -117,6 +129,9 @@ class TakeController(private val service: DictationService, private val overlay:
         current.stoppedAtMs = SystemClock.elapsedRealtime()
         current.recorder.stop()
         current.stopRequested = true
+        service.watchSelectionChanges(false)
+        if (trigger == TRIGGER_KEYBOARD || trigger == TRIGGER_PACKAGE) bubble.hide()
+        service.takeChanged()
     }
 
     fun discard(reason: DiscardReason) {
@@ -133,8 +148,13 @@ class TakeController(private val service: DictationService, private val overlay:
 
     private fun work(current: Run) {
         try {
-            while (!current.stopRequested) {
+            listening@ while (!current.stopRequested) {
                 if (current.live.step()) continue
+                if (cfg.stopSilenceS?.let { current.live.silenceS() >= it } == true) {
+                    handler.post { stop(current, TRIGGER_SILENCE) }
+                    while (!current.stopRequested) Thread.sleep(IDLE_POLL_MS)
+                    break@listening
+                }
                 if (current.live.segmentDue()) {
                     val dueAtMs = SystemClock.elapsedRealtime()
                     val segment = current.live.finishSegment()
@@ -183,8 +203,13 @@ class TakeController(private val service: DictationService, private val overlay:
             return
         }
         val segment = take.segmentsInserted
-        val opener = if (segment == 0) Pipeline.takeOpener(inserter.textOf(field), field.textSelectionEnd) else ""
-        val outcome = inserter.insert(field, opener + text)
+        // A take the user interrupted by moving the caret writes where it was dictating, not where they tapped.
+        val at = current.anchor.takeIf { trigger == TRIGGER_CARET && it >= 0 }
+        val opener = if (segment == 0) Pipeline.takeOpener(inserter.textOf(field), at ?: field.textSelectionEnd) else ""
+        val caretBefore = at ?: field.textSelectionEnd
+        val outcome = inserter.insert(field, opener + text, at, current.userCaret.takeIf { at != null })
+        current.anchor = if (caretBefore >= 0) caretBefore + (opener + text).length else -1
+        current.insertedAtMs = SystemClock.elapsedRealtime()
         if (last) {
             take.markInserted()
             current.sampler.stop()
@@ -241,15 +266,32 @@ class TakeController(private val service: DictationService, private val overlay:
         bubble.hide()
         if (run === current) run = null
         overlay.setMode(ButtonMode.IDLE)
+        service.watchSelectionChanges(false)
         service.stopService(Intent(service, RecordingService::class.java))
+        service.takeChanged()
     }
 
     fun onAccessibilityEvent(event: AccessibilityEvent) {
         run?.let { current ->
             val focused = service.focusedField()?.packageName?.toString()
             if (focused != null && current.take.pkg != UNKNOWN_PACKAGE && focused != current.take.pkg) stop(current, TRIGGER_PACKAGE)
+            if (event.eventType == AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED) onCaretEvent(current, event)
         }
         tracker?.onEvent(event)
+    }
+
+    /**
+     * The user moved the caret or typed in the take's field: the take stops and its text goes in at
+     * once, so their editing and the dictation do not write over each other. The caret moves this
+     * app's own inserts cause land on the anchor, or arrive within [OWN_INSERT_MS] of the insert.
+     */
+    private fun onCaretEvent(current: Run, event: AccessibilityEvent) {
+        if (current.take.state != TakeState.OPEN || current.anchor < 0 || event.source != current.field) return
+        val caret = event.toIndex
+        if (caret < 0 || caret == current.anchor) return
+        if (SystemClock.elapsedRealtime() - current.insertedAtMs < OWN_INSERT_MS) return
+        current.userCaret = caret
+        stop(current, TRIGGER_CARET)
     }
 
     /** Redraws the bubble from the worker's and the preview thread's latest text, at most every [BUBBLE_MS]. */
@@ -314,6 +356,9 @@ class TakeController(private val service: DictationService, private val overlay:
         private const val TRIGGER_STOP = "stop"
         private const val TRIGGER_KEYBOARD = "keyboard"
         private const val TRIGGER_PACKAGE = "package"
+        private const val TRIGGER_SILENCE = "silence"
+        private const val TRIGGER_CARET = "caret"
+        private const val OWN_INSERT_MS = 400L
         private const val TRIGGER_FIELD_LOST = "field_lost"
         private const val BUBBLE_MS = 100L
     }

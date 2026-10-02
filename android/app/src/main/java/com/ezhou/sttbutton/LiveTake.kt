@@ -126,6 +126,9 @@ class LiveTake(
     fun finish(): LiveResult =
         join(complete(takePending() + if (segmentsEnded > 0) slicer.endSegment() else slicer.finish()), holdMark = false)
 
+    /** Seconds since the last speech, or since the take opened when none has been heard. */
+    fun silenceS(): Double = (slicer.sampleCount - maxOf(slicer.lastSpeechEnd, 0)).toDouble() / Slicer.SAMPLE_RATE
+
     /** Speech was heard and followed by `insert_pause_s` of silence: the text so far is due for insertion. */
     fun segmentDue(): Boolean = cfg.insertPauseS?.let(slicer::segmentDue) ?: false
 
