@@ -13,6 +13,18 @@
     <string name="recording_channel">Dictation</string>
     <string name="recording_notification">Listening</string>
     <string name="grant_microphone">Allow the microphone</string>
-    <string name="service_on">Accessibility service: on</string>
-    <string name="service_off">Accessibility service: off</string>
+    <string name="service_on">Accessibility service is on</string>
+    <string name="service_off">Accessibility service is off</string>
+    <string name="microphone_on">Microphone is allowed</string>
+    <string name="microphone_off">Microphone is not allowed</string>
+    <string name="section_setup">Setup</string>
+    <string name="section_button">Button</string>
+    <string name="section_about">About</string>
+    <string name="placement_over">On Gboard\'s microphone (replaces Gboard dictation)</string>
+    <string name="placement_left">Left of Gboard\'s microphone (keeps both)</string>
+    <string name="size_label">Size: %1$d%%</string>
+    <string name="opacity_label">Opacity: %1$d%%</string>
+    <string name="idle_color">Resting color</string>
+    <string name="recording_color">Recording color</string>
+    <string name="preview_label">Resting and recording</string>
 </resources>

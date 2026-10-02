@@ -2,6 +2,7 @@ package com.ezhou.sttbutton
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.content.SharedPreferences
 import android.graphics.PixelFormat
 import android.graphics.Point
 import android.graphics.Rect
@@ -18,11 +19,7 @@ import kotlin.math.hypot
  * so it has no FLAG_ALT_FOCUSABLE_IM: combined with FLAG_NOT_FOCUSABLE that flag would put it
  * behind the keyboard.
  */
-enum class ButtonMode(val idle: Long, val pressed: Long) {
-    IDLE(0x6600BCD4, 0xCC00BCD4),
-    RECORDING(0xCCE53935, 0xFFB71C1C),
-    BUSY(0xCC9E9E9E, 0xCC9E9E9E),
-}
+enum class ButtonMode { IDLE, RECORDING, BUSY }
 
 class Overlay(
     private val context: Context,
@@ -35,6 +32,14 @@ class Overlay(
     private var view: View? = null
     private var mode = ButtonMode.IDLE
     private var zones: DropZonesView? = null
+    private var style = ButtonStyle.load(prefs)
+    private val styleListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+        if (key in ButtonStyle.KEYS) {
+            style = ButtonStyle.load(prefs)
+            view?.background = oval(style.color(mode))
+            onPlacementChanged()
+        }
+    }.also(prefs::registerOnSharedPreferenceChangeListener)
     private val params = overlayParams(WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
         WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL)
 
@@ -55,10 +60,11 @@ class Overlay(
 
     fun show(bounds: Rect) {
         val dragged = draggedPosition()
-        params.width = bounds.width()
-        params.height = bounds.height()
-        params.x = dragged?.x ?: bounds.left
-        params.y = dragged?.y ?: bounds.top
+        val styled = style.bounds(Bounds(bounds.left, bounds.top, bounds.right, bounds.bottom))
+        params.width = styled.right - styled.left
+        params.height = styled.bottom - styled.top
+        params.x = dragged?.x ?: styled.left
+        params.y = dragged?.y ?: styled.top
         val current = view
         if (current == null) {
             // Zones first, so they sit under the button. Adding or re-adding a window during a drag
@@ -74,7 +80,13 @@ class Overlay(
 
     fun setMode(next: ButtonMode) {
         mode = next
-        view?.background = oval(mode.idle.toInt())
+        // A take is spoken, not touched, so nothing else keeps the screen from timing out under it.
+        params.flags = if (next == ButtonMode.IDLE) params.flags and WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON.inv()
+        else params.flags or WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+        view?.let {
+            it.background = oval(style.color(mode))
+            windowManager.updateViewLayout(it, params)
+        }
     }
 
     fun remove() {
@@ -131,7 +143,7 @@ class Overlay(
 
     @SuppressLint("ClickableViewAccessibility")
     private fun createView(): View = View(context).apply {
-        background = oval(mode.idle.toInt())
+        background = oval(style.color(mode))
         val slop = ViewConfiguration.get(context).scaledTouchSlop
         var downX = 0f
         var downY = 0f
@@ -146,7 +158,7 @@ class Overlay(
                     startX = params.x
                     startY = params.y
                     dragging = false
-                    v.background = oval(mode.pressed.toInt())
+                    v.background = oval(style.color(mode, pressed = true))
                 }
                 MotionEvent.ACTION_MOVE -> {
                     val dx = event.rawX - downX
@@ -163,11 +175,11 @@ class Overlay(
                     }
                 }
                 MotionEvent.ACTION_UP -> {
-                    v.background = oval(mode.idle.toInt())
+                    v.background = oval(style.color(mode))
                     if (dragging) drop(zoneAt(event)) else onTap()
                 }
                 MotionEvent.ACTION_CANCEL -> {
-                    v.background = oval(mode.idle.toInt())
+                    v.background = oval(style.color(mode))
                     if (dragging) drop(null)
                 }
             }
@@ -175,11 +187,7 @@ class Overlay(
         }
     }
 
-    private fun oval(color: Int) = GradientDrawable().apply {
-        shape = GradientDrawable.OVAL
-        setColor(color)
-        setStroke((1.5f * density).toInt(), 0xCC00838F.toInt())
-    }
+    private fun oval(color: Int) = buttonDrawable(color, density)
 
     private fun overlayParams(flags: Int) = WindowManager.LayoutParams(
         0, 0,
@@ -194,7 +202,14 @@ class Overlay(
     }
 
     companion object {
-        private const val PREFS = "overlay"
+        /** The button's look, shared with the preview in the app. */
+        fun buttonDrawable(color: Int, density: Float) = GradientDrawable().apply {
+            shape = GradientDrawable.OVAL
+            setColor(color)
+            setStroke((1.5f * density).toInt(), (color and 0xFFFFFF) or (0xCC shl 24))
+        }
+
+        private const val PREFS = ButtonStyle.PREFS
         private const val KEY_X = "dragged_x"
         private const val KEY_Y = "dragged_y"
         private const val KEY_HIDDEN = "hidden"
