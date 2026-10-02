@@ -105,7 +105,7 @@ class TakeController(private val service: DictationService, private val overlay:
         val pcm = File(takesDir, "${take.id}.pcm")
         val recorder = Recorder(pcm) { samples, length ->
             live.addSamples(samples, length)
-            preview.offer(samples, length)
+            preview.offer(samples, length, live.slicer.paused)
         }
         val cost = TakeCost(AndroidCostProbe(service)).also { it.start() }
         val current = Run(take, pcm, models, live, recorder, cost, CostSampler(cost), bubbleText, preview)

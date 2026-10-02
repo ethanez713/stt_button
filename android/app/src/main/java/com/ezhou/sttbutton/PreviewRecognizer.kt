@@ -11,6 +11,39 @@ import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
 
 /**
+ * Maps a time in the audio the preview model was fed to the take's own time, which is later by the audio
+ * dropped during pauses. The bubble compares word times with the take's slices, so they must be take times.
+ */
+class PreviewClock {
+    private val breakpoints = ArrayList<Pair<Double, Double>>()
+    private var fedSamples = 0L
+    private var skippedSamples = 0L
+    private var skippedAtLastBreak = 0L
+
+    @Synchronized
+    fun fed(samples: Int) {
+        fedSamples += samples
+    }
+
+    @Synchronized
+    fun skipped(samples: Int) {
+        skippedSamples += samples
+    }
+
+    /** Audio is being fed again: from here on, stream time lags take time by everything skipped so far. */
+    @Synchronized
+    fun resumed() {
+        if (skippedSamples == skippedAtLastBreak) return
+        skippedAtLastBreak = skippedSamples
+        breakpoints += fedSamples.toDouble() / Slicer.SAMPLE_RATE to skippedSamples.toDouble() / Slicer.SAMPLE_RATE
+    }
+
+    @Synchronized
+    fun takeTimeS(streamS: Double): Double =
+        streamS + (breakpoints.lastOrNull { it.first <= streamS }?.second ?: 0.0)
+}
+
+/**
  * The streaming FastConformer behind the preview bubble, on its own thread so it never delays a slice or a
  * chunk clean. It loads after [awaitFirst] returns, which is the take's real recognizer, so a short take is
  * never held up by it. A load or decode failure disables the preview for the take and nothing else.
@@ -22,12 +55,31 @@ class PreviewRecognizer(
     private val threads: Int = THREADS,
 ) {
     private val queue = LinkedBlockingQueue<FloatArray>()
+    private val clock = PreviewClock()
+    private var held: FloatArray? = null
     @Volatile private var stopped = false
     private val thread = Thread(::run).apply { name = "preview"; start() }
 
-    /** Called on the recorder thread: copies the samples and returns. */
-    fun offer(samples: ShortArray, length: Int) {
-        if (!stopped) queue.add(FloatArray(length) { samples[it] / 32768f })
+    /**
+     * Called on the recorder thread: copies the samples and returns. Audio that arrives while the take is
+     * [paused] is not decoded, except the last piece before it resumes, which keeps a soft word onset.
+     */
+    fun offer(samples: ShortArray, length: Int, paused: Boolean) {
+        if (stopped) return
+        val piece = FloatArray(length) { samples[it] / 32768f }
+        if (paused) {
+            held?.let { clock.skipped(it.size) }
+            held = piece
+            return
+        }
+        held?.let {
+            clock.resumed()
+            queue.add(it)
+            clock.fed(it.size)
+            held = null
+        }
+        queue.add(piece)
+        clock.fed(length)
     }
 
     fun stop() {
@@ -68,7 +120,7 @@ class PreviewRecognizer(
                 val result = recognizer.getResult(stream)
                 if (result.text != shown) {
                     shown = result.text
-                    onWords(BubbleText.wordsFromTokens(result.tokens, result.timestamps))
+                    onWords(BubbleText.wordsFromTokens(result.tokens, result.timestamps).map { PreviewWord(it.text, clock.takeTimeS(it.startS)) })
                 }
             }
             stream.release()

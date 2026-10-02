@@ -110,7 +110,7 @@ It holds, in order:
 - Parakeet's text for recognized slices not yet cleaned;
 - the preview model's text for the audio after the last recognized slice, drawn lighter.
 
-When a slice lands, the preview words whose timestamps fall inside it are dropped and Parakeet's text takes their place.
+When a slice lands, the preview words whose timestamps fall inside it are dropped and Parakeet's text takes their place. The phone does not feed the preview model audio once the take is paused (speech heard, then `pause_s` of silence), except the last piece before speech resumes; word times are mapped back to take time by the audio skipped, so the comparison with slices holds.
 
 ### Insertion
 

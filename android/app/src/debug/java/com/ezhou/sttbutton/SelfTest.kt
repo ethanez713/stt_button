@@ -87,7 +87,7 @@ class SelfTest : Service() {
         for (at in audio.indices step piece) {
             val buffer = audio.copyOfRange(at, minOf(audio.size, at + piece))
             live.addSamples(buffer)
-            preview.offer(buffer, buffer.size)
+            preview.offer(buffer, buffer.size, live.slicer.paused)
             Thread.sleep(100L / speed)
         }
         stopping.set(true)
