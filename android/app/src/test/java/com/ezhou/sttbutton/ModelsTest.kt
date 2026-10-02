@@ -32,6 +32,25 @@ class ModelsTest {
     private fun models() = Models({ recognizer }, { cleanerLoads++; cleaner }, { logs += it })
 
     @Test
+    fun given_models_when_closed_then_they_are_no_longer_reusable_and_have_no_preview() {
+        val models = models()
+        assertTrue(models.reusable)
+        assertEquals(null, models.awaitPreview())
+        models.close()
+
+        assertEquals(false, models.reusable)
+    }
+
+    @Test
+    fun given_a_recognizer_that_failed_to_load_when_asked_then_the_models_are_not_reusable() {
+        val models = Models({ error("no model") }, { cleaner }, { logs += it })
+        models.awaitRecognizerLoaded()
+
+        assertEquals(false, models.reusable)
+        models.close()
+    }
+
+    @Test
     fun given_a_take_that_only_recognizes_when_closed_then_the_cleaner_was_never_loaded() {
         val models = models()
         assertEquals("heard", models.recognizer.recognize(FloatArray(10)))

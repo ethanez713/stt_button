@@ -3,6 +3,7 @@ package com.ezhou.sttbutton
 import android.Manifest
 import android.content.ClipData
 import android.content.ClipboardManager
+import android.content.ComponentCallbacks2
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Handler
@@ -35,6 +36,9 @@ class TakeController(private val service: DictationService, private val overlay:
     /** Accessibility events this process has handled, so the log shows the traffic between takes. */
     private var eventsSeen = 0L
     private val capRunnable = Runnable { run?.let(::stop) }
+    private var parked: Models? = null
+    private var shutDown = false
+    private val releaseParked = Runnable { releaseParkedNow() }
 
     private class Run(
         val take: Take, val pcm: File, val models: Models, val live: LiveTake, val recorder: Recorder,
@@ -89,7 +93,10 @@ class TakeController(private val service: DictationService, private val overlay:
         val field = service.focusedField()
         val pkg = field?.packageName?.toString() ?: service.activePackage() ?: UNKNOWN_PACKAGE
         val take = Take(UUID.randomUUID().toString(), pkg, SystemClock.elapsedRealtime())
-        log.write("start", take.id, "pkg" to pkg,
+        val warm = parked
+        parked = null
+        handler.removeCallbacks(releaseParked)
+        log.write("start", take.id, "pkg" to pkg, "models_warm" to (warm != null),
             "proc_cpu_ms" to Process.getElapsedCpuTime(),
             "proc_age_ms" to SystemClock.elapsedRealtime() - Process.getStartElapsedRealtime(),
             "proc_events" to eventsSeen)
@@ -98,10 +105,10 @@ class TakeController(private val service: DictationService, private val overlay:
         } catch (e: Exception) {
             Log.e(tag, "microphone foreground service refused", e)
         }
-        val models = Models.forFiles(service.filesDir, cfg)
+        val models = warm ?: Models.forFiles(service.filesDir, cfg)
         val bubbleText = BubbleText().apply { onChange = ::scheduleBubble }
         val live = LiveTake(models.recognizer, models::cleaner, cfg, bubbleText, models::prepareCleaner)
-        val preview = PreviewRecognizer(File(service.filesDir, ModelFiles.PREVIEW), models::awaitRecognizerLoaded, bubbleText::preview)
+        val preview = PreviewRecognizer(models::awaitPreview, bubbleText::preview)
         val pcm = File(takesDir, "${take.id}.pcm")
         val recorder = Recorder(pcm) { samples, length ->
             live.addSamples(samples, length)
@@ -179,8 +186,8 @@ class TakeController(private val service: DictationService, private val overlay:
             handler.post { if (run === current) discard(DiscardReason.ERROR) }
         } finally {
             current.preview.stop()
-            current.models.close()
             current.pcm.delete()
+            handler.post { park(current.models) }
         }
     }
 
@@ -313,11 +320,35 @@ class TakeController(private val service: DictationService, private val overlay:
 
     fun onTrimMemory(level: Int) {
         run?.cost?.noteTrim(level)
+        if (level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) releaseParkedNow()
+    }
+
+    /** Keeps a finished take's models for [WARM_MS] so a take that follows starts without loading them. */
+    private fun park(models: Models) {
+        if (shutDown || run != null || parked != null || !models.reusable) {
+            closeInBackground(models)
+            return
+        }
+        parked = models
+        handler.postDelayed(releaseParked, WARM_MS)
+    }
+
+    private fun releaseParkedNow() {
+        handler.removeCallbacks(releaseParked)
+        parked?.let(::closeInBackground)
+        parked = null
+    }
+
+    /** Closing joins the loader threads, so it must not run on the main thread. */
+    private fun closeInBackground(models: Models) {
+        thread(name = "models-close") { models.close() }
     }
 
     fun logProcessExits() = ExitReasons.record(service, log, File(service.filesDir, "logs/edits.jsonl"))
 
     fun shutdown() {
+        shutDown = true
+        releaseParkedNow()
         discard(DiscardReason.ERROR)
         tracker?.end()
     }
@@ -369,5 +400,6 @@ class TakeController(private val service: DictationService, private val overlay:
         private const val OWN_INSERT_MS = 400L
         private const val TRIGGER_FIELD_LOST = "field_lost"
         private const val BUBBLE_MS = 100L
+        private const val WARM_MS = 30_000L
     }
 }

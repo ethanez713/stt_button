@@ -105,6 +105,21 @@ def totals(lines: list[dict], capacity_mah: float) -> list[str]:
     return out
 
 
+def warm_split(lines: list[dict]) -> list[str]:
+    """How many takes started with the models kept from the take before, and what a first segment cost either way."""
+    warm_by_take = {r["id"]: r["models_warm"] for r in lines if r.get("event") == "start" and r.get("models_warm") is not None}
+    if not warm_by_take:
+        return []
+    out = [f"\nwarm starts: {sum(warm_by_take.values())} of {len(warm_by_take)}"]
+    firsts = [r for r in lines if r.get("event") == "insert" and r.get("segment") == 0 and r.get("id") in warm_by_take
+              and r.get("cpu_ms") is not None and not r.get("plugged")]
+    for warm, label in ((True, "warm"), (False, "cold")):
+        rows = [r for r in firsts if warm_by_take[r["id"]] == warm]
+        per_second = per(rows, "cpu_ms", lambda r: (r.get("audio_ms") or 0) / 1000)
+        out.append(f"  first segment cpu_ms per audio second [{label}]: {fmt(median(per_second))} over {len(rows)}")
+    return out
+
+
 def summarize(lines: list[dict], capacity_mah: float = 5000) -> str:
     inserts = [line for line in lines if line.get("event") == "insert"]
     unplugged = [r for r in inserts if not r.get("plugged")]
@@ -137,6 +152,7 @@ def summarize(lines: list[dict], capacity_mah: float = 5000) -> str:
             out.append(f"  stop_to_insert_ms [{mode}] median {fmt(median(stops))} over {len(stops)}")
 
     out.extend(totals(lines, capacity_mah))
+    out.extend(warm_split(lines))
 
     cues = Counter(r["cue"] for r in inserts if r.get("cue"))
     out.append("\ncue matches: " + (", ".join(f"{c} {n}" for c, n in cues.most_common()) or "none"))

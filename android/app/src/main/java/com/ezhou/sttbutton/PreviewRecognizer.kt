@@ -43,16 +43,34 @@ class PreviewClock {
         streamS + (breakpoints.lastOrNull { it.first <= streamS }?.second ?: 0.0)
 }
 
+/** The streaming FastConformer behind the preview bubble; [Models] keeps it loaded between takes. */
+fun loadPreviewModel(modelDir: File, threads: Int = PreviewRecognizer.THREADS): OnlineRecognizer = OnlineRecognizer(
+    config = OnlineRecognizerConfig(
+        featConfig = FeatureConfig(sampleRate = 16000, featureDim = 80),
+        modelConfig = OnlineModelConfig(
+            transducer = OnlineTransducerModelConfig(
+                encoder = File(modelDir, "encoder.int8.onnx").path,
+                decoder = File(modelDir, "decoder.int8.onnx").path,
+                joiner = File(modelDir, "joiner.int8.onnx").path,
+            ),
+            tokens = File(modelDir, "tokens.txt").path,
+            numThreads = threads,
+            modelType = "nemo_transducer",
+        ),
+        enableEndpoint = false,
+        decodingMethod = "greedy_search",
+    ),
+)
+
 /**
- * The streaming FastConformer behind the preview bubble, on its own thread so it never delays a slice or a
- * chunk clean. It loads after [awaitFirst] returns, which is the take's real recognizer, so a short take is
- * never held up by it. A load or decode failure disables the preview for the take and nothing else.
+ * One take's stream over the preview model, on its own thread so it never delays a slice or a chunk clean.
+ * [awaitModel] returns once the take's real recognizer has loaded and then the preview model, so a short
+ * take is never held up by it; a null model or a decode failure disables the preview for the take and
+ * nothing else.
  */
 class PreviewRecognizer(
-    private val modelDir: File,
-    private val awaitFirst: () -> Unit,
+    private val awaitModel: () -> OnlineRecognizer?,
     private val onWords: (List<PreviewWord>) -> Unit,
-    private val threads: Int = THREADS,
 ) {
     private val queue = LinkedBlockingQueue<FloatArray>()
     private val clock = PreviewClock()
@@ -89,45 +107,28 @@ class PreviewRecognizer(
     }
 
     private fun run() {
-        var recognizer: OnlineRecognizer? = null
         try {
-            awaitFirst()
+            val recognizer = awaitModel() ?: return
             if (stopped) return
-            val started = System.nanoTime()
-            recognizer = OnlineRecognizer(config = OnlineRecognizerConfig(
-                featConfig = FeatureConfig(sampleRate = 16000, featureDim = 80),
-                modelConfig = OnlineModelConfig(
-                    transducer = OnlineTransducerModelConfig(
-                        encoder = File(modelDir, "encoder.int8.onnx").path,
-                        decoder = File(modelDir, "decoder.int8.onnx").path,
-                        joiner = File(modelDir, "joiner.int8.onnx").path,
-                    ),
-                    tokens = File(modelDir, "tokens.txt").path,
-                    numThreads = threads,
-                    modelType = "nemo_transducer",
-                ),
-                enableEndpoint = false,
-                decodingMethod = "greedy_search",
-            ))
-            Log.i(DictationService.TAG, "preview loaded ms=${(System.nanoTime() - started) / 1_000_000}")
             val stream = recognizer.createStream()
-            var shown = ""
-            while (!stopped) {
-                val chunk = queue.poll(POLL_MS, TimeUnit.MILLISECONDS) ?: continue
-                if (chunk.isEmpty()) continue
-                stream.acceptWaveform(chunk, 16000)
-                while (recognizer.isReady(stream)) recognizer.decode(stream)
-                val result = recognizer.getResult(stream)
-                if (result.text != shown) {
-                    shown = result.text
-                    onWords(BubbleText.wordsFromTokens(result.tokens, result.timestamps).map { PreviewWord(it.text, clock.takeTimeS(it.startS)) })
+            try {
+                var shown = ""
+                while (!stopped) {
+                    val chunk = queue.poll(POLL_MS, TimeUnit.MILLISECONDS) ?: continue
+                    if (chunk.isEmpty()) continue
+                    stream.acceptWaveform(chunk, 16000)
+                    while (recognizer.isReady(stream)) recognizer.decode(stream)
+                    val result = recognizer.getResult(stream)
+                    if (result.text != shown) {
+                        shown = result.text
+                        onWords(BubbleText.wordsFromTokens(result.tokens, result.timestamps).map { PreviewWord(it.text, clock.takeTimeS(it.startS)) })
+                    }
                 }
+            } finally {
+                stream.release()
             }
-            stream.release()
         } catch (e: Throwable) {
             Log.e(DictationService.TAG, "preview disabled for this take", e)
-        } finally {
-            recognizer?.release()
         }
     }
 

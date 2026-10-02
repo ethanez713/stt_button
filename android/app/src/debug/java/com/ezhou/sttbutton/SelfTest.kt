@@ -71,7 +71,7 @@ class SelfTest : Service() {
         val live = LiveTake(models.recognizer, models::cleaner, cfg, bubble, models::prepareCleaner)
         val feedStarted = SystemClock.elapsedRealtime()
         var firstPreviewMs = -1L
-        val preview = PreviewRecognizer(File(context.filesDir, ModelFiles.PREVIEW), models::awaitRecognizerLoaded, { words ->
+        val preview = PreviewRecognizer(models::awaitPreview, { words ->
             if (firstPreviewMs < 0 && words.isNotEmpty()) firstPreviewMs = SystemClock.elapsedRealtime() - feedStarted
             bubble.preview(words)
         })

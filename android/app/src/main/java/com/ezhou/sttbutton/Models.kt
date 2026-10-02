@@ -6,6 +6,7 @@ import com.k2fsa.sherpa.onnx.OfflineModelConfig
 import com.k2fsa.sherpa.onnx.OfflineRecognizer
 import com.k2fsa.sherpa.onnx.OfflineRecognizerConfig
 import com.k2fsa.sherpa.onnx.OfflineTransducerModelConfig
+import com.k2fsa.sherpa.onnx.OnlineRecognizer
 import java.io.File
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.atomic.AtomicBoolean
@@ -92,21 +93,25 @@ class LlamaChunkCleaner(private val llama: LlamaCleaner, private val cfg: Pipeli
 }
 
 /**
- * The models of one take, released when its text is inserted or the take is discarded. The recognizer
- * loads as the take opens, so a short take waits only for it. The cleaner loads on [prepareCleaner],
- * which the take calls once it runs long or its text needs cleaning; a user of the cleaner before then
- * triggers the load and blocks until it is ready.
+ * The models a take uses, kept by the controller for a short while after the take so the next one starts
+ * warm. The recognizer loads as the take opens, so a short take waits only for it, and the preview model
+ * loads once the recognizer has. The cleaner loads on [prepareCleaner], which the take calls once it runs
+ * long or its text needs cleaning; a user of the cleaner before then triggers the load and blocks until
+ * it is ready.
  */
 class Models(
     private val loadRecognizer: () -> ClosableRecognizer,
     private val loadCleaner: () -> ClosableCleaner,
     private val log: (String) -> Unit = { Log.i(DictationService.TAG, it) },
+    private val loadPreview: () -> OnlineRecognizer? = { null },
 ) : AutoCloseable {
     private val recognizerReady = CountDownLatch(1)
+    private val previewReady = CountDownLatch(1)
     private val cleanerReady = CountDownLatch(1)
     private val cleanerRequested = AtomicBoolean(false)
     @Volatile private var recognizerModel: ClosableRecognizer? = null
     @Volatile private var cleanerModel: ClosableCleaner? = null
+    @Volatile private var previewModel: OnlineRecognizer? = null
     @Volatile private var recognizerFailure: Throwable? = null
     @Volatile private var cleanerFailure: Throwable? = null
     @Volatile private var closed = false
@@ -141,6 +146,15 @@ class Models(
     /** Blocks until the recognizer has loaded or failed to. */
     fun awaitRecognizerLoaded() = recognizerReady.await()
 
+    /** The streaming preview model, or null when it failed to load or the models were released. */
+    fun awaitPreview(): OnlineRecognizer? {
+        previewReady.await()
+        return previewModel.takeUnless { closed }
+    }
+
+    /** Whether a take can use these again: released models and ones that failed to load cannot. */
+    val reusable: Boolean get() = !closed && recognizerFailure == null && cleanerFailure == null
+
     private val recognizerLoader = Thread {
         try {
             val started = System.nanoTime()
@@ -153,6 +167,20 @@ class Models(
             recognizerReady.countDown()
         }
     }.apply { name = "recognizer-loader"; start() }
+
+    private val previewLoader = Thread {
+        try {
+            recognizerReady.await()
+            if (closed) return@Thread
+            val started = System.nanoTime()
+            previewModel = loadPreview()
+            if (previewModel != null) log("preview loaded ms=${(System.nanoTime() - started) / 1_000_000}")
+        } catch (e: Throwable) {
+            Log.e(DictationService.TAG, "preview disabled for this take", e)
+        } finally {
+            previewReady.countDown()
+        }
+    }.apply { name = "preview-loader"; start() }
 
     /** Starts loading the cleaner if nothing has; [trigger] is logged by the call that starts it. */
     fun prepareCleaner(trigger: String) {
@@ -191,17 +219,21 @@ class Models(
             cleanerLoader
         }
         recognizerLoader.join()
+        previewLoader.join()
         loader?.join()
         recognizerModel?.close()
         cleanerModel?.close()
+        previewModel?.release()
         recognizerModel = null
         cleanerModel = null
+        previewModel = null
     }
 
     companion object {
         fun forFiles(filesDir: File, cfg: PipelineConfig) = Models(
             { ParakeetRecognizer(filesDir) },
             { LlamaChunkCleaner(LlamaCleaner(File(filesDir, ModelFiles.S1_MINI).path), cfg) },
+            loadPreview = { loadPreviewModel(File(filesDir, ModelFiles.PREVIEW)) },
         )
     }
 }
