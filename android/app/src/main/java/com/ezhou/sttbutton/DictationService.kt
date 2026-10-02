@@ -27,6 +27,7 @@ class DictationService : AccessibilityService() {
     private var lastState: String? = null
     private var imeTreeLoggedFor: Int? = null
     private val placement = MicPlacement()
+    private val slide = KeyboardSlide()
     private val handler = Handler(Looper.getMainLooper())
     private val reread = Runnable { reconcile() }
     private val imePrefs by lazy { getSharedPreferences("ime", MODE_PRIVATE) }
@@ -161,8 +162,14 @@ class DictationService : AccessibilityService() {
         if (overlay.isHidden) return removed("hidden from the drop zone")
         if (english == false) return removed("keyboard not English")
         val ime = windows.firstOrNull { it.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD }
-            ?: return removed("no keyboard window")
-        bubble.setAnchor(Rect().also(ime::getBoundsInScreen))
+        if (ime == null) {
+            slide.gone()
+            return removed("no keyboard window")
+        }
+        val imeBounds = Rect().also(ime::getBoundsInScreen)
+        val motion = slide.read(imeBounds.top, imeBounds.bottom, overlay.screen().bottom)
+        if (motion == KeyboardMotion.LEAVING) return removed("keyboard sliding out")
+        bubble.setAnchor(imeBounds)
         val field = findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
         val fieldShape = if (field != null) {
             if (field.packageName == packageName && field.viewIdResourceName != TRY_FIELD_ID) return removed("own app")
@@ -186,7 +193,7 @@ class DictationService : AccessibilityService() {
             imeTreeLoggedFor = ime.id
             Log.i(TAG, "voice key not found; IME descriptions: ${MicLocator.descriptions(root)}")
         }
-        show(mic ?: fallbackBounds(ime))
+        show(mic ?: fallbackBounds(ime), atRest = motion == KeyboardMotion.RESTING)
         val placement = when {
             overlay.isDragged -> "shown-dragged"
             mic != null -> "shown-on-node $mic"
@@ -203,15 +210,15 @@ class DictationService : AccessibilityService() {
     }
 
     // The keyboard slides in over a few hundred ms, so the button waits at the last settled spot
-    // until the bounds stop changing; a dragged button ignores the microphone.
-    private fun show(bounds: Rect) {
+    // until the keyboard is at rest; a dragged button ignores the microphone.
+    private fun show(bounds: Rect, atRest: Boolean) {
         if (overlay.isDragged) {
             placement.reset()
             overlay.show(bounds)
             return
         }
         val read = Bounds(bounds.left, bounds.top, bounds.right, bounds.bottom)
-        val wanted = placement.read(SystemClock.uptimeMillis(), read, overlay.rememberedBounds())
+        val wanted = placement.read(SystemClock.uptimeMillis(), read, overlay.rememberedBounds(), atRest)
         wanted.show?.let { overlay.show(Rect(it.left, it.top, it.right, it.bottom)) }
         wanted.persist?.let(overlay::remember)
         wanted.settle?.let {

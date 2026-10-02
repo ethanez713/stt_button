@@ -17,8 +17,8 @@ data class Settle(val remembered: Boolean, val reads: Int, val settledMs: Long, 
 
 /**
  * Keeps the button still while the keyboard slides in. On appearance the button takes the last
- * settled position; it moves to the microphone's current bounds only once they have stopped
- * changing, or after [capMs] if they never do.
+ * settled position; it moves to the microphone's current bounds only once the keyboard is at rest
+ * and they have stopped changing, or after [capMs] if they never do.
  */
 class MicPlacement(private val stableMs: Long = 100, private val capMs: Long = 1500) {
     private var shown: Bounds? = null
@@ -35,7 +35,7 @@ class MicPlacement(private val stableMs: Long = 100, private val capMs: Long = 1
         episodeStart = null
     }
 
-    fun read(now: Long, bounds: Bounds, remembered: Bounds?): Placement {
+    fun read(now: Long, bounds: Bounds, remembered: Bounds?, atRest: Boolean): Placement {
         if (shown == null) return appear(now, bounds, remembered)
         reads++
         if (bounds != last) {
@@ -44,7 +44,10 @@ class MicPlacement(private val stableMs: Long = 100, private val capMs: Long = 1
             if (episodeStart == null) beginEpisode(now)
         }
         val start = episodeStart ?: return Placement()
-        if (now - lastChangeAt < stableMs && now - start < capMs) return Placement(reread = true)
+        val capped = now - start >= capMs
+        // A sliding keyboard reports the same bounds for longer than stableMs, so stillness alone is not the end of a slide.
+        if (!atRest) return Placement(reread = !capped)
+        if (now - lastChangeAt < stableMs && !capped) return Placement(reread = true)
         return settle(now, start, bounds)
     }
 

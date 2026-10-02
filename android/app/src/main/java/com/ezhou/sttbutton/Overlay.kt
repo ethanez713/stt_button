@@ -99,7 +99,7 @@ class Overlay(
     private fun draggedPosition(): Point? =
         if (isDragged) Point(prefs.getInt(KEY_X, 0), prefs.getInt(KEY_Y, 0)) else null
 
-    private fun screen(): Rect = windowManager.currentWindowMetrics.bounds
+    fun screen(): Rect = windowManager.currentWindowMetrics.bounds
 
     private fun zoneHeight(): Int = (ZONE_HEIGHT_DP * density).toInt()
 

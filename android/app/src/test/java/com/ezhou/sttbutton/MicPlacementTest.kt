@@ -13,7 +13,7 @@ class MicPlacementTest {
 
     @Test
     fun given_rememberedRect_when_keyboardAppears_then_buttonShowsThereAtOnce() {
-        val placement = MicPlacement().read(0, sliding, remembered = settled)
+        val placement = MicPlacement().read(0, sliding, remembered = settled, atRest = false)
         assertEquals(settled, placement.show)
         assertTrue(placement.reread)
     }
@@ -21,19 +21,40 @@ class MicPlacementTest {
     @Test
     fun given_changingReads_when_sliding_then_buttonStaysPut() {
         val p = MicPlacement()
-        p.read(0, sliding, settled)
-        val mid = p.read(100, halfway, settled)
+        p.read(0, sliding, settled, atRest = false)
+        val mid = p.read(100, halfway, settled, atRest = false)
         assertNull(mid.show)
         assertTrue(mid.reread)
     }
 
     @Test
+    fun given_slidingKeyboard_when_itsBoundsRepeat_then_noSettle() {
+        val p = MicPlacement()
+        p.read(0, sliding, settled, atRest = false)
+        p.read(100, halfway, settled, atRest = false)
+        val repeated = p.read(250, halfway, settled, atRest = false)
+        assertNull(repeated.show)
+        assertNull(repeated.persist)
+        assertTrue(repeated.reread)
+    }
+
+    @Test
+    fun given_slideThatNeverComesToRest_when_capReached_then_rereadsStopWithNothingRemembered() {
+        val p = MicPlacement()
+        p.read(0, sliding, settled, atRest = false)
+        val capped = p.read(1500, halfway, settled, atRest = false)
+        assertNull(capped.show)
+        assertNull(capped.persist)
+        assertFalse(capped.reread)
+    }
+
+    @Test
     fun given_stableRead_when_slideEnds_then_buttonMovesAndRemembers() {
         val p = MicPlacement()
-        p.read(0, sliding, settled)
-        p.read(100, halfway, settled)
-        p.read(200, Bounds(900, 1520, 1000, 1620), settled)
-        val end = p.read(300, Bounds(900, 1520, 1000, 1620), settled)
+        p.read(0, sliding, settled, atRest = false)
+        p.read(100, halfway, settled, atRest = false)
+        p.read(200, Bounds(900, 1520, 1000, 1620), settled, atRest = true)
+        val end = p.read(300, Bounds(900, 1520, 1000, 1620), settled, atRest = true)
         assertEquals(Bounds(900, 1520, 1000, 1620), end.show)
         assertEquals(Bounds(900, 1520, 1000, 1620), end.persist)
         assertFalse(end.reread)
@@ -43,12 +64,12 @@ class MicPlacementTest {
     @Test
     fun given_readsThatNeverSettle_when_capReached_then_latestReadIsTaken() {
         val p = MicPlacement()
-        p.read(0, sliding, settled)
+        p.read(0, sliding, settled, atRest = true)
         var last = Placement()
         var latest = settled
         for (t in 100..1500 step 100) {
             latest = Bounds(900, 1700 + t, 1000, 1800 + t)
-            last = p.read(t.toLong(), latest, settled)
+            last = p.read(t.toLong(), latest, settled, atRest = true)
         }
         assertEquals(latest, last.show)
     }
@@ -56,9 +77,9 @@ class MicPlacementTest {
     @Test
     fun given_noRememberedRect_when_keyboardAppears_then_firstReadShowsAndSettles() {
         val p = MicPlacement()
-        val first = p.read(0, settled, remembered = null)
+        val first = p.read(0, settled, remembered = null, atRest = true)
         assertEquals(settled, first.show)
-        val second = p.read(100, settled, remembered = null)
+        val second = p.read(100, settled, remembered = null, atRest = true)
         assertNull(second.show)
         assertEquals(settled, second.persist)
         assertFalse(second.settle!!.remembered)
@@ -66,7 +87,7 @@ class MicPlacementTest {
 
     @Test
     fun given_rememberedMatchesRead_when_keyboardAppears_then_noRereadNeeded() {
-        val first = MicPlacement().read(0, settled, remembered = settled)
+        val first = MicPlacement().read(0, settled, remembered = settled, atRest = true)
         assertEquals(settled, first.show)
         assertFalse(first.reread)
     }
@@ -74,17 +95,17 @@ class MicPlacementTest {
     @Test
     fun given_settledButton_when_micMovesLater_then_itSettlesBeforeFollowing() {
         val p = MicPlacement()
-        p.read(0, settled, settled)
+        p.read(0, settled, settled, atRest = true)
         val moved = Bounds(900, 1000, 1000, 1100)
-        assertNull(p.read(500, moved, settled).show)
-        assertEquals(moved, p.read(600, moved, settled).show)
+        assertNull(p.read(500, moved, settled, atRest = true).show)
+        assertEquals(moved, p.read(600, moved, settled, atRest = true).show)
     }
 
     @Test
     fun given_reset_when_keyboardReturns_then_rememberedRectShowsAgain() {
         val p = MicPlacement()
-        p.read(0, settled, settled)
+        p.read(0, settled, settled, atRest = true)
         p.reset()
-        assertEquals(settled, p.read(5000, sliding, settled).show)
+        assertEquals(settled, p.read(5000, sliding, settled, atRest = false).show)
     }
 }
