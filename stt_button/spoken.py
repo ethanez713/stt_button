@@ -24,6 +24,8 @@ _TWO_WORD = {
     **{("close", p): ("cp", None) for p in _PAREN_WORDS},
 }
 _ONE_WORD = {"quote": "bq", "unquote": "cq", **{p: "bp" for p in _PAREN_WORDS}}
+# "quote unquote or …" names the command rather than quoting the next word.
+_CONJUNCTIONS = {"or", "and", "but", "nor"}
 _CAPITALIZE_AFTER = {"?", "!", "\n\n"}
 _COMMAND_KINDS = {"oq", "cq", "bq", "quq", "op", "cp", "bp", "mark", "nl"}
 
@@ -80,18 +82,18 @@ def _pair_up(elements: list[tuple]) -> list[tuple]:
                 out.append(("open", '"'))
         elif kind in ("op", "bp"):
             j = closer_after(i, "cp")
-            if j is not None:
+            if j is None:
+                out.append(("word", spoken))
+            else:
                 paired.add(j)
                 out.append(("open", "("))
-            else:
-                out.append(("open", "(") if kind == "op" else ("word", spoken))
         elif kind == "cq":
             out.append(("close", '"', trail) if i in paired else ("word", spoken))
         elif kind == "cp":
-            out.append(("close", ")", trail))
+            out.append(("close", ")", trail) if i in paired else ("word", spoken))
         elif kind == "quq":
             following = elements[i + 1] if i + 1 < len(elements) else None
-            if following is not None and following[0] == "w":
+            if following is not None and following[0] == "w" and following[2].lower() not in _CONJUNCTIONS:
                 out += [("open", '"'), ("word", following[2]), ("close", '"', following[3])]
                 i += 1
             else:

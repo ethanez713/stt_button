@@ -1417,7 +1417,19 @@
   },
   {
    "text": "close paren stray",
-   "spoken": ") stray"
+   "spoken": "close paren stray"
+  },
+  {
+   "text": "open paren never closed",
+   "spoken": "open paren never closed"
+  },
+  {
+   "text": "things like quote unquote or open close parentheses? Those get inserted",
+   "spoken": "things like quote unquote or open close parentheses? Those get inserted"
+  },
+  {
+   "text": "the quote unquote And operator",
+   "spoken": "the quote unquote And operator"
   },
   {
    "text": "She said open quote word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word end quote",

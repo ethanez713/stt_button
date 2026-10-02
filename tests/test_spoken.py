@@ -19,7 +19,11 @@ from tests.test_dictate import ScriptedRecognizer, live_cfg, speech_like
     ("a quote from the contractor", "a quote from the contractor"),
     ("a period of time", "a period of time"),
     ("the end. Quote of the day", "the end. Quote of the day"),
-    ("close paren stray", ") stray"),
+    ("close paren stray", "close paren stray"),
+    ("open paren never closed", "open paren never closed"),
+    ("things like quote unquote or open close parentheses? Those get inserted",
+     "things like quote unquote or open close parentheses? Those get inserted"),
+    ("the quote unquote And operator", "the quote unquote And operator"),
 ])
 def test_given_spoken_commands_when_converted_then_symbols_replace_them_and_plain_text_is_untouched(spoken, written):
     assert spoken_punctuation(spoken) == written

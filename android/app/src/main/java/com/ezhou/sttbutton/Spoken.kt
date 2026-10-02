@@ -27,6 +27,8 @@ object Spoken {
         put("unquote", "cq")
         for (p in PAREN_WORDS) put(p, "bp")
     }
+    // "quote unquote or …" names the command rather than quoting the next word.
+    private val CONJUNCTIONS = setOf("or", "and", "but", "nor")
     private val CAPITALIZE_AFTER = setOf("?", "!", "\n\n")
     private val COMMAND_KINDS = setOf("oq", "cq", "bq", "quq", "op", "cp", "bp", "mark", "nl")
 
@@ -100,18 +102,17 @@ object Spoken {
                 }
                 "op", "bp" -> {
                     val j = closerAfter(i, "cp")
-                    if (j != null) {
+                    if (j == null) out += Item("word", e.spoken)
+                    else {
                         paired += j
                         out += Item("open", "(")
-                    } else {
-                        out += if (e.kind == "op") Item("open", "(") else Item("word", e.spoken)
                     }
                 }
                 "cq" -> out += if (i in paired) Item("close", "\"", e.trail) else Item("word", e.spoken)
-                "cp" -> out += Item("close", ")", e.trail)
+                "cp" -> out += if (i in paired) Item("close", ")", e.trail) else Item("word", e.spoken)
                 "quq" -> {
                     val following = elements.getOrNull(i + 1)
-                    if (following != null && following.kind == "w") {
+                    if (following != null && following.kind == "w" && following.spoken.lowercase() !in CONJUNCTIONS) {
                         out += Item("open", "\"")
                         out += Item("word", following.spoken)
                         out += Item("close", "\"", following.trail)
