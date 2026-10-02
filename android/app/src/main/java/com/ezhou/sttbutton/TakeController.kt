@@ -67,11 +67,6 @@ class TakeController(private val service: DictationService, private val overlay:
         takesDir.listFiles()?.forEach { it.delete() }
     }
 
-    val hasOpenTake: Boolean get() = run != null
-
-    /** A take is open and still listening; after its stop it finishes without the button. */
-    val isRecording: Boolean get() = run?.take?.state == TakeState.OPEN
-
     /** The open take's state for the trace log, NONE between takes. */
     val stateName: String get() = run?.take?.state?.name ?: "NONE"
 
