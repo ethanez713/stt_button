@@ -110,10 +110,6 @@ It holds, in order:
 
 When a slice lands, the preview words whose timestamps fall inside it are dropped and Parakeet's text takes their place.
 
-### Recordings
-
-After insertion, each take's PCM file is encoded losslessly to `files/recordings/<id>.flac`, named by its edit-log id, and the PCM file is deleted. The encoder is Android's built-in `MediaCodec` FLAC encoder; its codec-config buffer (the `fLaC` stream header) followed by its output frames is the file, since `MediaMuxer` has no FLAC container. Recordings are kept up to 10 minutes of total audio, oldest deleted first, which is roughly 10 MB as FLAC against 19 MB as PCM. A discarded take's audio is deleted at once. Pull with `adb exec-out run-as com.ezhou.sttbutton tar -cf - files/recordings > recordings.tar`, and decode to wav on the host with `flac -d` before replaying through the library.
-
 ### Insertion
 
 The utterance is inserted at the caret. Characters already in the field stay. A take's first insert is led by a space when the character before the caret is neither white space nor an opening bracket or quote. A selection is collapsed to its end before the insert, so highlighted text is kept. The paths, in order:
