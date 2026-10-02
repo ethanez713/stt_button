@@ -43,6 +43,7 @@ class LiveResult(
     val prefix: String = "",
     val contextDecodes: Int = 0,
     val contextFallbacks: Int = 0,
+    val drifts: Int = 0,
 )
 
 /**
@@ -66,6 +67,7 @@ class LiveTake(
     private var inTokens = 0
     private var outTokens = 0
     private var idleCleans = 0
+    private var drifts = 0
     private var stopAsrMs = 0L
     private var stopCleanMs = 0L
     private val finishedRaw = mutableListOf<String>()
@@ -159,7 +161,7 @@ class LiveTake(
         return LiveResult(
             result.raw, body, result.chunks, result.cleanMode, result.asrMs, result.cleanMs, result.asrMsAfterStop,
             result.cleanMsAfterStop, result.inTokens, result.outTokens, result.idleCleans, result.idleHits, result.cue,
-            result.audioMs, prefix, contextDecodes, contextFallbacks,
+            result.audioMs, prefix, contextDecodes, contextFallbacks, result.drifts,
         )
     }
 
@@ -182,6 +184,7 @@ class LiveTake(
         inTokens = 0
         outTokens = 0
         idleCleans = 0
+        drifts = 0
         stopAsrMs = 0
         stopCleanMs = 0
         leadingMark = null
@@ -193,6 +196,7 @@ class LiveTake(
         raw, cleaned, chunks, mode, asrMs, cleanMs, asrMs - stopAsrMs, cleanMs - stopCleanMs,
         inTokens, outTokens, idleCleans, idleHits, Pipeline.matchedCue(judged, cfg.selfCorrectionCues),
         (slicer.sampleCount - segmentStartSample) / (Slicer.SAMPLE_RATE / 1000).toLong(),
+        drifts = drifts,
     )
 
     private fun takePending(): List<IntArray> = synchronized(pending) { pending.toList().also { pending.clear() } }
@@ -269,11 +273,16 @@ class LiveTake(
         return true
     }
 
+    /** A clean that swapped a name or number for another is replaced by the chunk as heard. */
     private fun keep(cleaner: ChunkCleaner, chunk: String, cleaned: ChunkResult) {
-        cleanedChunks[chunk] = cleaned.text
+        val text = if (Pipeline.factDrift(chunk, cleaned.text).isEmpty()) cleaned.text else {
+            drifts++
+            Spoken.convert(chunk)
+        }
+        cleanedChunks[chunk] = text
         inTokens += cleaner.countTokens(chunk)
         outTokens += cleaned.outTokens
-        sink?.chunkCleaned(chunk, cleaned.text)
+        sink?.chunkCleaned(chunk, text)
     }
 
     private fun elapsedMs(since: Long) = (System.nanoTime() - since) / 1_000_000

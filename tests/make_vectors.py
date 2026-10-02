@@ -14,7 +14,7 @@ import numpy as np
 from stt_button import asr, config
 from stt_button.asr import context_audio, settled_mark, split_at_junction
 from stt_button.bubble import Bubble
-from stt_button.cleaner import casual, live_chunks, matched_cue, skips_cleaner
+from stt_button.cleaner import casual, fact_drift, live_chunks, matched_cue, skips_cleaner
 from stt_button.spoken import spoken_punctuation
 
 FIXTURE = Path(__file__).parent / "fixtures" / "pipeline_vectors.json"
@@ -109,6 +109,19 @@ SPOKEN_TEXTS = [
 ]
 
 
+DRIFT_CASES = [
+    ("Agents attach to my S20 Ultra today.", "Agents attach to my S25 Ultra today."),
+    ("It is my S20 Ultra, not the S25 Ultra. Put it on the S20 Ultra.", "It is my S25 Ultra, not the S25 Ultra. Put it on the S25 Ultra."),
+    ("I want AB Connect to have it.", "I want ADB Connect to have it."),
+    ("So the plan is simple. Wake the phone first.", "So the plan is simple. wake the phone first."),
+    ("meet at Twelfth at five", "meet at 12th at 5"),
+    ("meet at 4. Actually no, make it 5.", "Meet at 5."),
+    ("a letter See then", "a letter C then"),
+    ("Then I'm sure I'll go", "Then I am sure I will go"),
+    ("It costs $5, I think.", "It costs $5. I think."),
+    ("", ""),
+]
+
 JUNCTION_CASES = [
     {"tokens": [" update", " the", " plan", ".", " have", " some", " monitoring"],
      "times": [0.1, 0.4, 0.7, 0.9, 2.3, 2.6, 2.9], "junction_s": 2.0},
@@ -182,6 +195,7 @@ def vectors() -> dict:
         "context_audio": [context_audio_vector(c) for c in CONTEXT_AUDIO_CASES],
         "settled_mark": [{"slice": s, "context": c, "mark": settled_mark(s, c)}
                          for s in ("", ".", ",", "?", "!") for c in ("", ".", ",", "?", "!")],
+        "fact_drift": [{"raw": r, "cleaned": c, "drift": [list(p) for p in fact_drift(r, c)]} for r, c in DRIFT_CASES],
         "spoken": [{"text": t, "spoken": spoken_punctuation(t)} for t in SPOKEN_TEXTS],
         "skips_cleaner": {
             "skip_max_words": cfg["skip_max_words"],

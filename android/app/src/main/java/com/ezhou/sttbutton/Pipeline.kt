@@ -71,6 +71,55 @@ object Pipeline {
         if (wordCount(judged) > cfg.skipMaxWords) text
         else FINAL_PERIOD.replace(COMMA_OUTSIDE_NUMBER.replace(text, ""), "$1")
 
+    private val EDGE_PUNCTUATION = Regex("^[^\\p{L}\\p{N}_]+|[^\\p{L}\\p{N}_]+$")
+    private val FIRST_PERSON = setOf("i", "i'm", "i'll", "i've", "i'd")
+    private val SENTENCE_END = Regex("[.?!]$")
+    private const val DRIFT_MAX_EDITS = 2
+
+    private fun factTokens(text: String): Map<String, Int> {
+        val facts = mutableMapOf<String, Int>()
+        var opens = true
+        for (word in text.trim().split(WHITESPACE).filter { it.isNotEmpty() }) {
+            val token = EDGE_PUNCTUATION.replace(word, "")
+            if (token.isNotEmpty() && token.lowercase() !in FIRST_PERSON && (token.any { it.isDigit() } || (token[0].isUpperCase() && !opens))) {
+                facts.merge(token.lowercase(), 1, Int::plus)
+            }
+            opens = SENTENCE_END.containsMatchIn(word)
+        }
+        return facts
+    }
+
+    private fun edits(a: String, b: String): Int {
+        val row = IntArray(b.length + 1) { it }
+        for (i in 1..a.length) {
+            var previous = row[0]
+            row[0] = i
+            for (j in 1..b.length) {
+                val above = row[j]
+                row[j] = minOf(row[j] + 1, row[j - 1] + 1, previous + if (a[i - 1] == b[j - 1]) 0 else 1)
+                previous = above
+            }
+        }
+        return row[b.length]
+    }
+
+    /** Mirrors `stt_button.cleaner.fact_drift`. */
+    fun factDrift(raw: String, cleaned: String): List<Pair<String, String>> {
+        val before = factTokens(raw)
+        val after = factTokens(cleaned)
+        val lost = before.keys.filter { t ->
+            if (t.any { it.isDigit() }) (after[t] ?: 0) < before.getValue(t) else t !in after
+        }.sorted()
+        val gained = after.keys.filter { t ->
+            if (t.any { it.isDigit() }) after.getValue(t) > (before[t] ?: 0) else t !in before
+        }.sorted()
+        return lost.flatMap { m ->
+            gained.filter { n ->
+                m.length > 1 && n.length > 1 && edits(m, n) <= (if (minOf(m.length, n.length) > 3) DRIFT_MAX_EDITS else 1)
+            }.map { n -> m to n }
+        }
+    }
+
     fun trailingMark(text: String): String = TRAILING_MARK.find(text)?.value ?: ""
 
     fun withoutTrailingMark(text: String): String = TRAILING_MARK.replace(text, "")

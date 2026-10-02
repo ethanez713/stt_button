@@ -64,6 +64,21 @@ class LiveTakeTest {
     }
 
     @Test
+    fun given_a_clean_that_swaps_a_model_name_when_finished_then_the_chunk_is_inserted_as_heard() {
+        val swapping = object : ChunkCleaner {
+            override fun countTokens(text: String) = Pipeline.wordCount(text)
+            override fun clean(chunk: String) = ChunkResult(chunk.replace("S20", "S25"), 1)
+            override fun cancel() = Unit
+        }
+        val take = LiveTake(ScriptedRecognizer("Put it on the S20 Ultra please now"), { swapping }, cfg)
+        take.addSamples(tone(3))
+        val result = take.finish()
+
+        assertEquals("Put it on the S20 Ultra please now", result.cleaned)
+        assertEquals(1, result.drifts)
+    }
+
+    @Test
     fun given_a_five_word_take_when_finished_then_it_is_raw_and_the_cleaner_is_never_asked_for() {
         val take = LiveTake(ScriptedRecognizer("Meet at noon, okay."), { error("the cleaner must not be touched") }, cfg)
         take.addSamples(tone(3))

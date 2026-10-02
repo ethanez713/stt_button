@@ -10,7 +10,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from stt_button.asr import SAMPLE_RATE, TRAILING_MARK, Slicer, context_audio, join_slices, settled_mark
-from stt_button.cleaner import casual, live_chunks, matched_cue, skips_cleaner
+from stt_button.cleaner import casual, fact_drift, live_chunks, matched_cue, skips_cleaner
 from stt_button.spoken import spoken_punctuation
 
 
@@ -27,6 +27,7 @@ class LiveResult:
     cue: str | None = None
     context_decodes: int = 0
     context_fallbacks: int = 0
+    drifts: int = 0
 
 
 IDLE_POLL_S = 0.05
@@ -54,6 +55,7 @@ class LiveTake:
         self.asr_ms = 0
         self.context_decodes = 0
         self.context_fallbacks = 0
+        self.drifts = 0
         self.clean_ms = 0
         self._stop_asr_ms = self._stop_clean_ms = 0
 
@@ -96,7 +98,7 @@ class LiveTake:
             self.clean_ms += _ms(started)
             if cleaned is None:
                 break
-            self.cleaned_chunks[chunk] = cleaned[0]
+            self._keep(chunk, cleaned[0])
             self.idle_chunks.add(chunk)
             self._announce(chunk)
         return bool(chunks)
@@ -117,7 +119,7 @@ class LiveTake:
         return LiveResult(raw, casual(cleaned, self.cfg), len(chunks), "chunks", self.asr_ms - self._stop_asr_ms,
                           self.clean_ms - self._stop_clean_ms, self.idle_cleans,
                           sum(c in self.idle_chunks for c in chunks), matched_cue(raw, self.cfg["self_correction_cues"]),
-                          self.context_decodes, self.context_fallbacks)
+                          self.context_decodes, self.context_fallbacks, self.drifts)
 
     def _recognize(self, start: int, end: int) -> None:
         started = time.monotonic()
@@ -155,10 +157,17 @@ class LiveTake:
         for chunk in chunks:
             if chunk not in self.cleaned_chunks:
                 started = time.monotonic()
-                self.cleaned_chunks[chunk] = cleaner.clean_chunk(chunk)[0]
+                self._keep(chunk, cleaner.clean_chunk(chunk)[0])
                 self.clean_ms += _ms(started)
                 self._announce(chunk)
         return chunks
+
+    def _keep(self, chunk: str, cleaned: str) -> None:
+        """A clean that swapped a name or number for another is replaced by the chunk as heard."""
+        if fact_drift(chunk, cleaned):
+            self.drifts += 1
+            cleaned = spoken_punctuation(chunk)
+        self.cleaned_chunks[chunk] = cleaned
 
     def _announce(self, chunk: str) -> None:
         if self.bubble:

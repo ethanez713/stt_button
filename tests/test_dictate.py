@@ -247,3 +247,30 @@ def test_given_a_short_take_when_idle_then_nothing_is_cleaned():
     take = idle_take(cleaner, "Meet at noon, okay.", "")
     assert not take.idle_step(lambda: np.zeros(0, dtype=np.float32))
     assert cleaner.calls == []
+
+
+class SwappingCleaner(UppercaseCleaner):
+    def clean_chunk(self, chunk, cancelled=None):
+        return chunk.replace("S20", "S25").replace("it ", "it, ", 1), 1
+
+
+def test_given_a_clean_that_swaps_a_model_name_when_finished_then_the_chunk_is_inserted_as_heard():
+    from stt_button.live import LiveTake
+
+    take = LiveTake(ScriptedRecognizer("Put it on the S20 Ultra please now"), lambda: SwappingCleaner(), live_cfg())
+    take.feed(speech_like(3))
+    result = take.finish()
+
+    assert result.cleaned == "Put it on the S20 Ultra please now"
+    assert result.drifts == 1
+
+
+def test_given_a_clean_that_keeps_the_names_when_finished_then_it_is_kept_and_no_drift_is_counted():
+    from stt_button.live import LiveTake
+
+    take = LiveTake(ScriptedRecognizer("Put it on the Ultra please now"), lambda: SwappingCleaner(), live_cfg())
+    take.feed(speech_like(3))
+    result = take.finish()
+
+    assert result.cleaned == "Put it, on the Ultra please now"
+    assert result.drifts == 0

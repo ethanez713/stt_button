@@ -1370,6 +1370,73 @@
    "mark": "!"
   }
  ],
+ "fact_drift": [
+  {
+   "raw": "Agents attach to my S20 Ultra today.",
+   "cleaned": "Agents attach to my S25 Ultra today.",
+   "drift": [
+    [
+     "s20",
+     "s25"
+    ]
+   ]
+  },
+  {
+   "raw": "It is my S20 Ultra, not the S25 Ultra. Put it on the S20 Ultra.",
+   "cleaned": "It is my S25 Ultra, not the S25 Ultra. Put it on the S25 Ultra.",
+   "drift": [
+    [
+     "s20",
+     "s25"
+    ]
+   ]
+  },
+  {
+   "raw": "I want AB Connect to have it.",
+   "cleaned": "I want ADB Connect to have it.",
+   "drift": [
+    [
+     "ab",
+     "adb"
+    ]
+   ]
+  },
+  {
+   "raw": "So the plan is simple. Wake the phone first.",
+   "cleaned": "So the plan is simple. wake the phone first.",
+   "drift": []
+  },
+  {
+   "raw": "meet at Twelfth at five",
+   "cleaned": "meet at 12th at 5",
+   "drift": []
+  },
+  {
+   "raw": "meet at 4. Actually no, make it 5.",
+   "cleaned": "Meet at 5.",
+   "drift": []
+  },
+  {
+   "raw": "a letter See then",
+   "cleaned": "a letter C then",
+   "drift": []
+  },
+  {
+   "raw": "Then I'm sure I'll go",
+   "cleaned": "Then I am sure I will go",
+   "drift": []
+  },
+  {
+   "raw": "It costs $5, I think.",
+   "cleaned": "It costs $5. I think.",
+   "drift": []
+  },
+  {
+   "raw": "",
+   "cleaned": "",
+   "drift": []
+  }
+ ],
  "spoken": [
   {
    "text": "He said quote hello world, unquote and left",

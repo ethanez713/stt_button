@@ -133,6 +133,14 @@ class PipelineVectorsTest {
     }
 
     @Test
+    fun given_fact_drift_vectors_when_compared_then_the_pairs_match_the_host() {
+        for (case in Fixtures.objects(Fixtures.vectors.getJSONArray("fact_drift"))) {
+            val expected = case.getJSONArray("drift").let { a -> List(a.length()) { a.getJSONArray(it).getString(0) to a.getJSONArray(it).getString(1) } }
+            assertEquals(case.getString("raw"), expected, Pipeline.factDrift(case.getString("raw"), case.getString("cleaned")))
+        }
+    }
+
+    @Test
     fun given_the_prompt_when_rendered_then_it_is_the_training_format() {
         val prompt = Pipeline.promptFor(Fixtures.config, "um so hi")
         assertTrue(prompt.startsWith("<|im_start|>system\nYou are a text normalizer"))
