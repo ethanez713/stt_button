@@ -1,12 +1,15 @@
 package com.ezhou.sttbutton
 
 import android.Manifest
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
+import android.widget.Toast
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import java.io.File
@@ -38,6 +41,10 @@ class TakeController(private val service: DictationService, private val overlay:
         @Volatile var aborted = false
         @Volatile var stopTrigger = TRIGGER_STOP
         var stoppedAtMs = 0L
+
+        /** Text of segments that found no field to go into, kept for the clipboard at the end of the take. */
+        val unplaced = StringBuilder()
+        var unplacedReason: DiscardReason? = null
     }
 
     /** A take that exited with the process still owns a PCM file nobody will read. */
@@ -159,7 +166,8 @@ class TakeController(private val service: DictationService, private val overlay:
         val text = if (result.cleaned.isBlank()) result.prefix.trim() else result.prefix + result.cleaned
         if (text.isBlank()) {
             if (!last) return
-            if (take.finishWithoutText()) release(current) else discard(DiscardReason.EMPTY)
+            if (current.unplaced.isNotEmpty()) copyUnplaced(current, result, trigger)
+            else if (take.finishWithoutText()) release(current) else discard(DiscardReason.EMPTY)
             return
         }
         val field = service.focusedField()
@@ -168,8 +176,10 @@ class TakeController(private val service: DictationService, private val overlay:
             take.pkg != UNKNOWN_PACKAGE && field.packageName?.toString() != take.pkg -> DiscardReason.PACKAGE
             else -> null
         }
-        if (reason != null || field == null) {
-            discard(reason ?: DiscardReason.NO_FIELD)
+        if (reason != null || field == null || current.unplaced.isNotEmpty()) {
+            current.unplaced.append(text)
+            current.unplacedReason = current.unplacedReason ?: reason ?: DiscardReason.NO_FIELD
+            if (last) copyUnplaced(current, result, trigger) else stop(current, trigger = TRIGGER_FIELD_LOST)
             return
         }
         val segment = take.segmentsInserted
@@ -198,6 +208,28 @@ class TakeController(private val service: DictationService, private val overlay:
         if (last) release(current)
     }
 
+    /**
+     * The field the take was for is gone or belongs to another app, so the text has nowhere to go:
+     * it is put on the clipboard and the user is told, instead of losing what they dictated.
+     */
+    private fun copyUnplaced(current: Run, result: LiveResult, trigger: String) {
+        val text = current.unplaced.toString().trim()
+        val reason = current.unplacedReason ?: DiscardReason.NO_FIELD
+        val copied = try {
+            service.getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("dictation", text))
+            true
+        } catch (e: Exception) {
+            Log.e(tag, "could not copy the dictation to the clipboard", e)
+            false
+        }
+        if (copied) Toast.makeText(service, R.string.copied_to_clipboard, Toast.LENGTH_LONG).show()
+        log.write("clipboard", current.take.id,
+            "pkg" to current.take.pkg, "reason" to reason.logName, "trigger" to trigger, "copied" to copied,
+            "raw" to result.raw, "text" to text, "clean_mode" to result.cleanMode, "audio_ms" to result.audioMs)
+        current.take.discard(reason)
+        release(current)
+    }
+
     private fun track(take: Take, field: AccessibilityNodeInfo) {
         val existing = tracker
         if (existing != null && existing.takeId == take.id) existing.refresh(inserter.textOf(field))
@@ -215,7 +247,7 @@ class TakeController(private val service: DictationService, private val overlay:
     fun onAccessibilityEvent(event: AccessibilityEvent) {
         run?.let { current ->
             val focused = service.focusedField()?.packageName?.toString()
-            if (focused != null && current.take.pkg != UNKNOWN_PACKAGE && focused != current.take.pkg) discard(DiscardReason.PACKAGE)
+            if (focused != null && current.take.pkg != UNKNOWN_PACKAGE && focused != current.take.pkg) stop(current, TRIGGER_PACKAGE)
         }
         tracker?.onEvent(event)
     }
@@ -281,6 +313,8 @@ class TakeController(private val service: DictationService, private val overlay:
         private const val TRIGGER_PAUSE = "pause"
         private const val TRIGGER_STOP = "stop"
         private const val TRIGGER_KEYBOARD = "keyboard"
+        private const val TRIGGER_PACKAGE = "package"
+        private const val TRIGGER_FIELD_LOST = "field_lost"
         private const val BUBBLE_MS = 100L
     }
 }

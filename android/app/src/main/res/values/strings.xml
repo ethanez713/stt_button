@@ -9,6 +9,7 @@
     <string name="zone_reset">Reset</string>
     <string name="zone_hide">Hide</string>
     <string name="licenses">Models: Parakeet Unified EN 0.6B by NVIDIA, NVIDIA Open Model License (use and redistribution with the license and this notice kept). Live preview: NVIDIA stt_en_fastconformer_hybrid_large_streaming_multi, converted for sherpa-onnx, CC-BY-4.0. Cleanup: S1-mini by Superwhisper, Apache-2.0, kept under the name S1-mini. Runtimes: sherpa-onnx and ONNX Runtime, llama.cpp (MIT).</string>
+    <string name="copied_to_clipboard">Dictation copied to the clipboard</string>
     <string name="recording_channel">Dictation</string>
     <string name="recording_notification">Listening</string>
     <string name="grant_microphone">Allow the microphone</string>
