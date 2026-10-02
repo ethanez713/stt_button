@@ -15,7 +15,7 @@ interface ClosableRecognizer : SliceRecognizer, AutoCloseable
 
 interface ClosableCleaner : ChunkCleaner, AutoCloseable
 
-class ParakeetRecognizer(filesDir: File, threads: Int = LlamaCleaner.THREADS) : ClosableRecognizer {
+class ParakeetRecognizer(filesDir: File, threads: Int = THREADS) : ClosableRecognizer {
     private val recognizer: OfflineRecognizer
 
     init {
@@ -60,6 +60,10 @@ class ParakeetRecognizer(filesDir: File, threads: Int = LlamaCleaner.THREADS) : 
     }
 
     override fun close() = recognizer.release()
+
+    companion object {
+        const val THREADS = 3
+    }
 }
 
 class LlamaChunkCleaner(private val llama: LlamaCleaner, private val cfg: PipelineConfig) : ClosableCleaner {

@@ -4,6 +4,7 @@
 #     android/selftest.sh clean r05      # cleans files/selftest/r05.prompt.txt
 #     android/selftest.sh wav r05        # recognizes files/selftest/r05.wav
 #
+# THREADS=n sets the recognizer thread count for `asr`.
 # The result is pulled to $OUT (default /tmp/selftest). Stage inputs with push_selftest.py first.
 set -euo pipefail
 
@@ -17,7 +18,7 @@ case "$kind" in wav) suffix=take.txt ;; asr) suffix=asr.txt ;; esac
 
 adb -s "$S" shell "run-as com.ezhou.sttbutton rm -f files/selftest/$name.$suffix"
 adb -s "$S" logcat -c
-adb -s "$S" shell am start-foreground-service -n com.ezhou.sttbutton/.SelfTest --es "$kind" "$name" >/dev/null
+adb -s "$S" shell am start-foreground-service -n com.ezhou.sttbutton/.SelfTest --es "$kind" "$name" ${THREADS:+--ei threads "$THREADS"} >/dev/null
 for _ in $(seq "${WAIT_LOOPS:-150}"); do
     adb -s "$S" logcat -d -s SttButton:* | grep -E "selftest (wav|asr|clean) $name|selftest failed" && break
     sleep 2

@@ -8,6 +8,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.IBinder
+import android.os.Process
 import android.os.SystemClock
 import android.util.Log
 import java.io.File
@@ -38,7 +39,7 @@ class SelfTest : Service() {
         thread {
             try {
                 intent.getStringExtra("wav")?.let { take(this, it, intent.getIntExtra("speed", 1)) }
-                intent.getStringExtra("asr")?.let { recognize(this, it) }
+                intent.getStringExtra("asr")?.let { recognize(this, it, intent.getIntExtra("threads", ParakeetRecognizer.THREADS)) }
                 intent.getStringExtra("clean")?.let { clean(this, it, intent.getStringExtra("with")) }
             } catch (e: Throwable) {
                 Log.e(TAG, "selftest failed", e)
@@ -49,16 +50,20 @@ class SelfTest : Service() {
         return START_NOT_STICKY
     }
 
-    private fun recognize(context: Context, name: String) {
+    private fun recognize(context: Context, name: String, threads: Int) {
         val dir = File(context.filesDir, "selftest")
         val samples = readWav(File(dir, "$name.wav")).let { pcm -> FloatArray(pcm.size) { pcm[it] / 32768f } }
         val started = SystemClock.elapsedRealtime()
-        ParakeetRecognizer(context.filesDir).use { recognizer ->
+        ParakeetRecognizer(context.filesDir, threads).use { recognizer ->
             val loaded = SystemClock.elapsedRealtime()
+            val cpuBefore = Process.getElapsedCpuTime()
             val text = recognizer.recognize(samples)
+            val cpuMs = Process.getElapsedCpuTime() - cpuBefore
             File(dir, "$name.asr.txt").writeText(text + "\n")
             Log.i(TAG, "selftest asr $name audio_ms=${samples.size / 16} load_ms=${loaded - started} " +
-                "decode_ms=${SystemClock.elapsedRealtime() - loaded} words=${text.split(' ').size}")
+                "decode_ms=${SystemClock.elapsedRealtime() - loaded} threads=$threads cpu_ms=$cpuMs " +
+                "cpus_allowed=${File("/proc/self/status").readLines().first { it.startsWith("Cpus_allowed_list") }.substringAfter(':').trim()} " +
+                "words=${text.split(' ').size}")
         }
     }
 
