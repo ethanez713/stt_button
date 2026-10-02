@@ -70,6 +70,9 @@ class TakeController(private val service: DictationService, private val overlay:
     /** A take is open and still listening; after its stop it finishes without the button. */
     val isRecording: Boolean get() = run?.take?.state == TakeState.OPEN
 
+    /** The open take's state for the trace log, NONE between takes. */
+    val stateName: String get() = run?.take?.state?.name ?: "NONE"
+
     fun onTap() {
         val current = run
         when {
@@ -128,6 +131,7 @@ class TakeController(private val service: DictationService, private val overlay:
         current.anchor = field?.textSelectionEnd ?: -1
         service.watchSelectionChanges(true)
         run = current
+        Log.i(tag, "take start pkg=$pkg")
         bubble.show()
         thread(name = "take-worker") { work(current) }
         handler.postDelayed(capRunnable, cfg.takeCapS * 1000L)
@@ -137,6 +141,7 @@ class TakeController(private val service: DictationService, private val overlay:
     private fun stop(current: Run, trigger: String = TRIGGER_STOP) {
         if (!current.take.requestStop()) return
         current.stopTrigger = trigger
+        Log.i(tag, "take stop trigger=$trigger")
         handler.removeCallbacks(capRunnable)
         overlay.setMode(ButtonMode.BUSY)
         current.stoppedAtMs = SystemClock.elapsedRealtime()
@@ -276,6 +281,7 @@ class TakeController(private val service: DictationService, private val overlay:
     }
 
     private fun release(current: Run) {
+        Log.i(tag, "take end state=${current.take.state} reason=${current.take.discardReason?.logName}")
         current.sampler.stop()
         bubble.hide()
         if (run === current) run = null

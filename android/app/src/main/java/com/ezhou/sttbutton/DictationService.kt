@@ -64,8 +64,32 @@ class DictationService : AccessibilityService() {
         reconcile()
     }
 
+    /** `adb shell setprop log.tag.SttTrace DEBUG` logs what each event found: the take, the focused field and every window. */
+    private fun trace(event: AccessibilityEvent) {
+        if (!Log.isLoggable(TRACE, Log.DEBUG)) return
+        val wins = windows.joinToString("; ") { w ->
+            val type = when (w.type) {
+                AccessibilityWindowInfo.TYPE_INPUT_METHOD -> "IME"
+                AccessibilityWindowInfo.TYPE_APPLICATION -> "APP"
+                AccessibilityWindowInfo.TYPE_SYSTEM -> "SYS"
+                AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY -> "A11Y"
+                else -> "T${w.type}"
+            }
+            val root = w.root
+            val mic = if (w.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD) " mic=${root?.let(MicLocator::find)}" else ""
+            "$type#${w.id} ${root?.packageName ?: "noroot"} ${Rect().also(w::getBoundsInScreen).toShortString()}" +
+                "${if (w.isFocused) " F" else ""}${if (w.isActive) " A" else ""}$mic"
+        }
+        val focus = findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
+            ?.let { "${it.packageName}/${it.className} id=${it.viewIdResourceName} editable=${it.isEditable} focused=${it.isFocused} vis=${it.isVisibleToUser} win#${it.windowId}" }
+        Log.d(TRACE, "ev=${AccessibilityEvent.eventTypeToString(event.eventType)} changes=0x${event.windowChanges.toString(16)} pkg=${event.packageName}" +
+            " | take=${controller.stateName} | focus=${focus ?: "none"} | wins=[$wins]")
+    }
+
     override fun onAccessibilityEvent(event: AccessibilityEvent) {
-        if (::controller.isInitialized) controller.onAccessibilityEvent(event)
+        if (!::controller.isInitialized) return
+        trace(event)
+        controller.onAccessibilityEvent(event)
         if (event.eventType and FIELD_EVENTS == 0) reconcile()
     }
 
@@ -216,6 +240,7 @@ class DictationService : AccessibilityService() {
 
     companion object {
         const val TAG = "SttButton"
+        private const val TRACE = "SttTrace"
         private const val FALLBACK_DP = 48
         private const val TRY_FIELD_ID = "com.ezhou.sttbutton:id/try_field"
         private const val REREAD_MS = 100L

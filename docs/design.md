@@ -143,6 +143,8 @@ Pull with:
 adb exec-out run-as com.ezhou.sttbutton cat files/logs/edits.jsonl
 ```
 
+Logcat tag `SttButton` carries each change of the button's state with its reason, and each take's start, stop trigger and end. `adb shell setprop log.tag.SttTrace DEBUG` adds, under tag `SttTrace`, what every accessibility event found: the take's state, the focused field and each window with its bounds, which is the record to read when the button shows or hides at the wrong moment. The property lasts until the phone restarts.
+
 ### Battery
 
 - No boot-time model load, no analytics, no wake lock held across takes.
