@@ -80,7 +80,8 @@ class LiveTake:
             return False
         cleaner = self.get_cleaner()
         chunks = [c for c in live_chunks(self.raw, cleaner.count_tokens, self.cfg["chunk_min_tokens"],
-                                         self.cfg["chunk_max_tokens"], final=True)
+                                         self.cfg["chunk_max_tokens"], final=True,
+                                         cues=self.cfg["self_correction_cues"])
                   if c not in self.cleaned_chunks]
         last_poll = 0.0
 
@@ -153,7 +154,7 @@ class LiveTake:
             return []
         cleaner = self.get_cleaner()
         chunks = live_chunks(raw, cleaner.count_tokens, self.cfg["chunk_min_tokens"],
-                             self.cfg["chunk_max_tokens"], final)
+                             self.cfg["chunk_max_tokens"], final, cues=self.cfg["self_correction_cues"])
         for chunk in chunks:
             if chunk not in self.cleaned_chunks:
                 started = time.monotonic()

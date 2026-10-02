@@ -233,7 +233,7 @@ class LiveTake(
     }
 
     private fun chunksOf(cleaner: ChunkCleaner, final: Boolean) =
-        Pipeline.liveChunks(raw, cleaner::countTokens, cfg.chunkMinTokens, cfg.chunkMaxTokens, final)
+        Pipeline.liveChunks(raw, cleaner::countTokens, cfg.chunkMinTokens, cfg.chunkMaxTokens, final, cfg.selfCorrectionCues)
 
     private fun cleanClosed(final: Boolean): List<String> {
         if (skips()) return emptyList()

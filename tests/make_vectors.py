@@ -68,6 +68,14 @@ SLICER_CASES = {
                                          ["noise", 2, 3000]], 30, 5, PAUSE),
 }
 
+JOIN_TEXTS = {
+    "correction_opens_second_chunk": sentence(12) + " " + sentence(12) + " Actually no, make that Wednesday. " + sentence(12),
+    "cue_inside_first_chunk_only": sentence(6) + " Actually, I agree. " + sentence(12) + " " + sentence(12),
+    "cue_in_a_later_sentence_of_a_chunk": sentence(12) + " " + sentence(12) + " " + sentence(3) + " Sorry, I mean that. " + sentence(12),
+    "join_beyond_twice_the_max": sentence(30) + " " + sentence(30) + " Actually scratch that. " + sentence(30),
+    "two_corrections_in_a_row": sentence(12) + " " + sentence(12) + " No wait, that is wrong. " + sentence(12) + " Or rather, never mind. " + sentence(12),
+}
+
 CHUNK_TEXTS = {
     "mixed_sentences": " ".join(sentence(n, e) for n, e in
                                 [(7, "."), (31, "?"), (12, "."), (45, "!"), (9, "."), (28, "."), (60, ".")]),
@@ -190,6 +198,10 @@ def vectors() -> dict:
         "slicer": slicer,
         "bubble": [{"name": n, "events": e, "after_each": replay_bubble(e)} for n, e in BUBBLE_SEQUENCES.items()],
         "live_chunks": chunks,
+        "join_chunks": [{"name": n, "text": t, "min_tokens": lo, "max_tokens": hi, "final": final,
+                         "cues": cfg["self_correction_cues"],
+                         "chunks": live_chunks(t, words, lo, hi, final, cues=cfg["self_correction_cues"])}
+                        for n, t in JOIN_TEXTS.items() for lo, hi in ((20, 100), (20, 30)) for final in (False, True)],
         "casual": [{"text": t, "casual": casual(t, cfg)} for t in CASUAL_TEXTS],
         "junction": [{**c, "split": list(split_at_junction(c["tokens"], c["times"], c["junction_s"]))} for c in JUNCTION_CASES],
         "context_audio": [context_audio_vector(c) for c in CONTEXT_AUDIO_CASES],

@@ -158,3 +158,22 @@ def test_skipped_take_is_returned_as_recognized_without_generating():
 ])
 def test_casual_rule(text, expected):
     assert cleaner.casual(text, CFG) == expected
+
+
+def test_given_a_chunk_that_opens_with_a_correction_when_joined_then_it_follows_the_chunk_before_it():
+    cues = ["actually"]
+    text = " ".join(["a b c d e f g h."] * 3 + ["Actually no, make that Wednesday."] + ["x y z."] * 2)
+
+    plain = cleaner.live_chunks(text, len, 8, 100, final=True)
+    joined = cleaner.live_chunks(text, len, 8, 100, final=True, cues=cues)
+
+    assert len(plain) == 5 and len(joined) == 4
+    assert joined[2].endswith("a b c d e f g h. Actually no, make that Wednesday.")
+
+
+def test_given_a_join_beyond_twice_the_max_when_checked_then_the_chunks_stay_apart():
+    assert cleaner.join_corrections(["a " * 30 + "b.", "Actually c d."], ["actually"], len, 20) == ["a " * 30 + "b.", "Actually c d."]
+
+
+def test_given_a_cue_after_the_first_sentence_when_joined_then_nothing_joins():
+    assert cleaner.join_corrections(["a b.", "c d. Actually e."], ["actually"], len, 100) == ["a b.", "c d. Actually e."]

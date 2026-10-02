@@ -57,14 +57,29 @@ def _pieces(sentences: list[str], count_tokens: Callable[[str], int], max_tokens
     return pieces
 
 
+def join_corrections(chunks: list[str], cues: list[str], count_tokens: Callable[[str], int],
+                     max_tokens: int) -> list[str]:
+    """A chunk whose first sentence holds a self-correction cue is joined to the chunk before it,
+    because the correction may reach back into that chunk; a join beyond 2 * max_tokens is not made."""
+    joined: list[str] = []
+    for chunk in chunks:
+        first = split_sentences(chunk)[0] if chunk.strip() else ""
+        if joined and matched_cue(first, cues) and count_tokens(f"{joined[-1]} {chunk}") <= 2 * max_tokens:
+            joined[-1] = f"{joined[-1]} {chunk}"
+        else:
+            joined.append(chunk)
+    return joined
+
+
 def live_chunks(text: str, count_tokens: Callable[[str], int], min_tokens: int, max_tokens: int,
-                final: bool) -> list[str]:
+                final: bool, cues: list[str] | None = None) -> list[str]:
     """Chunks of whole sentences, each closed once it holds min_tokens or more.
 
     A sentence over max_tokens is split at word boundaries first. With final=False the last
     sentence is withheld, since the next slice may continue it, and an unclosed remainder is not
     returned; the chunks are then a prefix of what final=True returns for any longer text that
-    starts with the same words.
+    starts with the same words. With cues, a chunk that opens with a correction is joined to the one
+    before it (join_corrections), so the later chunks of a longer text can absorb an earlier one.
     """
     sentences = split_sentences(text)
     if not final:
@@ -78,7 +93,7 @@ def live_chunks(text: str, count_tokens: Callable[[str], int], min_tokens: int, 
             current = ""
     if final and current:
         chunks.append(current)
-    return chunks
+    return join_corrections(chunks, cues, count_tokens, max_tokens) if cues else chunks
 
 
 def matched_cue(text: str, cues: list[str]) -> str | None:
@@ -228,7 +243,7 @@ class Cleaner:
         outputs = []
         in_tokens = out_tokens = 0
         chunks = live_chunks(raw, self.count_tokens, min_tokens or self.cfg["chunk_min_tokens"],
-                             self.cfg["chunk_max_tokens"], final=True)
+                             self.cfg["chunk_max_tokens"], final=True, cues=self.cfg["self_correction_cues"])
         for chunk in chunks:
             text, n_out = self.clean_chunk(chunk)
             outputs.append(text)

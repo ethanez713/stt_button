@@ -48,6 +48,17 @@ class PipelineVectorsTest {
     }
 
     @Test
+    fun given_join_vectors_when_chunked_with_cues_then_chunks_match_the_host() {
+        for (case in Fixtures.objects(Fixtures.vectors.getJSONArray("join_chunks"))) {
+            val chunks = Pipeline.liveChunks(
+                case.getString("text"), Fixtures::words, case.getInt("min_tokens"), case.getInt("max_tokens"),
+                case.getBoolean("final"), Fixtures.strings(case.getJSONArray("cues")),
+            )
+            assertEquals(case.getString("name"), Fixtures.strings(case.getJSONArray("chunks")), chunks)
+        }
+    }
+
+    @Test
     fun given_skip_vectors_when_checked_then_decisions_match_the_host() {
         val skips = Fixtures.vectors.getJSONObject("skips_cleaner")
         val cues = Fixtures.strings(skips.getJSONArray("self_correction_cues"))

@@ -173,8 +173,24 @@ object Pipeline {
         return if (rawLetter.isLowerCase() && cleaned[first].isUpperCase()) cleaned.replaceRange(first, first + 1, cleaned[first].lowercase()) else cleaned
     }
 
+    /** Mirrors `stt_button.cleaner.join_corrections`. */
+    fun joinCorrections(chunks: List<String>, cues: List<String>, countTokens: (String) -> Int, maxTokens: Int): List<String> {
+        val joined = mutableListOf<String>()
+        for (chunk in chunks) {
+            val first = splitSentences(chunk).firstOrNull().orEmpty()
+            if (joined.isNotEmpty() && matchedCue(first, cues) != null && countTokens("${joined.last()} $chunk") <= 2 * maxTokens) {
+                joined[joined.lastIndex] = "${joined.last()} $chunk"
+            } else {
+                joined += chunk
+            }
+        }
+        return joined
+    }
+
     /** Mirrors `stt_button.cleaner.live_chunks`. */
-    fun liveChunks(text: String, countTokens: (String) -> Int, minTokens: Int, maxTokens: Int, final: Boolean): List<String> {
+    fun liveChunks(
+        text: String, countTokens: (String) -> Int, minTokens: Int, maxTokens: Int, final: Boolean, cues: List<String> = emptyList(),
+    ): List<String> {
         var sentences = splitSentences(text)
         if (!final) sentences = sentences.dropLast(1)
         val chunks = mutableListOf<String>()
@@ -187,7 +203,7 @@ object Pipeline {
             }
         }
         if (final && current.isNotEmpty()) chunks += current
-        return chunks
+        return if (cues.isEmpty()) chunks else joinCorrections(chunks, cues, countTokens, maxTokens)
     }
 
     private fun pieces(sentences: List<String>, countTokens: (String) -> Int, maxTokens: Int): List<String> =

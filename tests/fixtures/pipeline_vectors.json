@@ -1048,6 +1048,579 @@
    "chunks": []
   }
  ],
+ "join_chunks": [
+  {
+   "name": "correction_opens_second_chunk",
+   "text": "word word word word word word word word word word word last. word word word word word word word word word word word last. Actually no, make that Wednesday. word word word word word word word word word word word last.",
+   "min_tokens": 20,
+   "max_tokens": 100,
+   "final": false,
+   "cues": [
+    "actually",
+    "sorry",
+    "i mean",
+    "i meant",
+    "scratch that",
+    "never mind",
+    "make that",
+    "make it",
+    "no",
+    "not",
+    "wait",
+    "oops",
+    "rather",
+    "correction",
+    "i said",
+    "instead"
+   ],
+   "chunks": [
+    "word word word word word word word word word word word last. word word word word word word word word word word word last."
+   ]
+  },
+  {
+   "name": "correction_opens_second_chunk",
+   "text": "word word word word word word word word word word word last. word word word word word word word word word word word last. Actually no, make that Wednesday. word word word word word word word word word word word last.",
+   "min_tokens": 20,
+   "max_tokens": 100,
+   "final": true,
+   "cues": [
+    "actually",
+    "sorry",
+    "i mean",
+    "i meant",
+    "scratch that",
+    "never mind",
+    "make that",
+    "make it",
+    "no",
+    "not",
+    "wait",
+    "oops",
+    "rather",
+    "correction",
+    "i said",
+    "instead"
+   ],
+   "chunks": [
+    "word word word word word word word word word word word last. word word word word word word word word word word word last. Actually no, make that Wednesday. word word word word word word word word word word word last."
+   ]
+  },
+  {
+   "name": "correction_opens_second_chunk",
+   "text": "word word word word word word word word word word word last. word word word word word word word word word word word last. Actually no, make that Wednesday. word word word word word word word word word word word last.",
+   "min_tokens": 20,
+   "max_tokens": 30,
+   "final": false,
+   "cues": [
+    "actually",
+    "sorry",
+    "i mean",
+    "i meant",
+    "scratch that",
+    "never mind",
+    "make that",
+    "make it",
+    "no",
+    "not",
+    "wait",
+    "oops",
+    "rather",
+    "correction",
+    "i said",
+    "instead"
+   ],
+   "chunks": [
+    "word word word word word word word word word word word last. word word word word word word word word word word word last."
+   ]
+  },
+  {
+   "name": "correction_opens_second_chunk",
+   "text": "word word word word word word word word word word word last. word word word word word word word word word word word last. Actually no, make that Wednesday. word word word word word word word word word word word last.",
+   "min_tokens": 20,
+   "max_tokens": 30,
+   "final": true,
+   "cues": [
+    "actually",
+    "sorry",
+    "i mean",
+    "i meant",
+    "scratch that",
+    "never mind",
+    "make that",
+    "make it",
+    "no",
+    "not",
+    "wait",
+    "oops",
+    "rather",
+    "correction",
+    "i said",
+    "instead"
+   ],
+   "chunks": [
+    "word word word word word word word word word word word last. word word word word word word word word word word word last. Actually no, make that Wednesday. word word word word word word word word word word word last."
+   ]
+  },
+  {
+   "name": "cue_inside_first_chunk_only",
+   "text": "word word word word word last. Actually, I agree. word word word word word word word word word word word last. word word word word word word word word word word word last.",
+   "min_tokens": 20,
+   "max_tokens": 100,
+   "final": false,
+   "cues": [
+    "actually",
+    "sorry",
+    "i mean",
+    "i meant",
+    "scratch that",
+    "never mind",
+    "make that",
+    "make it",
+    "no",
+    "not",
+    "wait",
+    "oops",
+    "rather",
+    "correction",
+    "i said",
+    "instead"
+   ],
+   "chunks": [
+    "word word word word word last. Actually, I agree. word word word word word word word word word word word last."
+   ]
+  },
+  {
+   "name": "cue_inside_first_chunk_only",
+   "text": "word word word word word last. Actually, I agree. word word word word word word word word word word word last. word word word word word word word word word word word last.",
+   "min_tokens": 20,
+   "max_tokens": 100,
+   "final": true,
+   "cues": [
+    "actually",
+    "sorry",
+    "i mean",
+    "i meant",
+    "scratch that",
+    "never mind",
+    "make that",
+    "make it",
+    "no",
+    "not",
+    "wait",
+    "oops",
+    "rather",
+    "correction",
+    "i said",
+    "instead"
+   ],
+   "chunks": [
+    "word word word word word last. Actually, I agree. word word word word word word word word word word word last.",
+    "word word word word word word word word word word word last."
+   ]
+  },
+  {
+   "name": "cue_inside_first_chunk_only",
+   "text": "word word word word word last. Actually, I agree. word word word word word word word word word word word last. word word word word word word word word word word word last.",
+   "min_tokens": 20,
+   "max_tokens": 30,
+   "final": false,
+   "cues": [
+    "actually",
+    "sorry",
+    "i mean",
+    "i meant",
+    "scratch that",
+    "never mind",
+    "make that",
+    "make it",
+    "no",
+    "not",
+    "wait",
+    "oops",
+    "rather",
+    "correction",
+    "i said",
+    "instead"
+   ],
+   "chunks": [
+    "word word word word word last. Actually, I agree. word word word word word word word word word word word last."
+   ]
+  },
+  {
+   "name": "cue_inside_first_chunk_only",
+   "text": "word word word word word last. Actually, I agree. word word word word word word word word word word word last. word word word word word word word word word word word last.",
+   "min_tokens": 20,
+   "max_tokens": 30,
+   "final": true,
+   "cues": [
+    "actually",
+    "sorry",
+    "i mean",
+    "i meant",
+    "scratch that",
+    "never mind",
+    "make that",
+    "make it",
+    "no",
+    "not",
+    "wait",
+    "oops",
+    "rather",
+    "correction",
+    "i said",
+    "instead"
+   ],
+   "chunks": [
+    "word word word word word last. Actually, I agree. word word word word word word word word word word word last.",
+    "word word word word word word word word word word word last."
+   ]
+  },
+  {
+   "name": "cue_in_a_later_sentence_of_a_chunk",
+   "text": "word word word word word word word word word word word last. word word word word word word word word word word word last. word word last. Sorry, I mean that. word word word word word word word word word word word last.",
+   "min_tokens": 20,
+   "max_tokens": 100,
+   "final": false,
+   "cues": [
+    "actually",
+    "sorry",
+    "i mean",
+    "i meant",
+    "scratch that",
+    "never mind",
+    "make that",
+    "make it",
+    "no",
+    "not",
+    "wait",
+    "oops",
+    "rather",
+    "correction",
+    "i said",
+    "instead"
+   ],
+   "chunks": [
+    "word word word word word word word word word word word last. word word word word word word word word word word word last."
+   ]
+  },
+  {
+   "name": "cue_in_a_later_sentence_of_a_chunk",
+   "text": "word word word word word word word word word word word last. word word word word word word word word word word word last. word word last. Sorry, I mean that. word word word word word word word word word word word last.",
+   "min_tokens": 20,
+   "max_tokens": 100,
+   "final": true,
+   "cues": [
+    "actually",
+    "sorry",
+    "i mean",
+    "i meant",
+    "scratch that",
+    "never mind",
+    "make that",
+    "make it",
+    "no",
+    "not",
+    "wait",
+    "oops",
+    "rather",
+    "correction",
+    "i said",
+    "instead"
+   ],
+   "chunks": [
+    "word word word word word word word word word word word last. word word word word word word word word word word word last.",
+    "word word last. Sorry, I mean that. word word word word word word word word word word word last."
+   ]
+  },
+  {
+   "name": "cue_in_a_later_sentence_of_a_chunk",
+   "text": "word word word word word word word word word word word last. word word word word word word word word word word word last. word word last. Sorry, I mean that. word word word word word word word word word word word last.",
+   "min_tokens": 20,
+   "max_tokens": 30,
+   "final": false,
+   "cues": [
+    "actually",
+    "sorry",
+    "i mean",
+    "i meant",
+    "scratch that",
+    "never mind",
+    "make that",
+    "make it",
+    "no",
+    "not",
+    "wait",
+    "oops",
+    "rather",
+    "correction",
+    "i said",
+    "instead"
+   ],
+   "chunks": [
+    "word word word word word word word word word word word last. word word word word word word word word word word word last."
+   ]
+  },
+  {
+   "name": "cue_in_a_later_sentence_of_a_chunk",
+   "text": "word word word word word word word word word word word last. word word word word word word word word word word word last. word word last. Sorry, I mean that. word word word word word word word word word word word last.",
+   "min_tokens": 20,
+   "max_tokens": 30,
+   "final": true,
+   "cues": [
+    "actually",
+    "sorry",
+    "i mean",
+    "i meant",
+    "scratch that",
+    "never mind",
+    "make that",
+    "make it",
+    "no",
+    "not",
+    "wait",
+    "oops",
+    "rather",
+    "correction",
+    "i said",
+    "instead"
+   ],
+   "chunks": [
+    "word word word word word word word word word word word last. word word word word word word word word word word word last.",
+    "word word last. Sorry, I mean that. word word word word word word word word word word word last."
+   ]
+  },
+  {
+   "name": "join_beyond_twice_the_max",
+   "text": "word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last. word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last. Actually scratch that. word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last.",
+   "min_tokens": 20,
+   "max_tokens": 100,
+   "final": false,
+   "cues": [
+    "actually",
+    "sorry",
+    "i mean",
+    "i meant",
+    "scratch that",
+    "never mind",
+    "make that",
+    "make it",
+    "no",
+    "not",
+    "wait",
+    "oops",
+    "rather",
+    "correction",
+    "i said",
+    "instead"
+   ],
+   "chunks": [
+    "word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last.",
+    "word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last."
+   ]
+  },
+  {
+   "name": "join_beyond_twice_the_max",
+   "text": "word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last. word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last. Actually scratch that. word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last.",
+   "min_tokens": 20,
+   "max_tokens": 100,
+   "final": true,
+   "cues": [
+    "actually",
+    "sorry",
+    "i mean",
+    "i meant",
+    "scratch that",
+    "never mind",
+    "make that",
+    "make it",
+    "no",
+    "not",
+    "wait",
+    "oops",
+    "rather",
+    "correction",
+    "i said",
+    "instead"
+   ],
+   "chunks": [
+    "word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last.",
+    "word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last. Actually scratch that. word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last."
+   ]
+  },
+  {
+   "name": "join_beyond_twice_the_max",
+   "text": "word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last. word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last. Actually scratch that. word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last.",
+   "min_tokens": 20,
+   "max_tokens": 30,
+   "final": false,
+   "cues": [
+    "actually",
+    "sorry",
+    "i mean",
+    "i meant",
+    "scratch that",
+    "never mind",
+    "make that",
+    "make it",
+    "no",
+    "not",
+    "wait",
+    "oops",
+    "rather",
+    "correction",
+    "i said",
+    "instead"
+   ],
+   "chunks": [
+    "word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last.",
+    "word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last."
+   ]
+  },
+  {
+   "name": "join_beyond_twice_the_max",
+   "text": "word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last. word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last. Actually scratch that. word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last.",
+   "min_tokens": 20,
+   "max_tokens": 30,
+   "final": true,
+   "cues": [
+    "actually",
+    "sorry",
+    "i mean",
+    "i meant",
+    "scratch that",
+    "never mind",
+    "make that",
+    "make it",
+    "no",
+    "not",
+    "wait",
+    "oops",
+    "rather",
+    "correction",
+    "i said",
+    "instead"
+   ],
+   "chunks": [
+    "word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last.",
+    "word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last.",
+    "Actually scratch that. word word word word word word word word word word word word word word word word word word word word word word word word word word word word word last."
+   ]
+  },
+  {
+   "name": "two_corrections_in_a_row",
+   "text": "word word word word word word word word word word word last. word word word word word word word word word word word last. No wait, that is wrong. word word word word word word word word word word word last. Or rather, never mind. word word word word word word word word word word word last.",
+   "min_tokens": 20,
+   "max_tokens": 100,
+   "final": false,
+   "cues": [
+    "actually",
+    "sorry",
+    "i mean",
+    "i meant",
+    "scratch that",
+    "never mind",
+    "make that",
+    "make it",
+    "no",
+    "not",
+    "wait",
+    "oops",
+    "rather",
+    "correction",
+    "i said",
+    "instead"
+   ],
+   "chunks": [
+    "word word word word word word word word word word word last. word word word word word word word word word word word last. No wait, that is wrong. word word word word word word word word word word word last. Or rather, never mind."
+   ]
+  },
+  {
+   "name": "two_corrections_in_a_row",
+   "text": "word word word word word word word word word word word last. word word word word word word word word word word word last. No wait, that is wrong. word word word word word word word word word word word last. Or rather, never mind. word word word word word word word word word word word last.",
+   "min_tokens": 20,
+   "max_tokens": 100,
+   "final": true,
+   "cues": [
+    "actually",
+    "sorry",
+    "i mean",
+    "i meant",
+    "scratch that",
+    "never mind",
+    "make that",
+    "make it",
+    "no",
+    "not",
+    "wait",
+    "oops",
+    "rather",
+    "correction",
+    "i said",
+    "instead"
+   ],
+   "chunks": [
+    "word word word word word word word word word word word last. word word word word word word word word word word word last. No wait, that is wrong. word word word word word word word word word word word last. Or rather, never mind.",
+    "word word word word word word word word word word word last."
+   ]
+  },
+  {
+   "name": "two_corrections_in_a_row",
+   "text": "word word word word word word word word word word word last. word word word word word word word word word word word last. No wait, that is wrong. word word word word word word word word word word word last. Or rather, never mind. word word word word word word word word word word word last.",
+   "min_tokens": 20,
+   "max_tokens": 30,
+   "final": false,
+   "cues": [
+    "actually",
+    "sorry",
+    "i mean",
+    "i meant",
+    "scratch that",
+    "never mind",
+    "make that",
+    "make it",
+    "no",
+    "not",
+    "wait",
+    "oops",
+    "rather",
+    "correction",
+    "i said",
+    "instead"
+   ],
+   "chunks": [
+    "word word word word word word word word word word word last. word word word word word word word word word word word last. No wait, that is wrong. word word word word word word word word word word word last. Or rather, never mind."
+   ]
+  },
+  {
+   "name": "two_corrections_in_a_row",
+   "text": "word word word word word word word word word word word last. word word word word word word word word word word word last. No wait, that is wrong. word word word word word word word word word word word last. Or rather, never mind. word word word word word word word word word word word last.",
+   "min_tokens": 20,
+   "max_tokens": 30,
+   "final": true,
+   "cues": [
+    "actually",
+    "sorry",
+    "i mean",
+    "i meant",
+    "scratch that",
+    "never mind",
+    "make that",
+    "make it",
+    "no",
+    "not",
+    "wait",
+    "oops",
+    "rather",
+    "correction",
+    "i said",
+    "instead"
+   ],
+   "chunks": [
+    "word word word word word word word word word word word last. word word word word word word word word word word word last. No wait, that is wrong. word word word word word word word word word word word last. Or rather, never mind.",
+    "word word word word word word word word word word word last."
+   ]
+  }
+ ],
  "casual": [
   {
    "text": "Okay, I'm down.",
