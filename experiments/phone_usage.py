@@ -60,6 +60,51 @@ def edited_share(lines: list[dict]) -> tuple[int, int]:
     return edited, len(inserts)
 
 
+COSTED_EVENTS = ("insert", "discard", "clipboard")
+
+
+def outside_takes(lines: list[dict]) -> tuple[float, float, float]:
+    """CPU seconds, hours and accessibility events between consecutive `start` lines of one process,
+    less the CPU the lines between them account for: what the resident service costs when no take runs."""
+    cpu_ms = age_ms = events = 0.0
+    previous, counted = None, 0.0
+    for line in lines:
+        if line.get("event") in COSTED_EVENTS:
+            counted += line.get("cpu_ms") or 0
+        if line.get("event") != "start" or line.get("proc_cpu_ms") is None:
+            continue
+        # A younger process than the previous start's is a new one, and its counters began again.
+        if previous is not None and line["proc_age_ms"] > previous["proc_age_ms"]:
+            cpu_ms += line["proc_cpu_ms"] - previous["proc_cpu_ms"] - counted
+            age_ms += line["proc_age_ms"] - previous["proc_age_ms"]
+            events += line["proc_events"] - previous["proc_events"]
+        previous, counted = line, 0.0
+    return cpu_ms / 1000, age_ms / 3_600_000, events
+
+
+def totals(lines: list[dict], capacity_mah: float) -> list[str]:
+    costed = [r for r in lines if r.get("event") in COSTED_EVENTS and r.get("charge_uah") is not None
+              and not r.get("plugged")]
+    if not costed:
+        return []
+    mah = lambda rows: sum(r["charge_uah"] for r in rows) / 1000  # noqa: E731
+    cpu_s = lambda rows: sum(r.get("cpu_ms") or 0 for r in rows) / 1000  # noqa: E731
+    unplaced = [r for r in costed if r["event"] != "insert"]
+    days = len({r["ts"][:10] for r in costed if r.get("ts")}) or 1
+    out = [f"\nunplugged total: {fmt(mah(costed), 1)} mAh and {fmt(cpu_s(costed))} CPU s over {days} days "
+           f"({fmt(mah(costed) / days / capacity_mah * 100, 2)}% of the battery per day)",
+           f"  discarded or clipboard takes: {len(unplaced)}, {fmt(mah(unplaced), 1)} mAh, {fmt(cpu_s(unplaced))} CPU s"]
+    sampled = [r for r in costed if r.get("sampler_cpu_ms") is not None]
+    if sampled:
+        out.append(f"  the cost sampler's own share of cpu_ms: "
+                   f"{fmt(sum(r['sampler_cpu_ms'] for r in sampled) / max(sum(r.get('cpu_ms') or 0 for r in sampled), 1) * 100, 1)}%")
+    cpu, hours, events = outside_takes(lines)
+    if hours:
+        out.append(f"  outside takes: {fmt(cpu / hours, 1)} CPU s per hour and {fmt(events / hours)} accessibility events "
+                   f"per hour, over {fmt(hours, 1)} h")
+    return out
+
+
 def summarize(lines: list[dict], capacity_mah: float = 5000) -> str:
     inserts = [line for line in lines if line.get("event") == "insert"]
     unplugged = [r for r in inserts if not r.get("plugged")]
@@ -90,6 +135,8 @@ def summarize(lines: list[dict], capacity_mah: float = 5000) -> str:
         for mode in sorted({r.get("clean_mode") for r in rows}, key=str):
             stops = [r["stop_to_insert_ms"] for r in rows if r.get("clean_mode") == mode and r.get("stop_to_insert_ms") is not None]
             out.append(f"  stop_to_insert_ms [{mode}] median {fmt(median(stops))} over {len(stops)}")
+
+    out.extend(totals(lines, capacity_mah))
 
     cues = Counter(r["cue"] for r in inserts if r.get("cue"))
     out.append("\ncue matches: " + (", ".join(f"{c} {n}" for c, n in cues.most_common()) or "none"))

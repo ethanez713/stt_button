@@ -229,6 +229,24 @@ class TestPhoneUsage:
         report = phone_usage.summarize(lines)
         assert "take b died: LOW_MEMORY" in report and "process exits: LOW_MEMORY 1" in report
 
+    def test_totals_count_discarded_takes_and_cpu_outside_takes_within_one_process(self):
+        from experiments import phone_usage
+        start = lambda i, cpu, age_h, events: {  # noqa: E731
+            "event": "start", "id": f"t{i}", "proc_cpu_ms": cpu, "proc_age_ms": age_h * 3_600_000, "proc_events": events}
+        day = {"ts": "2026-10-02T10:00:00Z"}
+        lines = [
+            start(1, 1_000, 1, 100), {**self.insert(1), **day, "sampler_cpu_ms": 300},
+            {"event": "discard", "id": "t1b", **day, "charge_uah": 5_000, "cpu_ms": 4_000, "plugged": False},
+            start(2, 45_000, 3, 500), {**self.insert(2), **day, "plugged": True},
+            # A restarted process: its counters are not comparable with the one before.
+            start(3, 500, 0.1, 5),
+        ]
+        report = phone_usage.summarize(lines, capacity_mah=5000)
+        assert "unplugged total: 25.0 mAh and 34 CPU s over 1 days (0.50% of the battery per day)" in report
+        assert "discarded or clipboard takes: 1, 5.0 mAh, 4 CPU s" in report
+        assert "cost sampler's own share of cpu_ms: 1.0%" in report
+        assert "outside takes: 5.0 CPU s per hour and 200 accessibility events per hour, over 2.0 h" in report
+
     def test_cues_and_edited_inserts_are_counted(self):
         from experiments import phone_usage
         lines = [self.insert(1, cue="actually"), self.insert(2, cue="actually"), self.insert(3, cue="make it"),

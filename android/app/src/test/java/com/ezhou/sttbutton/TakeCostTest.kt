@@ -27,6 +27,9 @@ class TakeCostTest {
         override fun lowMemory() = low
         override fun thermalStatus() = thermal
         override fun cpuMs() = cpu
+        var threadCpu = 0L
+        /** Each read costs the sampling thread 2 ms, as a real probe read would cost it something. */
+        override fun threadCpuMs() = threadCpu.also { threadCpu += 2 }
     }
 
     private fun fields(cost: TakeCost) = cost.lap().toMap()
@@ -65,6 +68,19 @@ class TakeCostTest {
         assertEquals(true, f["low_memory"])
         assertEquals(10, f["trim_level_max"])
         assertEquals(4200L, f["cpu_ms"])
+    }
+
+    @Test
+    fun given_samples_when_lapped_then_the_window_length_and_the_samplers_own_cpu_are_reported() {
+        val probe = FakeProbe()
+        val cost = TakeCost(probe).also { it.start() }
+        probe.now += 1000; cost.sample()
+        probe.now += 500
+
+        val f = fields(cost)
+        assertEquals(1500L, f["window_ms"])
+        assertEquals(4L, f["sampler_cpu_ms"])
+        assertEquals(2L, fields(cost)["sampler_cpu_ms"])
     }
 
     @Test

@@ -25,4 +25,5 @@ class AndroidCostProbe(context: Context) : CostProbe {
     override fun lowMemory() = memory().lowMemory
     override fun thermalStatus() = power.currentThermalStatus
     override fun cpuMs() = Process.getElapsedCpuTime()
+    override fun threadCpuMs() = SystemClock.currentThreadTimeMillis()
 }

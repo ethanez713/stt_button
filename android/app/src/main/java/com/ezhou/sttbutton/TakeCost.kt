@@ -13,6 +13,8 @@ interface CostProbe {
     fun lowMemory(): Boolean
     fun thermalStatus(): Int
     fun cpuMs(): Long
+    /** CPU time of the calling thread. */
+    fun threadCpuMs(): Long
 }
 
 /**
@@ -34,6 +36,8 @@ class TakeCost(private val probe: CostProbe) {
     private var lowMemory = false
     private var thermalMax = 0
     private var trimMax = 0
+    private var windowStartMs = 0L
+    private var samplerCpuMs = 0L
 
     @Synchronized
     fun start() {
@@ -43,6 +47,7 @@ class TakeCost(private val probe: CostProbe) {
 
     @Synchronized
     fun sample() {
+        val threadCpuBefore = probe.threadCpuMs()
         val now = probe.elapsedMs()
         val draw = -probe.currentNowUa()
         chargeUah += (lastDrawUa + draw) / 2.0 * (now - lastSampleMs) / MS_PER_HOUR
@@ -54,6 +59,7 @@ class TakeCost(private val probe: CostProbe) {
         minAvailKb = minOf(minAvailKb, probe.availMemKb())
         lowMemory = lowMemory || probe.lowMemory()
         thermalMax = maxOf(thermalMax, probe.thermalStatus())
+        samplerCpuMs += probe.threadCpuMs() - threadCpuBefore
     }
 
     @Synchronized
@@ -69,6 +75,7 @@ class TakeCost(private val probe: CostProbe) {
             "plugged" to plugged, "battery_pct" to batteryPct,
             "peak_pss_kb" to peakPssKb, "avail_mem_min_kb" to minAvailKb, "low_memory" to lowMemory,
             "trim_level_max" to trimMax, "cpu_ms" to probe.cpuMs() - startCpuMs, "thermal_max" to thermalMax,
+            "window_ms" to probe.elapsedMs() - windowStartMs, "sampler_cpu_ms" to samplerCpuMs,
         )
         startWindow()
         batteryPct = probe.batteryPct()
@@ -77,6 +84,8 @@ class TakeCost(private val probe: CostProbe) {
 
     private fun startWindow() {
         lastSampleMs = probe.elapsedMs()
+        windowStartMs = lastSampleMs
+        samplerCpuMs = 0
         lastDrawUa = -probe.currentNowUa()
         chargeUah = 0.0
         plugged = probe.charging()

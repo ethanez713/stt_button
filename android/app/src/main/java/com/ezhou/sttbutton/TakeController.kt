@@ -7,6 +7,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Handler
 import android.os.Looper
+import android.os.Process
 import android.os.SystemClock
 import android.util.Log
 import android.widget.Toast
@@ -31,6 +32,8 @@ class TakeController(private val service: DictationService, private val overlay:
     private var run: Run? = null
     private val bubbleQueued = java.util.concurrent.atomic.AtomicBoolean(false)
     private var tracker: FieldTracker? = null
+    /** Accessibility events this process has handled, so the log shows the traffic between takes. */
+    private var eventsSeen = 0L
     private val capRunnable = Runnable { run?.let(::stop) }
 
     private class Run(
@@ -86,7 +89,10 @@ class TakeController(private val service: DictationService, private val overlay:
         val field = service.focusedField()
         val pkg = field?.packageName?.toString() ?: service.activePackage() ?: UNKNOWN_PACKAGE
         val take = Take(UUID.randomUUID().toString(), pkg, SystemClock.elapsedRealtime())
-        log.write("start", take.id, "pkg" to pkg)
+        log.write("start", take.id, "pkg" to pkg,
+            "proc_cpu_ms" to Process.getElapsedCpuTime(),
+            "proc_age_ms" to SystemClock.elapsedRealtime() - Process.getStartElapsedRealtime(),
+            "proc_events" to eventsSeen)
         try {
             service.startForegroundService(Intent(service, RecordingService::class.java))
         } catch (e: Exception) {
@@ -137,7 +143,7 @@ class TakeController(private val service: DictationService, private val overlay:
     fun discard(reason: DiscardReason) {
         val current = run ?: return
         if (!current.take.discard(reason)) return
-        log.write("discard", current.take.id, "reason" to reason.logName)
+        log.write("discard", current.take.id, "reason" to reason.logName, *current.cost.lap().toTypedArray())
         current.aborted = true
         current.stopRequested = true
         handler.removeCallbacks(capRunnable)
@@ -250,7 +256,8 @@ class TakeController(private val service: DictationService, private val overlay:
         if (copied) Toast.makeText(service, R.string.copied_to_clipboard, Toast.LENGTH_LONG).show()
         log.write("clipboard", current.take.id,
             "pkg" to current.take.pkg, "reason" to reason.logName, "trigger" to trigger, "copied" to copied,
-            "raw" to result.raw, "text" to text, "clean_mode" to result.cleanMode, "audio_ms" to result.audioMs)
+            "raw" to result.raw, "text" to text, "clean_mode" to result.cleanMode, "audio_ms" to result.audioMs,
+            *current.cost.lap().toTypedArray())
         current.take.discard(reason)
         release(current)
     }
@@ -272,6 +279,7 @@ class TakeController(private val service: DictationService, private val overlay:
     }
 
     fun onAccessibilityEvent(event: AccessibilityEvent) {
+        eventsSeen++
         run?.let { current ->
             val focused = service.focusedField()?.packageName?.toString()
             if (focused != null && current.take.pkg != UNKNOWN_PACKAGE && focused != current.take.pkg) stop(current, TRIGGER_PACKAGE)
