@@ -57,4 +57,20 @@ class KeyboardSlideTest {
         slide.gone()
         assertEquals(KeyboardMotion.ARRIVING, slide.at(2680))
     }
+
+    @Test
+    fun given_keyboardOpeningWithItsApp_when_itsWindowIsDrawnSmallerThanItRests_then_scaledUntilItsBottomMeetsTheScreens() {
+        val slide = KeyboardSlide()
+        for ((top, bottom) in listOf(1985 to 3006, 1990 to 3026, 1990 to 3026, 2014 to 3106, 2015 to 3110, 2018 to 3119)) {
+            assertEquals(KeyboardMotion.SCALED, slide.read(top, bottom, screenBottom))
+        }
+        assertEquals(KeyboardMotion.RESTING, slide.at(2018))
+    }
+
+    @Test
+    fun given_scaledKeyboard_when_theSameBoundsAreReadBelowTheScreen_then_arriving() {
+        val slide = KeyboardSlide()
+        slide.read(2042, 3100, screenBottom)
+        assertEquals(KeyboardMotion.ARRIVING, slide.at(2042))
+    }
 }
