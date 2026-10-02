@@ -2,6 +2,7 @@ import json
 import re
 import time
 import urllib.request
+from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -88,6 +89,46 @@ def matched_cue(text: str, cues: list[str]) -> str | None:
 
 def skips_cleaner(text: str, cfg: dict) -> bool:
     return len(text.split()) <= cfg["skip_max_words"] and matched_cue(text, cfg["self_correction_cues"]) is None
+
+
+_FIRST_PERSON = {"i", "i'm", "i'll", "i've", "i'd"}
+_SENTENCE_END = re.compile(r"[.?!]$")
+_DRIFT_MAX_EDITS = 2  # one for a token of three characters or fewer, where two edits can reach any other
+
+
+def _fact_tokens(text: str) -> Counter[str]:
+    """Tokens with a digit, and capitalized words that do not open a sentence, lower-cased with
+    their edge punctuation stripped."""
+    facts: Counter[str] = Counter()
+    opens = True
+    for word in text.split():
+        token = re.sub(r"^[^\w]+|[^\w]+$", "", word)
+        if token and token.lower() not in _FIRST_PERSON and (
+                any(c.isdigit() for c in token) or (token[0].isupper() and not opens)):
+            facts[token.lower()] += 1
+        opens = bool(_SENTENCE_END.search(word))
+    return facts
+
+
+def _edits(a: str, b: str) -> int:
+    row = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        previous, row[0] = row[0], i
+        for j, cb in enumerate(b, 1):
+            previous, row[j] = row[j], min(row[j] + 1, row[j - 1] + 1, previous + (ca != cb))
+    return row[-1]
+
+
+def fact_drift(raw: str, cleaned: str) -> list[tuple[str, str]]:
+    """(lost, gained) pairs where the cleaner replaced a name or number with a near spelling of
+    another, such as S20 for S25. A number respelled ("five" for 5) or a name lower-cased is not
+    drift, and neither is a dropped token with no close new one. A token with a digit counts per
+    occurrence, so a swap among tokens the raw text already held shows."""
+    before, after = _fact_tokens(raw), _fact_tokens(cleaned)
+    lost = [t for t in before if (after[t] < before[t] if any(c.isdigit() for c in t) else t not in after)]
+    gained = [t for t in after if (after[t] > before[t] if any(c.isdigit() for c in t) else t not in before)]
+    return [(m, n) for m in sorted(lost) for n in sorted(gained)
+            if len(m) > 1 and len(n) > 1 and _edits(m, n) <= (_DRIFT_MAX_EDITS if min(len(m), len(n)) > 3 else 1)]
 
 
 def casual(text: str, cfg: dict) -> str:
