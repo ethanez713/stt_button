@@ -151,7 +151,7 @@ class DictationService : AccessibilityService() {
         bubble.setAnchor(Rect().also(ime::getBoundsInScreen))
         val field = findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
         if (field != null) {
-            if (field.packageName == packageName) return removed("own app", keepWhileTaking = true)
+            if (field.packageName == packageName && field.viewIdResourceName != TRY_FIELD_ID) return removed("own app", keepWhileTaking = true)
             FieldPolicy.exclusion(field.isPassword, field.inputType)?.let { return removed(it, keepWhileTaking = true) }
         }
         val root = ime.root
@@ -217,6 +217,7 @@ class DictationService : AccessibilityService() {
     companion object {
         const val TAG = "SttButton"
         private const val FALLBACK_DP = 48
+        private const val TRY_FIELD_ID = "com.ezhou.sttbutton:id/try_field"
         private const val REREAD_MS = 100L
         private const val KEYBOARD_GONE_MS = 700L
         private const val KEY_VOICE_KEY_SEEN = "voice_key_seen"

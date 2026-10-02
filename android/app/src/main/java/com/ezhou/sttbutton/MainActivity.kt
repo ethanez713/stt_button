@@ -9,13 +9,16 @@ import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.provider.Settings
+import android.text.InputType
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.view.Window
 import android.view.WindowInsets
+import android.view.inputmethod.InputMethodManager
 import android.widget.Button
+import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.RadioButton
 import android.widget.RadioGroup
@@ -50,7 +53,7 @@ class MainActivity : Activity() {
             addView(content)
             // The window draws edge to edge, so the bars' height is padded here rather than drawn under.
             setOnApplyWindowInsetsListener { v, insets ->
-                val bars = insets.getInsets(WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout())
+                val bars = insets.getInsets(WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout() or WindowInsets.Type.ime())
                 v.setPadding(bars.left + dp(20), bars.top + dp(12), bars.right + dp(20), bars.bottom + dp(20))
                 insets
             }
@@ -81,6 +84,7 @@ class MainActivity : Activity() {
 
     private fun button(content: LinearLayout) {
         content.addView(header(R.string.section_button))
+        tryField(content)
         previewIdle = View(this)
         previewRecording = View(this)
         content.addView(LinearLayout(this).apply {
@@ -118,6 +122,25 @@ class MainActivity : Activity() {
                 isEnabled = false
             }
         }.also(content::addView)
+    }
+
+    /** A field of this app's own, so the button and its live preview can be tried with the keyboard up. */
+    private fun tryField(content: LinearLayout) {
+        val field = EditText(this).apply {
+            id = R.id.try_field
+            setHint(R.string.try_hint)
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+            minLines = 3
+            gravity = Gravity.TOP
+        }
+        content.addView(field)
+        content.addView(Button(this).apply {
+            setText(R.string.show_keyboard)
+            setOnClickListener {
+                field.requestFocus()
+                getSystemService(InputMethodManager::class.java).showSoftInput(field, 0)
+            }
+        })
     }
 
     override fun onResume() {
