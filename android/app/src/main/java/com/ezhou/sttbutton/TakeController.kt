@@ -41,6 +41,7 @@ class TakeController(private val service: DictationService, private val overlay:
     private val releaseParked = Runnable { releaseParkedNow() }
     private val hiddenWatch = HiddenWatch(HIDDEN_GRACE_MS)
     private val hiddenCheck = Runnable { service.recheck() }
+    private val caretPoll = Runnable { pollCaret() }
 
     private class Run(
         val take: Take, val pcm: File, val models: Models, val live: LiveTake, val recorder: Recorder,
@@ -51,13 +52,19 @@ class TakeController(private val service: DictationService, private val overlay:
         @Volatile var stopTrigger = TRIGGER_STOP
         var stoppedAtMs = 0L
 
-        /** Text of segments that found no field to go into, kept for the clipboard at the end of the take. */
-        /** The field the take was started in, and where its next text goes: the caret then, moved on by each insert. */
+        /** The field the take was started in, and where its text goes. */
         var field: AccessibilityNodeInfo? = null
         var anchor = -1
+        var accepted = Caret.UNKNOWN
+        var sawConnection = false
         var userCaret = -1
-        var insertedAtMs = 0L
+        var caretLeftField = false
+        var caretSource: String? = null
+        var graceUntilMs = 0L
+        var ignoredCarets: Set<Int> = emptySet()
+        var unreadPolls = 0
 
+        /** Text of segments that found no field to go into, kept for the clipboard at the end of the take. */
         val unplaced = StringBuilder()
         var unplacedReason: DiscardReason? = null
     }
@@ -141,11 +148,19 @@ class TakeController(private val service: DictationService, private val overlay:
             return
         }
         current.field = field
-        current.anchor = field?.textSelectionEnd ?: -1
+        val initial = inserter.readCaret(field)
+        current.sawConnection = initial.fromConnection
+        current.accepted = initial.caret
+        current.anchor = when {
+            initial.caret.known -> initial.caret.end
+            else -> field?.textSelectionEnd ?: -1
+        }
+        if (!current.accepted.known && current.anchor >= 0) current.accepted = Caret(current.anchor, current.anchor)
         service.watchSelectionChanges(true)
         run = current
-        Log.i(tag, "take start pkg=$pkg")
+        Log.i(tag, "take start pkg=$pkg anchor=${current.anchor} connection=${current.sawConnection}")
         bubble.show()
+        handler.postDelayed(caretPoll, CARET_POLL_MS)
         thread(name = "take-worker") { work(current) }
         handler.postDelayed(capRunnable, cfg.takeCapS * 1000L)
         overlay.setMode(ButtonMode.RECORDING)
@@ -156,6 +171,7 @@ class TakeController(private val service: DictationService, private val overlay:
         current.stopTrigger = trigger
         Log.i(tag, "take stop trigger=$trigger")
         handler.removeCallbacks(capRunnable)
+        handler.removeCallbacks(caretPoll)
         overlay.setMode(ButtonMode.BUSY)
         current.stoppedAtMs = SystemClock.elapsedRealtime()
         current.recorder.stop()
@@ -221,7 +237,8 @@ class TakeController(private val service: DictationService, private val overlay:
             else if (take.finishWithoutText()) release(current) else discard(DiscardReason.EMPTY)
             return
         }
-        val field = service.focusedField()
+        noteFocus(current)
+        val field = targetField(current)
         val reason = when {
             field == null -> DiscardReason.NO_FIELD
             take.pkg != UNKNOWN_PACKAGE && field.packageName?.toString() != take.pkg -> DiscardReason.PACKAGE
@@ -234,13 +251,31 @@ class TakeController(private val service: DictationService, private val overlay:
             return
         }
         val segment = take.segmentsInserted
-        // A take the user interrupted by moving the caret writes where it was dictating, not where they tapped.
-        val at = current.anchor.takeIf { trigger == TRIGGER_CARET && it >= 0 }
-        val opener = if (segment == 0) Pipeline.takeOpener(inserter.textOf(field), at ?: field.textSelectionEnd) else ""
-        val caretBefore = at ?: field.textSelectionEnd
-        val outcome = inserter.insert(field, opener + text, at, current.userCaret.takeIf { at != null })
-        current.anchor = if (caretBefore >= 0) caretBefore + (opener + text).length else -1
-        current.insertedAtMs = SystemClock.elapsedRealtime()
+        // Once the user has taken the caret, the rest of the take writes where it was dictating.
+        val redirected = current.userCaret >= 0 || current.caretLeftField
+        val at = current.anchor.takeIf { redirected && it >= 0 }
+        val live = inserter.readCaret(field)
+        val caretBefore = at ?: if (live.caret.known) live.caret.end else field.textSelectionEnd
+        val opener = if (segment == 0) Pipeline.takeOpener(inserter.textOf(field), caretBefore) else ""
+        val placing = opener + text
+        armCaretGrace(current, caretBefore, placing.length)
+        val outcome = inserter.insert(
+            field, placing, at, current.userCaret.takeIf { at != null && !current.caretLeftField },
+            useConnection = !current.caretLeftField,
+        )
+        current.graceUntilMs = SystemClock.elapsedRealtime() + GRACE_MS
+        if (outcome.landed && caretBefore >= 0) {
+            current.anchor = caretBefore + placing.length
+            current.accepted = if (outcome.restoredCaret >= 0) Caret(outcome.restoredCaret, outcome.restoredCaret)
+            else Caret(current.anchor, current.anchor)
+        } else {
+            val after = inserter.readCaret(field)
+            if (after.caret.known) current.accepted = after.caret
+        }
+        if (outcome.restoredCaret >= 0) current.userCaret = outcome.restoredCaret
+        if (outcome.copied && outcome.readback == "unchanged") {
+            Toast.makeText(service, R.string.copied_to_clipboard, Toast.LENGTH_LONG).show()
+        }
         if (last) {
             take.markInserted()
             current.sampler.stop()
@@ -250,6 +285,9 @@ class TakeController(private val service: DictationService, private val overlay:
         log.write("insert", take.id,
             "pkg" to take.pkg, "raw" to result.raw, "cleaned" to result.cleaned, "text_before" to outcome.textBefore,
             "insert_path" to outcome.path, "landed" to outcome.landed,
+            "readback" to outcome.readback, "attempts" to outcome.attempts, "copied" to outcome.copied,
+            "sel_before" to caretBefore, "sel_after" to inserter.readCaret(field).caret.end,
+            "caret_source" to current.caretSource,
             "asr_ms" to result.asrMs, "clean_ms" to result.cleanMs, "asr_backend" to "cpu", "clean_backend" to "cpu",
             "audio_ms" to result.audioMs,
             "in_tokens" to result.inTokens, "out_tokens" to result.outTokens,
@@ -297,6 +335,7 @@ class TakeController(private val service: DictationService, private val overlay:
         Log.i(tag, "take end state=${current.take.state} reason=${current.take.discardReason?.logName}")
         current.sampler.stop()
         bubble.hide()
+        handler.removeCallbacks(caretPoll)
         if (run === current) run = null
         overlay.setMode(ButtonMode.IDLE)
         service.watchSelectionChanges(false)
@@ -309,24 +348,108 @@ class TakeController(private val service: DictationService, private val overlay:
         run?.let { current ->
             val focused = service.focusedField()?.packageName?.toString()
             if (focused != null && current.take.pkg != UNKNOWN_PACKAGE && focused != current.take.pkg) stop(current, TRIGGER_PACKAGE)
-            if (event.eventType == AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED) onCaretEvent(current, event)
+            if (event.eventType == AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED) noteSelectionEvent(current, event)
         }
         tracker?.onEvent(event)
     }
 
+    /** The input connection reported a new selection. Absolute indices, the same ones the keyboard gets. */
+    fun onImeSelection(start: Int, end: Int) {
+        val current = run ?: return
+        noteCaret(current, Caret(start, end), fromConnection = true, source = "ime")
+    }
+
     /**
-     * The user moved the caret or typed in the take's field: the take stops and its text goes in at
-     * once, so their editing and the dictation do not write over each other. The caret moves this
-     * app's own inserts cause land on the anchor, or arrive within [OWN_INSERT_MS] of the insert.
+     * While a take is open, re-read the caret. Not every editor delivers [onImeSelection] to an
+     * accessibility service, and a selection event's node often is not the node focus returned.
      */
-    private fun onCaretEvent(current: Run, event: AccessibilityEvent) {
-        if (current.take.state != TakeState.OPEN || current.anchor < 0 || event.source != current.field) return
-        val caret = event.toIndex
-        if (caret < 0 || caret == current.anchor) return
-        if (SystemClock.elapsedRealtime() - current.insertedAtMs < OWN_INSERT_MS) return
-        current.userCaret = caret
+    private fun pollCaret() {
+        val current = run ?: return
+        if (current.take.state != TakeState.OPEN) return
+        noteFocus(current)
+        if (current.take.state != TakeState.OPEN) return
+        val read = inserter.readCaret(current.field)
+        noteCaret(current, read.caret, read.fromConnection, "poll")
+        if (run === current && current.take.state == TakeState.OPEN) handler.postDelayed(caretPoll, CARET_POLL_MS)
+    }
+
+    private fun noteFocus(current: Run) {
+        val field = current.field ?: return
+        val focused = service.focusedField() ?: return
+        if (!CaretWatch.differentBox(editorId(field), editorId(focused))) return
+        current.caretLeftField = true
+        if (current.caretSource == null) current.caretSource = "focus"
+        if (current.take.state == TakeState.OPEN) stop(current, TRIGGER_CARET)
+    }
+
+    private fun noteSelectionEvent(current: Run, event: AccessibilityEvent) {
+        if (current.take.state != TakeState.OPEN) return
+        val pkg = event.packageName?.toString()
+        if (pkg != null && pkg != current.take.pkg) return
+        val source = event.source
+        val field = current.field
+        if (source != null && field != null && source != field &&
+            !CaretWatch.sameEditor(editorId(field), editorId(source))) return
+        noteCaret(current, Caret(event.fromIndex, event.toIndex), fromConnection = false, source = "event")
+    }
+
+    private fun noteCaret(current: Run, caret: Caret, fromConnection: Boolean, source: String) {
+        if (current.take.state != TakeState.OPEN) return
+        if (!caret.known) {
+            if (source == "poll") {
+                current.unreadPolls++
+                if (current.unreadPolls == UNREAD_POLLS_LOG) Log.i(tag, "caret still unreadable")
+            }
+            return
+        }
+        if (!current.accepted.known) {
+            current.accepted = caret
+            current.anchor = caret.end
+            current.sawConnection = fromConnection
+            return
+        }
+        // The node and the input connection disagree until the connection has been read once.
+        if (!current.sawConnection && fromConnection) {
+            current.sawConnection = true
+            if (caret.collapsed && caret != current.accepted) {
+                current.accepted = caret
+                current.anchor = caret.end
+                return
+            }
+        }
+        val inGrace = SystemClock.elapsedRealtime() < current.graceUntilMs
+        if (!CaretWatch.userMoved(current.accepted, caret, current.ignoredCarets, inGrace)) return
+        if (current.userCaret < 0) current.userCaret = caret.end
+        if (current.caretSource == null) current.caretSource = source
+        Log.i(tag, "caret moved source=$source anchor=${current.anchor} sel=${caret.start}..${caret.end}")
         stop(current, TRIGGER_CARET)
     }
+
+    /** Carets this insert is about to produce. A different one in the same moment is the user. */
+    private fun armCaretGrace(current: Run, caretBefore: Int, textLength: Int) {
+        val expectedEnd = if (caretBefore >= 0) caretBefore + textLength else -1
+        current.ignoredCarets = buildSet {
+            if (current.anchor >= 0) add(current.anchor)
+            if (current.accepted.known) {
+                add(current.accepted.start)
+                add(current.accepted.end)
+            }
+            if (caretBefore >= 0) add(caretBefore)
+            if (expectedEnd >= 0) add(expectedEnd)
+            if (current.userCaret >= 0 && caretBefore >= 0) add(CaretWatch.restored(current.userCaret, caretBefore, textLength))
+        }
+        current.graceUntilMs = SystemClock.elapsedRealtime() + GRACE_MS
+    }
+
+    /** The field the take started in, once the user has moved. Null when that field is gone. */
+    private fun targetField(current: Run): AccessibilityNodeInfo? {
+        val original = current.field
+        if (current.userCaret >= 0 || current.caretLeftField) return original
+        return service.focusedField() ?: original
+    }
+
+    private fun editorId(node: AccessibilityNodeInfo) =
+        EditorId(node.windowId, node.viewIdResourceName, node.className?.toString())
 
     /** Redraws the bubble from the worker's and the preview thread's latest text, at most every [BUBBLE_MS]. */
     private fun scheduleBubble() {
@@ -416,7 +539,9 @@ class TakeController(private val service: DictationService, private val overlay:
         private const val TRIGGER_PACKAGE = "package"
         private const val TRIGGER_SILENCE = "silence"
         private const val TRIGGER_CARET = "caret"
-        private const val OWN_INSERT_MS = 400L
+        private const val GRACE_MS = 400L
+        private const val CARET_POLL_MS = 100L
+        private const val UNREAD_POLLS_LOG = 5
         private const val TRIGGER_FIELD_LOST = "field_lost"
         private const val BUBBLE_MS = 100L
         private const val WARM_MS = 30_000L

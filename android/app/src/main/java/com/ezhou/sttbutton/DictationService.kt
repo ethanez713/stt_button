@@ -1,6 +1,7 @@
 package com.ezhou.sttbutton
 
 import android.accessibilityservice.AccessibilityService
+import android.accessibilityservice.InputMethod
 import android.database.ContentObserver
 import android.graphics.Rect
 import android.os.Handler
@@ -40,6 +41,18 @@ class DictationService : AccessibilityService() {
             english = resolveEnglish()
             if (english == false && ::controller.isInitialized) controller.discard(DiscardReason.LANGUAGE)
             reconcile()
+        }
+    }
+
+    override fun onCreateInputMethod(): InputMethod = object : InputMethod(this) {
+        override fun onUpdateSelection(
+            oldSelStart: Int, oldSelEnd: Int, newSelStart: Int, newSelEnd: Int,
+            candidatesStart: Int, candidatesEnd: Int,
+        ) {
+            super.onUpdateSelection(oldSelStart, oldSelEnd, newSelStart, newSelEnd, candidatesStart, candidatesEnd)
+            handler.post {
+                if (::controller.isInitialized) controller.onImeSelection(newSelStart, newSelEnd)
+            }
         }
     }
 
