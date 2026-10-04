@@ -3,16 +3,19 @@ package com.ezhou.sttbutton
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.InputMethod
 import android.content.ClipData
+import android.content.ClipDescription
 import android.content.ClipboardManager
 import android.os.Bundle
+import android.os.PersistableBundle
 import android.util.Log
 import android.view.accessibility.AccessibilityNodeInfo
 
 /**
  * Puts a segment at the caret. The input connection is the same channel the editor gives the
  * keyboard, so the caret is read and moved there. A commit that does not change the field is
- * not success: paste, then set-text, are tried when that is safe. The segment is left on the
- * clipboard either way, so a field that drops it can still be filled by hand.
+ * not success: paste, then set-text, are tried when that is safe. The clipboard is written only
+ * when the field is still unchanged afterwards, so a failed insert can be pasted by hand and a
+ * successful one does not raise the system's copy toast.
  */
 class Inserter(private val service: AccessibilityService) {
     class Outcome(
@@ -33,8 +36,8 @@ class Inserter(private val service: AccessibilityService) {
         val conn = if (useConnection) connection() else null
         val beforeNode = nodeView(field)
         val beforeAround = readAround(conn)
-        val copied = archive(text)
         val tried = mutableListOf<String>()
+        var staged = false
         var commitMissing = conn == null
         if (!commitMissing) {
             tried += "commit_text"
@@ -46,11 +49,12 @@ class Inserter(private val service: AccessibilityService) {
                 verdict, commitMissing, InsertReadback.allowSetText(beforeNode, beforeAround.beforeCaret),
                 triedPaste = "paste" in tried, triedSetText = "set_text" in tried,
             ) ?: break
-            if (next == "paste" && !copied) {
+            if (next == "paste" && !staged && !stageForPaste(text)) {
                 tried += "paste"
                 Log.w(DictationService.TAG, "paste skipped: the dictation is not on the clipboard")
                 continue
             }
+            if (next == "paste") staged = true
             tried += next
             when (next) {
                 "paste" -> paste(conn, field, at)
@@ -65,6 +69,8 @@ class Inserter(private val service: AccessibilityService) {
         } else {
             -1
         }
+        val copied = verdict == InsertReadback.Verdict.UNCHANGED && setClip(ClipData.newPlainText("dictation", text))
+        if (staged && !copied) clearClip()
         val path = tried.lastOrNull() ?: "none"
         val readback = verdict.name.lowercase()
         Log.i(DictationService.TAG, "insert readback=$readback attempts=${tried.joinToString(",")} copied=$copied")
@@ -103,14 +109,32 @@ class Inserter(private val service: AccessibilityService) {
         return verdict
     }
 
-    /** Leaves [text] as the current clip, unmarked, so the keyboard's clipboard history keeps it. */
-    private fun archive(text: String): Boolean = try {
-        service.getSystemService(ClipboardManager::class.java)
-            .setPrimaryClip(ClipData.newPlainText("dictation", text))
+    /**
+     * Paste reads whatever is on the clipboard. A sensitive clip does not raise the system copy
+     * toast and is kept out of clipboard history; the history copy happens only after a failed insert.
+     */
+    private fun stageForPaste(text: String): Boolean {
+        val clip = ClipData.newPlainText("dictation", text)
+        clip.description.extras = PersistableBundle().apply {
+            putBoolean(ClipDescription.EXTRA_IS_SENSITIVE, true)
+        }
+        return setClip(clip)
+    }
+
+    private fun setClip(clip: ClipData): Boolean = try {
+        service.getSystemService(ClipboardManager::class.java).setPrimaryClip(clip)
         true
     } catch (e: Exception) {
-        Log.w(DictationService.TAG, "clipboard archive failed", e)
+        Log.w(DictationService.TAG, "clipboard set failed", e)
         false
+    }
+
+    private fun clearClip() {
+        try {
+            service.getSystemService(ClipboardManager::class.java).clearPrimaryClip()
+        } catch (e: Exception) {
+            Log.w(DictationService.TAG, "clipboard clear failed", e)
+        }
     }
 
     private fun commit(
