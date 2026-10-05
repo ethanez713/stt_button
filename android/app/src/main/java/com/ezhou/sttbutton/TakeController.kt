@@ -35,7 +35,7 @@ class TakeController(private val service: DictationService, private val overlay:
     private var tracker: FieldTracker? = null
     /** Accessibility events this process has handled, so the log shows the traffic between takes. */
     private var eventsSeen = 0L
-    private val capRunnable = Runnable { run?.let(::stop) }
+    private val capRunnable = Runnable { run?.let { stop(it, TRIGGER_CAP) } }
     private var parked: Models? = null
     private var shutDown = false
     private val releaseParked = Runnable { releaseParkedNow() }
@@ -278,7 +278,7 @@ class TakeController(private val service: DictationService, private val overlay:
         tracker?.onEvent(event)
     }
 
-    private fun targetField(current: Run): AccessibilityNodeInfo? = service.focusedField() ?: current.field
+    private fun targetField(current: Run): AccessibilityNodeInfo? = service.focusedField() ?: current.field?.takeIf { it.refresh() }
 
     /** Redraws the bubble from the worker's and the preview thread's latest text, at most every [BUBBLE_MS]. */
     private fun scheduleBubble() {
@@ -371,6 +371,7 @@ class TakeController(private val service: DictationService, private val overlay:
         private const val UNKNOWN_PACKAGE = "unknown"
         private const val IDLE_POLL_MS = 25L
         private const val TRIGGER_STOP = "stop"
+        private const val TRIGGER_CAP = "cap"
         private const val TRIGGER_KEYBOARD = "keyboard"
         private const val TRIGGER_PACKAGE = "package"
         private const val TRIGGER_SILENCE = "silence"
