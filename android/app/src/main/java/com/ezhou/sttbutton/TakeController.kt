@@ -114,7 +114,10 @@ class TakeController(private val service: DictationService, private val overlay:
         val live = LiveTake(models.recognizer, models::cleaner, cfg, bubbleText, models::prepareCleaner)
         val preview = PreviewRecognizer(models::awaitPreview, bubbleText::preview)
         val pcm = File(takesDir, "${take.id}.pcm")
-        val recorder = Recorder(pcm) { samples, length ->
+        val recorder = Recorder(pcm, onFailure = { e ->
+            Log.e(tag, "recording failed", e)
+            handler.post { run?.takeIf { it.pcm == pcm }?.let { stop(it, TRIGGER_MIC) } }
+        }) { samples, length ->
             live.addSamples(samples, length)
             preview.offer(samples, length, live.slicer.paused)
         }
@@ -126,6 +129,7 @@ class TakeController(private val service: DictationService, private val overlay:
             Log.e(tag, "recording failed to start", e)
             run = current
             discard(DiscardReason.ERROR)
+            park(models)
             return
         }
         current.field = field
@@ -375,6 +379,7 @@ class TakeController(private val service: DictationService, private val overlay:
         private const val TRIGGER_KEYBOARD = "keyboard"
         private const val TRIGGER_PACKAGE = "package"
         private const val TRIGGER_SILENCE = "silence"
+        private const val TRIGGER_MIC = "mic"
         private const val BUBBLE_MS = 100L
         private const val WARM_MS = 30_000L
         private const val HIDDEN_GRACE_MS = 700L
