@@ -204,8 +204,8 @@ class TakeController(private val service: DictationService, private val overlay:
             copyUnplaced(current, result, body, trigger, if (otherPackage) DiscardReason.PACKAGE else DiscardReason.NO_FIELD)
             return
         }
-        val live = inserter.readCaret(field)
-        val caretBefore = if (live.caret.known) live.caret.end else field.textSelectionEnd
+        val caret = inserter.readCaret(field)
+        val caretBefore = if (caret.known) caret.end else field.textSelectionEnd
         val outcome = inserter.insert(field, Pipeline.takeOpener(fieldText, caretBefore) + body)
         if (outcome.copied && outcome.readback == "unchanged") {
             Toast.makeText(service, R.string.copied_to_clipboard, Toast.LENGTH_LONG).show()
@@ -216,7 +216,7 @@ class TakeController(private val service: DictationService, private val overlay:
             "pkg" to take.pkg, "raw" to result.raw, "cleaned" to body, "text_before" to outcome.textBefore,
             "insert_path" to outcome.path, "landed" to outcome.landed,
             "readback" to outcome.readback, "attempts" to outcome.attempts, "copied" to outcome.copied,
-            "sel_before" to caretBefore, "sel_after" to inserter.readCaret(field).caret.end,
+            "sel_before" to caretBefore, "sel_after" to inserter.readCaret(field).end,
             "asr_ms" to result.asrMs, "clean_ms" to result.cleanMs, "asr_backend" to "cpu", "clean_backend" to "cpu",
             "audio_ms" to result.audioMs,
             "in_tokens" to result.inTokens, "out_tokens" to result.outTokens,

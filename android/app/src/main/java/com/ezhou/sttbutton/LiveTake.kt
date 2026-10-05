@@ -25,6 +25,7 @@ interface TakeSink {
 
 class LiveResult(
     val raw: String,
+    /** Before the casual rule, which the caller applies where the text is inserted. */
     val cleaned: String,
     val chunks: Int,
     val cleanMode: String,
@@ -48,7 +49,6 @@ class LiveResult(
 /**
  * One take's pipeline, the port of `stt_button.live.LiveTake`. [addSamples] runs on the recorder thread;
  * [step], [markStop] and [finish] run on the one worker thread that recognizes slices and cleans chunks.
- * [cleaned] is the text before the casual rule; the caller applies that where the text is inserted.
  */
 class LiveTake(
     private val recognizer: SliceRecognizer,

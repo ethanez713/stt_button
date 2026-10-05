@@ -23,11 +23,8 @@ class Inserter(private val service: AccessibilityService) {
         val attempts: String, val copied: Boolean,
     )
 
-    data class CaretRead(val caret: Caret, val fromConnection: Boolean)
-
-    fun insert(field: AccessibilityNodeInfo, text: String, useConnection: Boolean = true): Outcome {
-        // Once focus has left this field the connection belongs to wherever it went, so it must not be written.
-        val conn = if (useConnection) connection() else null
+    fun insert(field: AccessibilityNodeInfo, text: String): Outcome {
+        val conn = connection()
         val beforeNode = nodeView(field)
         val beforeAround = readAround(conn)
         val tried = mutableListOf<String>()
@@ -65,14 +62,14 @@ class Inserter(private val service: AccessibilityService) {
             tried.joinToString(","), copied)
     }
 
-    fun readCaret(field: AccessibilityNodeInfo?): CaretRead {
+    /** The input connection's caret when it can be read, else the node's. */
+    fun readCaret(field: AccessibilityNodeInfo): Caret {
         val around = readAround(connection())
-        if (around.caret.known) return CaretRead(around.caret, true)
-        if (field == null || !field.refresh()) return CaretRead(Caret.UNKNOWN, false)
+        if (around.caret.known) return around.caret
+        if (!field.refresh()) return Caret.UNKNOWN
         val start = field.textSelectionStart
         val end = field.textSelectionEnd
-        if (start < 0 || end < 0) return CaretRead(Caret.UNKNOWN, false)
-        return CaretRead(Caret(start, end), false)
+        return if (start < 0 || end < 0) Caret.UNKNOWN else Caret(start, end)
     }
 
     fun textOf(field: AccessibilityNodeInfo): String =

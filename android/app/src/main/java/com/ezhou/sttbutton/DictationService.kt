@@ -1,7 +1,6 @@
 package com.ezhou.sttbutton
 
 import android.accessibilityservice.AccessibilityService
-import android.accessibilityservice.InputMethod
 import android.database.ContentObserver
 import android.graphics.Rect
 import android.os.Handler
@@ -43,8 +42,6 @@ class DictationService : AccessibilityService() {
             reconcile()
         }
     }
-
-    override fun onCreateInputMethod(): InputMethod = InputMethod(this)
 
     override fun onServiceConnected() {
         overlay = Overlay(
