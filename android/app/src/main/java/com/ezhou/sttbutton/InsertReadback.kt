@@ -9,7 +9,7 @@ object InsertReadback {
 
     /**
      * The write landed when the field holds the utterance more times than it did before. Holding it
-     * at all proves nothing: a short segment ("see", "that") is usually in the field already.
+     * at all proves nothing: a short phrase ("see", "that") is usually in the field already.
      */
     fun judge(before: View, after: View, needle: String): Verdict {
         val wanted = needle.trim()

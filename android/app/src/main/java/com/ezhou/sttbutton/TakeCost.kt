@@ -17,11 +17,7 @@ interface CostProbe {
     fun threadCpuMs(): Long
 }
 
-/**
- * The cost of one window of a take, from its first sample to the end of insertion (plan 07). [lap] returns
- * the window's fields and opens the next one, so a take that inserts several segments reports each
- * segment's own cost.
- */
+/** The cost of one window of a take, from its first sample to the end of insertion (plan 07). */
 class TakeCost(private val probe: CostProbe) {
     private var lastSampleMs = 0L
     private var lastDrawUa = 0

@@ -19,9 +19,9 @@ import java.util.UUID
 import kotlin.concurrent.thread
 
 /**
- * Runs takes for the accessibility service: the tap starts one, the next tap or the cap stops it, and
- * the text is inserted at the stop and after each pause of `insert_pause_s`. Everything here is called on the main thread except the
- * worker's own loop, which hands its result back through the handler.
+ * Runs takes for the accessibility service. The tap, the cap, silence, the button leaving the screen,
+ * or a package change stops one, and its text is inserted once then. Everything here is called on the
+ * main thread except the worker's own loop, which hands its result back through the handler.
  */
 class TakeController(private val service: DictationService, private val overlay: Overlay, private val bubble: BubbleOverlay) {
     private val tag = DictationService.TAG
@@ -41,7 +41,6 @@ class TakeController(private val service: DictationService, private val overlay:
     private val releaseParked = Runnable { releaseParkedNow() }
     private val hiddenWatch = HiddenWatch(HIDDEN_GRACE_MS)
     private val hiddenCheck = Runnable { service.recheck() }
-    private val caretPoll = Runnable { pollCaret() }
 
     private class Run(
         val take: Take, val pcm: File, val models: Models, val live: LiveTake, val recorder: Recorder,
@@ -52,26 +51,8 @@ class TakeController(private val service: DictationService, private val overlay:
         @Volatile var stopTrigger = TRIGGER_STOP
         var stoppedAtMs = 0L
 
-        /** The field the take was started in, and where its text goes. */
+        /** The field the take was started in. Text goes to the focused field, or to this one when nothing is. */
         var field: AccessibilityNodeInfo? = null
-        var anchor = -1
-        var accepted = Caret.UNKNOWN
-        var sawConnection = false
-        var userCaret = -1
-        var caretLeftField = false
-        var caretSource: String? = null
-        var graceUntilMs = 0L
-        var ignoredCarets: Set<Int> = emptySet()
-        var unreadPolls = 0
-
-        /** Text of segments that found no field to go into, kept for the clipboard at the end of the take. */
-        val unplaced = StringBuilder()
-        var unplacedReason: DiscardReason? = null
-    }
-
-    /** A take that exited with the process still owns a PCM file nobody will read. */
-    fun deleteLeftovers() {
-        takesDir.listFiles()?.forEach { it.delete() }
     }
 
     /** The open take's state for the trace log, NONE between takes. */
@@ -148,19 +129,10 @@ class TakeController(private val service: DictationService, private val overlay:
             return
         }
         current.field = field
-        val initial = inserter.readCaret(field)
-        current.sawConnection = initial.fromConnection
-        current.accepted = initial.caret
-        current.anchor = when {
-            initial.caret.known -> initial.caret.end
-            else -> field?.textSelectionEnd ?: -1
-        }
-        if (!current.accepted.known && current.anchor >= 0) current.accepted = Caret(current.anchor, current.anchor)
-        service.watchSelectionChanges(true)
+        pruneTakeAudio(pcm.name)
         run = current
-        Log.i(tag, "take start pkg=$pkg anchor=${current.anchor} connection=${current.sawConnection}")
+        Log.i(tag, "take start pkg=$pkg")
         bubble.show()
-        handler.postDelayed(caretPoll, CARET_POLL_MS)
         thread(name = "take-worker") { work(current) }
         handler.postDelayed(capRunnable, cfg.takeCapS * 1000L)
         overlay.setMode(ButtonMode.RECORDING)
@@ -171,12 +143,10 @@ class TakeController(private val service: DictationService, private val overlay:
         current.stopTrigger = trigger
         Log.i(tag, "take stop trigger=$trigger")
         handler.removeCallbacks(capRunnable)
-        handler.removeCallbacks(caretPoll)
         overlay.setMode(ButtonMode.BUSY)
         current.stoppedAtMs = SystemClock.elapsedRealtime()
         current.recorder.stop()
         current.stopRequested = true
-        service.watchSelectionChanges(false)
         if (trigger == TRIGGER_KEYBOARD || trigger == TRIGGER_PACKAGE) bubble.hide()
         service.recheck()
     }
@@ -196,18 +166,12 @@ class TakeController(private val service: DictationService, private val overlay:
 
     private fun work(current: Run) {
         try {
-            listening@ while (!current.stopRequested) {
+            while (!current.stopRequested) {
                 if (current.live.step()) continue
                 if (cfg.stopSilenceS?.let { current.live.silenceS() >= it } == true) {
                     handler.post { stop(current, TRIGGER_SILENCE) }
                     while (!current.stopRequested) Thread.sleep(IDLE_POLL_MS)
-                    break@listening
-                }
-                if (current.live.segmentDue()) {
-                    val dueAtMs = SystemClock.elapsedRealtime()
-                    val segment = current.live.finishSegment()
-                    handler.post { insert(current, segment, TRIGGER_PAUSE, dueAtMs) }
-                    continue
+                    break
                 }
                 Thread.sleep(IDLE_POLL_MS)
             }
@@ -221,101 +185,60 @@ class TakeController(private val service: DictationService, private val overlay:
             handler.post { if (run === current) discard(DiscardReason.ERROR) }
         } finally {
             current.preview.stop()
-            current.pcm.delete()
             handler.post { park(current.models) }
         }
     }
 
-    /** Inserts one segment: the pause's text while the take stays open, or the last one at the stop. */
     private fun insert(current: Run, result: LiveResult, trigger: String, triggerAtMs: Long) {
         val take = current.take
-        val last = trigger != TRIGGER_PAUSE
-        if (take.finished || (last && take.state != TakeState.STOPPING)) return
-        val text = if (result.cleaned.isBlank()) result.prefix.trim() else result.prefix + result.cleaned
-        if (text.isBlank()) {
-            if (!last) return
-            if (current.unplaced.isNotEmpty()) copyUnplaced(current, result, trigger)
-            else if (take.finishWithoutText()) {
-                log.write("end", take.id, "trigger" to trigger, "caret_source" to current.caretSource,
-                    "audio_ms" to result.audioMs, *current.cost.lap().toTypedArray())
-                release(current)
-            } else discard(DiscardReason.EMPTY, trigger)
-            return
-        }
-        noteFocus(current)
+        if (take.finished || take.state != TakeState.STOPPING) return
         val field = targetField(current)
-        val reason = when {
-            field == null -> DiscardReason.NO_FIELD
-            take.pkg != UNKNOWN_PACKAGE && field.packageName?.toString() != take.pkg -> DiscardReason.PACKAGE
-            else -> null
-        }
-        if (reason != null || field == null || current.unplaced.isNotEmpty()) {
-            current.unplaced.append(text)
-            current.unplacedReason = current.unplacedReason ?: reason ?: DiscardReason.NO_FIELD
-            if (last) copyUnplaced(current, result, trigger) else stop(current, trigger = TRIGGER_FIELD_LOST)
+        val otherPackage = field != null && take.pkg != UNKNOWN_PACKAGE && field.packageName?.toString() != take.pkg
+        val fieldText = if (field != null && !otherPackage) inserter.textOf(field) else null
+        val body = if (fieldText != null && fieldText.isEmpty()) Pipeline.casual(result.cleaned, cfg) else result.cleaned
+        if (body.isBlank()) {
+            discard(DiscardReason.EMPTY, trigger)
             return
         }
-        val segment = take.segmentsInserted
-        // Once the user has taken the caret, the rest of the take writes where it was dictating.
-        val redirected = current.userCaret >= 0 || current.caretLeftField
-        val at = current.anchor.takeIf { redirected && it >= 0 }
-        val live = inserter.readCaret(field)
-        val caretBefore = at ?: if (live.caret.known) live.caret.end else field.textSelectionEnd
-        val opener = if (segment == 0) Pipeline.takeOpener(inserter.textOf(field), caretBefore) else ""
-        val placing = opener + text
-        armCaretGrace(current, caretBefore, placing.length)
-        val outcome = inserter.insert(
-            field, placing, at, current.userCaret.takeIf { at != null && !current.caretLeftField },
-            useConnection = !current.caretLeftField,
-        )
-        current.graceUntilMs = SystemClock.elapsedRealtime() + GRACE_MS
-        if (outcome.landed && caretBefore >= 0) {
-            current.anchor = caretBefore + placing.length
-            current.accepted = if (outcome.restoredCaret >= 0) Caret(outcome.restoredCaret, outcome.restoredCaret)
-            else Caret(current.anchor, current.anchor)
-        } else {
-            val after = inserter.readCaret(field)
-            if (after.caret.known) current.accepted = after.caret
+        if (field == null || fieldText == null) {
+            copyUnplaced(current, result, body, trigger, if (otherPackage) DiscardReason.PACKAGE else DiscardReason.NO_FIELD)
+            return
         }
-        if (outcome.restoredCaret >= 0) current.userCaret = outcome.restoredCaret
+        val live = inserter.readCaret(field)
+        val caretBefore = if (live.caret.known) live.caret.end else field.textSelectionEnd
+        val outcome = inserter.insert(field, Pipeline.takeOpener(fieldText, caretBefore) + body)
         if (outcome.copied && outcome.readback == "unchanged") {
             Toast.makeText(service, R.string.copied_to_clipboard, Toast.LENGTH_LONG).show()
         }
-        if (last) {
-            take.markInserted()
-            current.sampler.stop()
-        } else {
-            take.markSegmentInserted()
-        }
+        take.markInserted()
+        current.sampler.stop()
         log.write("insert", take.id,
-            "pkg" to take.pkg, "raw" to result.raw, "cleaned" to result.cleaned, "text_before" to outcome.textBefore,
+            "pkg" to take.pkg, "raw" to result.raw, "cleaned" to body, "text_before" to outcome.textBefore,
             "insert_path" to outcome.path, "landed" to outcome.landed,
             "readback" to outcome.readback, "attempts" to outcome.attempts, "copied" to outcome.copied,
             "sel_before" to caretBefore, "sel_after" to inserter.readCaret(field).caret.end,
-            "caret_source" to current.caretSource,
             "asr_ms" to result.asrMs, "clean_ms" to result.cleanMs, "asr_backend" to "cpu", "clean_backend" to "cpu",
             "audio_ms" to result.audioMs,
             "in_tokens" to result.inTokens, "out_tokens" to result.outTokens,
             "clean_mode" to result.cleanMode, "chunks" to result.chunks,
             "idle_cleans" to result.idleCleans, "idle_hits" to result.idleHits, "cue" to result.cue,
             "context_decodes" to result.contextDecodes, "context_fallbacks" to result.contextFallbacks, "drifts" to result.drifts, "corrections" to result.corrections, "corrections_kept" to result.correctionsKept,
-            "segment" to segment, "trigger" to trigger,
+            "trigger" to trigger,
             "asr_ms_after_stop" to result.asrMsAfterStop, "clean_ms_after_stop" to result.cleanMsAfterStop,
             "stop_to_insert_ms" to SystemClock.elapsedRealtime() - triggerAtMs,
             *current.cost.lap().toTypedArray())
         track(take, field)
-        if (last) release(current)
+        release(current)
     }
 
     /**
      * The field the take was for is gone or belongs to another app, so the text has nowhere to go:
      * it is put on the clipboard and the user is told, instead of losing what they dictated.
      */
-    private fun copyUnplaced(current: Run, result: LiveResult, trigger: String) {
-        val text = current.unplaced.toString().trim()
-        val reason = current.unplacedReason ?: DiscardReason.NO_FIELD
+    private fun copyUnplaced(current: Run, result: LiveResult, text: String, trigger: String, reason: DiscardReason) {
+        val clip = text.trim()
         val copied = try {
-            service.getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("dictation", text))
+            service.getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("dictation", clip))
             true
         } catch (e: Exception) {
             Log.e(tag, "could not copy the dictation to the clipboard", e)
@@ -324,7 +247,7 @@ class TakeController(private val service: DictationService, private val overlay:
         if (copied) Toast.makeText(service, R.string.copied_to_clipboard, Toast.LENGTH_LONG).show()
         log.write("clipboard", current.take.id,
             "pkg" to current.take.pkg, "reason" to reason.logName, "trigger" to trigger, "copied" to copied,
-            "raw" to result.raw, "text" to text, "clean_mode" to result.cleanMode, "audio_ms" to result.audioMs,
+            "raw" to result.raw, "text" to clip, "clean_mode" to result.cleanMode, "audio_ms" to result.audioMs,
             *current.cost.lap().toTypedArray())
         current.take.discard(reason)
         release(current)
@@ -340,10 +263,8 @@ class TakeController(private val service: DictationService, private val overlay:
         Log.i(tag, "take end state=${current.take.state} reason=${current.take.discardReason?.logName}")
         current.sampler.stop()
         bubble.hide()
-        handler.removeCallbacks(caretPoll)
         if (run === current) run = null
         overlay.setMode(ButtonMode.IDLE)
-        service.watchSelectionChanges(false)
         service.stopService(Intent(service, RecordingService::class.java))
         service.recheck()
     }
@@ -353,108 +274,11 @@ class TakeController(private val service: DictationService, private val overlay:
         run?.let { current ->
             val focused = service.focusedField()?.packageName?.toString()
             if (focused != null && current.take.pkg != UNKNOWN_PACKAGE && focused != current.take.pkg) stop(current, TRIGGER_PACKAGE)
-            if (event.eventType == AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED) noteSelectionEvent(current, event)
         }
         tracker?.onEvent(event)
     }
 
-    /** The input connection reported a new selection. Absolute indices, the same ones the keyboard gets. */
-    fun onImeSelection(start: Int, end: Int) {
-        val current = run ?: return
-        noteCaret(current, Caret(start, end), fromConnection = true, source = "ime")
-    }
-
-    /**
-     * While a take is open, re-read the caret. Not every editor delivers [onImeSelection] to an
-     * accessibility service, and a selection event's node often is not the node focus returned.
-     */
-    private fun pollCaret() {
-        val current = run ?: return
-        if (current.take.state != TakeState.OPEN) return
-        noteFocus(current)
-        if (current.take.state != TakeState.OPEN) return
-        val read = inserter.readCaret(current.field)
-        noteCaret(current, read.caret, read.fromConnection, "poll")
-        if (run === current && current.take.state == TakeState.OPEN) handler.postDelayed(caretPoll, CARET_POLL_MS)
-    }
-
-    private fun noteFocus(current: Run) {
-        val field = current.field ?: return
-        val focused = service.focusedField() ?: return
-        if (!CaretWatch.differentBox(editorId(field), editorId(focused))) return
-        current.caretLeftField = true
-        if (current.caretSource == null) current.caretSource = "focus"
-        if (current.take.state == TakeState.OPEN) stop(current, TRIGGER_CARET)
-    }
-
-    private fun noteSelectionEvent(current: Run, event: AccessibilityEvent) {
-        if (current.take.state != TakeState.OPEN) return
-        val pkg = event.packageName?.toString()
-        if (pkg != null && pkg != current.take.pkg) return
-        val source = event.source
-        val field = current.field
-        if (source != null && field != null && source != field &&
-            !CaretWatch.sameEditor(editorId(field), editorId(source))) return
-        noteCaret(current, Caret(event.fromIndex, event.toIndex), fromConnection = false, source = "event")
-    }
-
-    private fun noteCaret(current: Run, caret: Caret, fromConnection: Boolean, source: String) {
-        if (current.take.state != TakeState.OPEN) return
-        if (!caret.known) {
-            if (source == "poll") {
-                current.unreadPolls++
-                if (current.unreadPolls == UNREAD_POLLS_LOG) Log.i(tag, "caret still unreadable")
-            }
-            return
-        }
-        if (!current.accepted.known) {
-            current.accepted = caret
-            current.anchor = caret.end
-            current.sawConnection = fromConnection
-            return
-        }
-        // The node and the input connection disagree until the connection has been read once.
-        if (!current.sawConnection && fromConnection) {
-            current.sawConnection = true
-            if (caret.collapsed && caret != current.accepted) {
-                current.accepted = caret
-                current.anchor = caret.end
-                return
-            }
-        }
-        val inGrace = SystemClock.elapsedRealtime() < current.graceUntilMs
-        if (!CaretWatch.userMoved(current.accepted, caret, current.ignoredCarets, inGrace)) return
-        if (current.userCaret < 0) current.userCaret = caret.end
-        if (current.caretSource == null) current.caretSource = source
-        Log.i(tag, "caret moved source=$source anchor=${current.anchor} sel=${caret.start}..${caret.end}")
-        stop(current, TRIGGER_CARET)
-    }
-
-    /** Carets this insert is about to produce. A different one in the same moment is the user. */
-    private fun armCaretGrace(current: Run, caretBefore: Int, textLength: Int) {
-        val expectedEnd = if (caretBefore >= 0) caretBefore + textLength else -1
-        current.ignoredCarets = buildSet {
-            if (current.anchor >= 0) add(current.anchor)
-            if (current.accepted.known) {
-                add(current.accepted.start)
-                add(current.accepted.end)
-            }
-            if (caretBefore >= 0) add(caretBefore)
-            if (expectedEnd >= 0) add(expectedEnd)
-            if (current.userCaret >= 0 && caretBefore >= 0) add(CaretWatch.restored(current.userCaret, caretBefore, textLength))
-        }
-        current.graceUntilMs = SystemClock.elapsedRealtime() + GRACE_MS
-    }
-
-    /** The field the take started in, once the user has moved. Null when that field is gone. */
-    private fun targetField(current: Run): AccessibilityNodeInfo? {
-        val original = current.field
-        if (current.userCaret >= 0 || current.caretLeftField) return original
-        return service.focusedField() ?: original
-    }
-
-    private fun editorId(node: AccessibilityNodeInfo) =
-        EditorId(node.windowId, node.viewIdResourceName, node.className?.toString())
+    private fun targetField(current: Run): AccessibilityNodeInfo? = service.focusedField() ?: current.field
 
     /** Redraws the bubble from the worker's and the preview thread's latest text, at most every [BUBBLE_MS]. */
     private fun scheduleBubble() {
@@ -535,19 +359,21 @@ class TakeController(private val service: DictationService, private val overlay:
         }
     }
 
+    private fun pruneTakeAudio(recording: String) {
+        val files = takesDir.listFiles()?.filter { it.isFile && it.extension == "pcm" } ?: return
+        val drop = TakeAudio.toDelete(files.map {
+            TakeAudioFile(it.name, it.length(), if (it.name == recording) Long.MAX_VALUE else it.lastModified())
+        }).toSet()
+        for (file in files) if (file.name in drop) file.delete()
+    }
+
     companion object {
         private const val UNKNOWN_PACKAGE = "unknown"
         private const val IDLE_POLL_MS = 25L
-        private const val TRIGGER_PAUSE = "pause"
         private const val TRIGGER_STOP = "stop"
         private const val TRIGGER_KEYBOARD = "keyboard"
         private const val TRIGGER_PACKAGE = "package"
         private const val TRIGGER_SILENCE = "silence"
-        private const val TRIGGER_CARET = "caret"
-        private const val GRACE_MS = 400L
-        private const val CARET_POLL_MS = 100L
-        private const val UNREAD_POLLS_LOG = 5
-        private const val TRIGGER_FIELD_LOST = "field_lost"
         private const val BUBBLE_MS = 100L
         private const val WARM_MS = 30_000L
         private const val HIDDEN_GRACE_MS = 700L

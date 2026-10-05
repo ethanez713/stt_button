@@ -8,7 +8,6 @@ class PipelineConfig(json: JSONObject) {
     val sliceMaxS = json.getDouble("slice_max_s")
     val sliceSearchS = json.getDouble("slice_search_s")
     val pauseS: Double? = if (json.isNull("pause_s")) null else json.getDouble("pause_s")
-    val insertPauseS: Double? = if (json.isNull("insert_pause_s")) null else json.getDouble("insert_pause_s")
     val stopSilenceS: Double? = if (json.isNull("stop_silence_s")) null else json.getDouble("stop_silence_s")
     val sliceMinS = json.getDouble("slice_min_s")
     val contextS = json.getDouble("context_s")
@@ -38,7 +37,6 @@ object Pipeline {
     private val NOT_SPOKEN = Regex("[^\\p{L}\\p{N}_\\s]")
     private val TRAILING_MARK = Regex("[.,?!;:]$")
     private const val CONTEXT_LEAD_S = 0.1
-    const val SENTENCE_MARKS = ".,?!;:"
     val SENTENCE_ENDS = listOf(".", "?", "!")
     private const val OPENING_MARKS = "([{\u201C\u2018"
     private val SENTENCE_ENDS_ASKED = listOf("?", "!")
@@ -70,8 +68,8 @@ object Pipeline {
         wordCount(text) <= cfg.skipMaxWords && matchedCue(text, cfg.selfCorrectionCues) == null
 
     /** Mirrors `stt_button.cleaner.casual`. */
-    fun casual(text: String, cfg: PipelineConfig, judged: String = text): String =
-        if (wordCount(judged) > cfg.skipMaxWords) text
+    fun casual(text: String, cfg: PipelineConfig): String =
+        if (wordCount(text) > cfg.skipMaxWords) text
         else FINAL_PERIOD.replace(COMMA_OUTSIDE_NUMBER.replace(text, ""), "$1")
 
     private val EDGE_PUNCTUATION = Regex("^[^\\p{L}\\p{N}_]+|[^\\p{L}\\p{N}_]+$")
@@ -160,20 +158,6 @@ object Pipeline {
         val words = BubbleText.wordsFromTokens(tokens.toTypedArray(), FloatArray(times.size) { times[it].toFloat() })
         val context = words.filter { it.startS < junctionS }
         return trailingMark(context.lastOrNull()?.text ?: "") to words.filter { it.startS >= junctionS }.joinToString(" ") { it.text }
-    }
-
-    /**
-     * A segment that continues the sentence before it keeps the raw words' lower case: the cleaner
-     * capitalizes the first word of every chunk it is given.
-     */
-    fun continueSentence(cleaned: String, raw: String): String {
-        val cleanedWord = cleaned.trimStart().split(WHITESPACE).firstOrNull().orEmpty()
-        val rawWord = raw.trimStart().split(WHITESPACE).firstOrNull().orEmpty()
-        val key = { word: String -> word.filter { it.isLetterOrDigit() }.lowercase() }
-        val first = cleaned.indexOfFirst { !it.isWhitespace() }
-        if (first < 0 || rawWord.isEmpty() || key(cleanedWord) != key(rawWord)) return cleaned
-        val rawLetter = rawWord.firstOrNull { it.isLetter() } ?: return cleaned
-        return if (rawLetter.isLowerCase() && cleaned[first].isUpperCase()) cleaned.replaceRange(first, first + 1, cleaned[first].lowercase()) else cleaned
     }
 
     private fun spokenWords(text: String): List<String> =

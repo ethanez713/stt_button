@@ -30,7 +30,6 @@ class Slicer(
     private val sorted = ArrayList<Long>()
     private var lastSpeech = -1
     private val speech = ArrayList<Boolean>()
-    private var segmentStart = 0
 
     val sampleCount: Int get() = synchronized(this) { size }
 
@@ -54,23 +53,6 @@ class Slicer(
     }
 
     fun finish(): List<IntArray> = synchronized(this) { if (size > start) listOf(intArrayOf(start, size)) else emptyList() }
-
-    /** Speech since the last [endSegment] is followed by at least [insertPauseS] of silence. */
-    fun segmentDue(insertPauseS: Double): Boolean = synchronized(this) {
-        lastSpeech >= 0 && (lastSpeech + 1) * WIN > segmentStart &&
-            energies - 1 - lastSpeech >= Math.round(insertPauseS / CUT_WINDOW_S).toInt()
-    }
-
-    /**
-     * Closes a segment: returns the slice still open when it holds speech, and starts the next slice
-     * after everything heard so far. A leftover of silence alone is not worth recognizing.
-     */
-    fun endSegment(): List<IntArray> = synchronized(this) {
-        val rest = if (size > start && lastSpeech >= 0 && (lastSpeech + 1) * WIN > start) listOf(intArrayOf(start, size)) else emptyList()
-        start = size
-        segmentStart = size
-        rest
-    }
 
     /** Where the last non-silent window that ends at or before [sample] ends, or null. */
     fun speechBefore(sample: Int): Int? = synchronized(this) {

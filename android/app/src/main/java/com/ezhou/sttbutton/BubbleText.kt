@@ -25,13 +25,6 @@ class BubbleText : TakeSink {
 
     override fun chunkCleaned(raw: String, cleaned: String) = update { chunks += raw to cleaned }
 
-    /** The segment was inserted: its text leaves the bubble, and preview words before [endS] are spent. */
-    override fun segmentEnded(endS: Double) = update {
-        slices.clear()
-        chunks.clear()
-        coveredS = maxOf(coveredS, endS)
-    }
-
     @Synchronized
     fun text(): BubbleContent {
         val raw = Pipeline.joinSlices(slices)

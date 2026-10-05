@@ -49,17 +49,4 @@ class BubbleTextTest {
     private fun words(array: JSONArray) = List(array.length()) { i ->
         array.getJSONArray(i).let { PreviewWord(it.getString(0), it.getDouble(1)) }
     }
-
-    @Test
-    fun given_an_inserted_segment_when_it_ends_then_its_text_and_earlier_preview_words_leave_the_bubble() {
-        val bubble = BubbleText()
-        bubble.preview(listOf(PreviewWord("okay", 0.4), PreviewWord("sounds", 1.0)))
-        bubble.sliceLanded(2.0, "Okay sounds good.")
-        bubble.segmentEnded(4.5)
-        bubble.preview(listOf(PreviewWord("okay", 0.4), PreviewWord("sounds", 1.0), PreviewWord("and", 5.0)))
-
-        val shown = bubble.text()
-        assertEquals("", shown.settled)
-        assertEquals("and", shown.preview)
-    }
 }

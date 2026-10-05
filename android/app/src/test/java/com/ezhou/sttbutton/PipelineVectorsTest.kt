@@ -161,14 +161,6 @@ class PipelineVectorsTest {
     }
 
     @Test
-    fun given_a_cleaned_first_word_that_matches_a_lower_case_raw_one_when_continued_then_it_is_lowercased() {
-        assertEquals("have some", Pipeline.continueSentence("Have some", "have some monitoring"))
-        assertEquals("Have some", Pipeline.continueSentence("Have some", "Have some monitoring"))
-        assertEquals("Okay then", Pipeline.continueSentence("Okay then", "so then"))
-        assertEquals("I think so", Pipeline.continueSentence("I think so", "I think so"))
-    }
-
-    @Test
     fun given_fact_drift_vectors_when_compared_then_the_pairs_match_the_host() {
         for (case in Fixtures.objects(Fixtures.vectors.getJSONArray("fact_drift"))) {
             val expected = case.getJSONArray("drift").let { a -> List(a.length()) { a.getJSONArray(it).getString(0) to a.getJSONArray(it).getString(1) } }

@@ -11,7 +11,7 @@ import android.util.Log
 import android.view.accessibility.AccessibilityNodeInfo
 
 /**
- * Puts a segment at the caret. The input connection is the same channel the editor gives the
+ * Puts text at the caret. The input connection is the same channel the editor gives the
  * keyboard, so the caret is read and moved there. A commit that does not change the field is
  * not success: paste, then set-text, are tried when that is safe. The clipboard is written only
  * when the field is still unchanged afterwards, so a failed insert can be pasted by hand and a
@@ -20,18 +20,12 @@ import android.view.accessibility.AccessibilityNodeInfo
 class Inserter(private val service: AccessibilityService) {
     class Outcome(
         val path: String, val textBefore: String, val landed: Boolean, val readback: String,
-        val attempts: String, val copied: Boolean, val restoredCaret: Int,
+        val attempts: String, val copied: Boolean,
     )
 
     data class CaretRead(val caret: Caret, val fromConnection: Boolean)
 
-    /**
-     * With [at], the text goes in at that offset instead of at the caret, and the caret is then put
-     * back at [restore], moved along by the inserted text when it lay after the insertion point.
-     */
-    fun insert(
-        field: AccessibilityNodeInfo, text: String, at: Int? = null, restore: Int? = null, useConnection: Boolean = true,
-    ): Outcome {
+    fun insert(field: AccessibilityNodeInfo, text: String, useConnection: Boolean = true): Outcome {
         // Once focus has left this field the connection belongs to wherever it went, so it must not be written.
         val conn = if (useConnection) connection() else null
         val beforeNode = nodeView(field)
@@ -41,7 +35,7 @@ class Inserter(private val service: AccessibilityService) {
         var commitMissing = conn == null
         if (!commitMissing) {
             tried += "commit_text"
-            commitMissing = !commit(conn, field, text, at)
+            commitMissing = !commit(conn, field, text)
         }
         var verdict = confirm(conn, field, beforeNode, beforeAround.beforeCaret, text)
         while (true) {
@@ -57,17 +51,10 @@ class Inserter(private val service: AccessibilityService) {
             if (next == "paste") staged = true
             tried += next
             when (next) {
-                "paste" -> paste(conn, field, at)
-                "set_text" -> setText(conn, field, text, beforeNode.text, at)
+                "paste" -> paste(conn, field)
+                "set_text" -> setText(conn, field, text, beforeNode.text)
             }
             verdict = confirm(conn, field, beforeNode, beforeAround.beforeCaret, text)
-        }
-        val restoredCaret = if (at != null && restore != null && restore >= 0) {
-            val caret = CaretWatch.restored(restore, at, text.length)
-            select(conn, field, caret)
-            caret
-        } else {
-            -1
         }
         val copied = verdict == InsertReadback.Verdict.UNCHANGED && setClip(ClipData.newPlainText("dictation", text))
         if (staged && !copied) clearClip()
@@ -75,7 +62,7 @@ class Inserter(private val service: AccessibilityService) {
         val readback = verdict.name.lowercase()
         Log.i(DictationService.TAG, "insert readback=$readback attempts=${tried.joinToString(",")} copied=$copied")
         return Outcome(path, beforeNode.text, verdict == InsertReadback.Verdict.LANDED, readback,
-            tried.joinToString(","), copied, restoredCaret)
+            tried.joinToString(","), copied)
     }
 
     fun readCaret(field: AccessibilityNodeInfo?): CaretRead {
@@ -138,11 +125,11 @@ class Inserter(private val service: AccessibilityService) {
     }
 
     private fun commit(
-        conn: InputMethod.AccessibilityInputConnection?, field: AccessibilityNodeInfo, text: String, at: Int?,
+        conn: InputMethod.AccessibilityInputConnection?, field: AccessibilityNodeInfo, text: String,
     ): Boolean {
         if (conn == null) return false
         return try {
-            placeCaret(conn, field, at)
+            placeCaret(conn, field)
             conn.commitText(text, 1, null)
             true
         } catch (e: Exception) {
@@ -151,15 +138,15 @@ class Inserter(private val service: AccessibilityService) {
         }
     }
 
-    private fun paste(conn: InputMethod.AccessibilityInputConnection?, field: AccessibilityNodeInfo, at: Int?) {
-        placeCaret(conn, field, at)
+    private fun paste(conn: InputMethod.AccessibilityInputConnection?, field: AccessibilityNodeInfo) {
+        placeCaret(conn, field)
         field.performAction(AccessibilityNodeInfo.ACTION_PASTE)
     }
 
     private fun setText(
-        conn: InputMethod.AccessibilityInputConnection?, field: AccessibilityNodeInfo, text: String, before: String, at: Int?,
+        conn: InputMethod.AccessibilityInputConnection?, field: AccessibilityNodeInfo, text: String, before: String,
     ) {
-        val caret = (at ?: field.textSelectionEnd).coerceIn(0, before.length)
+        val caret = field.textSelectionEnd.coerceIn(0, before.length)
         val args = Bundle().apply {
             putCharSequence(
                 AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,
@@ -170,11 +157,7 @@ class Inserter(private val service: AccessibilityService) {
         select(conn, field, caret + text.length)
     }
 
-    private fun placeCaret(conn: InputMethod.AccessibilityInputConnection?, field: AccessibilityNodeInfo, at: Int?) {
-        if (at != null && at >= 0) {
-            select(conn, field, at)
-            return
-        }
+    private fun placeCaret(conn: InputMethod.AccessibilityInputConnection?, field: AccessibilityNodeInfo) {
         val caret = readAround(conn).caret
         if (caret.known && !caret.collapsed) select(conn, field, caret.end)
         else collapseSelection(conn, field)

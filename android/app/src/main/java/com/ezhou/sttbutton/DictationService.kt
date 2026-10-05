@@ -44,17 +44,7 @@ class DictationService : AccessibilityService() {
         }
     }
 
-    override fun onCreateInputMethod(): InputMethod = object : InputMethod(this) {
-        override fun onUpdateSelection(
-            oldSelStart: Int, oldSelEnd: Int, newSelStart: Int, newSelEnd: Int,
-            candidatesStart: Int, candidatesEnd: Int,
-        ) {
-            super.onUpdateSelection(oldSelStart, oldSelEnd, newSelStart, newSelEnd, candidatesStart, candidatesEnd)
-            handler.post {
-                if (::controller.isInitialized) controller.onImeSelection(newSelStart, newSelEnd)
-            }
-        }
-    }
+    override fun onCreateInputMethod(): InputMethod = InputMethod(this)
 
     override fun onServiceConnected() {
         overlay = Overlay(
@@ -64,7 +54,6 @@ class DictationService : AccessibilityService() {
         )
         bubble = BubbleOverlay(this)
         controller = TakeController(this, overlay, bubble).also {
-            it.deleteLeftovers()
             it.logProcessExits()
         }
         for (key in listOf(Settings.Secure.SELECTED_INPUT_METHOD_SUBTYPE, Settings.Secure.DEFAULT_INPUT_METHOD)) {
@@ -113,9 +102,6 @@ class DictationService : AccessibilityService() {
 
     /** TYPE_VIEW_TEXT_CHANGED is only worth its event traffic while a field this app wrote into is tracked. */
     fun watchTextChanges(on: Boolean) = watch(AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED, on)
-
-    /** Caret moves matter only while a take is recording into the field. */
-    fun watchSelectionChanges(on: Boolean) = watch(AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED, on)
 
     private fun watch(eventType: Int, on: Boolean) {
         val info = serviceInfo ?: return
@@ -263,6 +249,6 @@ class DictationService : AccessibilityService() {
         private const val TRY_FIELD_ID = "com.ezhou.sttbutton:id/try_field"
         private const val REREAD_MS = 100L
         private const val KEY_VOICE_KEY_SEEN = "voice_key_seen"
-        private const val FIELD_EVENTS = AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED or AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED
+        private const val FIELD_EVENTS = AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED
     }
 }
