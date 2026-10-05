@@ -20,7 +20,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 class Inserter(private val service: AccessibilityService) {
     class Outcome(
         val path: String, val textBefore: String, val landed: Boolean, val readback: String,
-        val attempts: String, val copied: Boolean,
+        val attempts: String, val copied: Boolean, val landedCount: Int?,
     )
 
     fun insert(field: AccessibilityNodeInfo, text: String): Outcome {
@@ -34,10 +34,10 @@ class Inserter(private val service: AccessibilityService) {
             tried += "commit_text"
             commitMissing = !commit(conn, field, text)
         }
-        var verdict = confirm(conn, field, beforeNode, beforeAround.beforeCaret, text)
+        var confirmation = confirm(conn, field, beforeNode, beforeAround.beforeCaret, text)
         while (true) {
             val next = InsertReadback.nextPath(
-                verdict, commitMissing, InsertReadback.allowSetText(beforeNode, beforeAround.beforeCaret),
+                confirmation.verdict, commitMissing, InsertReadback.allowSetText(beforeNode, beforeAround.beforeCaret),
                 triedPaste = "paste" in tried, triedSetText = "set_text" in tried,
             ) ?: break
             if (next == "paste" && !staged && !stageForPaste(text)) {
@@ -51,15 +51,16 @@ class Inserter(private val service: AccessibilityService) {
                 "paste" -> paste(conn, field)
                 "set_text" -> setText(conn, field, text, beforeNode.text)
             }
-            verdict = confirm(conn, field, beforeNode, beforeAround.beforeCaret, text)
+            confirmation = confirm(conn, field, beforeNode, beforeAround.beforeCaret, text)
         }
+        val verdict = confirmation.verdict
         val copied = verdict == InsertReadback.Verdict.UNCHANGED && setClip(ClipData.newPlainText("dictation", text))
         if (staged && !copied) clearClip()
         val path = tried.lastOrNull() ?: "none"
         val readback = verdict.name.lowercase()
-        Log.i(DictationService.TAG, "insert readback=$readback attempts=${tried.joinToString(",")} copied=$copied")
+        Log.i(DictationService.TAG, "insert readback=$readback landed_count=${confirmation.landedCount} attempts=${tried.joinToString(",")} copied=$copied")
         return Outcome(path, beforeNode.text, verdict == InsertReadback.Verdict.LANDED, readback,
-            tried.joinToString(","), copied)
+            tried.joinToString(","), copied, confirmation.landedCount)
     }
 
     /** The input connection's caret when it can be read, else the node's. */
@@ -75,22 +76,25 @@ class Inserter(private val service: AccessibilityService) {
     fun textOf(field: AccessibilityNodeInfo): String =
         if (field.isShowingHintText) "" else field.text?.toString().orEmpty()
 
+    private data class Confirmation(val verdict: InsertReadback.Verdict, val landedCount: Int?)
+
     private fun confirm(
         conn: InputMethod.AccessibilityInputConnection?, field: AccessibilityNodeInfo,
         beforeNode: InsertReadback.View, beforeCaret: InsertReadback.View, needle: String,
-    ): InsertReadback.Verdict {
-        var verdict = InsertReadback.Verdict.BLIND
+    ): Confirmation {
+        var confirmation = Confirmation(InsertReadback.Verdict.BLIND, null)
         for (wait in READ_WAITS_MS) {
             if (wait > 0) Thread.sleep(wait.toLong())
             val node = nodeView(field)
             val caret = readAround(conn).beforeCaret
-            verdict = InsertReadback.combine(
+            val verdict = InsertReadback.combine(
                 InsertReadback.judge(beforeNode, node, needle),
                 InsertReadback.judge(beforeCaret, caret, needle),
             )
-            if (verdict == InsertReadback.Verdict.LANDED || verdict == InsertReadback.Verdict.DIVERGED) return verdict
+            confirmation = Confirmation(verdict, InsertReadback.landedCount(beforeNode, node, beforeCaret, caret, needle))
+            if (verdict == InsertReadback.Verdict.LANDED || verdict == InsertReadback.Verdict.DIVERGED) return confirmation
         }
-        return verdict
+        return confirmation
     }
 
     /**

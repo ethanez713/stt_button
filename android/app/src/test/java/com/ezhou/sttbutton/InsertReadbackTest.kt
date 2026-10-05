@@ -108,4 +108,55 @@ class InsertReadbackTest {
     fun given_both_reads_empty_when_set_text_is_considered_then_it_is_allowed() {
         assertTrue(InsertReadback.allowSetText(view(""), view("")))
     }
+
+    @Test
+    fun given_the_node_gained_the_utterance_twice_when_counted_then_the_count_is_2() {
+        val count = InsertReadback.landedCount(view("go"), view("go go go"), view("go"), view("go go"), "go")
+        assertEquals(2, count)
+    }
+
+    @Test
+    fun given_no_text_from_either_view_when_counted_then_there_is_no_count() {
+        val blind = view("", readable = false)
+        assertNull(InsertReadback.landedCount(blind, blind, blind, blind, "go"))
+    }
+
+    @Test
+    fun given_a_blind_node_and_a_caret_that_gained_the_utterance_when_counted_then_the_count_is_the_carets() {
+        val blind = view("", readable = false)
+        assertEquals(1, InsertReadback.landedCount(blind, blind, view(""), view("go"), "go"))
+    }
+
+    @Test
+    fun given_a_long_utterance_found_by_its_tail_when_read_back_then_it_landed() {
+        val needle = "H".repeat(101) + "T".repeat(400)
+        assertEquals(501, needle.length)
+        val before = view("")
+        val after = view("T".repeat(400))
+        assertEquals(InsertReadback.Verdict.LANDED, InsertReadback.judge(before, after, needle))
+        assertEquals(1, InsertReadback.landedCount(before, after, view("", readable = false), view("", readable = false), needle))
+    }
+
+    @Test
+    fun given_a_long_utterance_found_by_its_head_when_read_back_then_it_landed() {
+        val needle = "H".repeat(400) + "M".repeat(101)
+        assertEquals(501, needle.length)
+        assertEquals(InsertReadback.Verdict.LANDED, InsertReadback.judge(view(""), view("H".repeat(400)), needle))
+    }
+
+    @Test
+    fun given_an_utterance_of_500_characters_found_only_by_its_tail_when_read_back_then_it_did_not_land() {
+        val needle = "H".repeat(100) + "T".repeat(400)
+        assertEquals(500, needle.length)
+        assertEquals(InsertReadback.Verdict.DIVERGED, InsertReadback.judge(view(""), view("T".repeat(400)), needle))
+    }
+
+    @Test
+    fun given_a_long_utterance_whose_tail_the_field_already_held_when_read_back_then_paste_is_still_next() {
+        val needle = "H".repeat(101) + "T".repeat(400)
+        val field = view("T".repeat(400))
+        val verdict = InsertReadback.judge(field, field, needle)
+        assertEquals(InsertReadback.Verdict.UNCHANGED, verdict)
+        assertEquals("paste", InsertReadback.nextPath(verdict, commitMissing = false, allowSetText = true, triedPaste = false, triedSetText = false))
+    }
 }

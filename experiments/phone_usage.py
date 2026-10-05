@@ -4,7 +4,8 @@
     pyrun python -m experiments.phone_usage edits.jsonl [--capacity-mah 5000]
 
 Plugged takes are excluded: charging current hides the take's draw. Medians and counts only; the
-figures do not claim precision.
+figures do not claim precision. Inserts with landed_count over 1, and takes whose zero_ms is over
+half their audio_ms, are named.
 """
 
 import argparse
@@ -121,6 +122,31 @@ def warm_split(lines: list[dict]) -> list[str]:
     return out
 
 
+def _ids(ids: list) -> str:
+    if not ids:
+        return "0"
+    return f"{len(ids)} ({', '.join(str(i) for i in ids)})"
+
+
+def take_diagnostics(lines: list[dict]) -> list[str]:
+    doubled = [line["id"] for line in lines if line.get("event") == "insert" and (line.get("landed_count") or 0) > 1]
+    silent = []
+    for line in lines:
+        if line.get("event") not in ("insert", "discard", "clipboard"):
+            continue
+        zero, audio = line.get("zero_ms"), line.get("audio_ms")
+        if not isinstance(zero, (int, float)) or isinstance(zero, bool):
+            continue
+        if not isinstance(audio, (int, float)) or isinstance(audio, bool) or audio <= 0:
+            continue
+        if zero > audio / 2:
+            silent.append(line["id"])
+    return [
+        "inserts with landed_count > 1: " + _ids(doubled),
+        "takes with zero_ms over half their audio_ms: " + _ids(silent),
+    ]
+
+
 def summarize(lines: list[dict], capacity_mah: float = 5000) -> str:
     inserts = [line for line in lines if line.get("event") == "insert"]
     unplugged = [r for r in inserts if not r.get("plugged")]
@@ -159,6 +185,7 @@ def summarize(lines: list[dict], capacity_mah: float = 5000) -> str:
     out.append("\ncue matches: " + (", ".join(f"{c} {n}" for c, n in cues.most_common()) or "none"))
     edited, total = edited_share(lines)
     out.append(f"inserts whose text was edited afterwards: {edited} of {total} with an edit line")
+    out.extend(take_diagnostics(lines))
 
     exits = Counter(line.get("reason") for line in lines if line.get("event") == "exit")
     out.append("process exits: " + (", ".join(f"{k} {n}" for k, n in exits.most_common()) or "none"))

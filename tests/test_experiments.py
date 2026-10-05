@@ -290,6 +290,28 @@ class TestPhoneUsage:
         assert "cue matches: actually 2, make it 1" in report
         assert "edited afterwards: 1 of 2" in report
 
+    def test_inserts_with_landed_count_over_1_are_named(self):
+        from experiments import phone_usage
+        lines = [
+            self.insert(1, landed_count=2), self.insert(2, landed_count=1),
+            self.insert(3, landed_count=None), self.insert(4, landed_count=3),
+        ]
+        report = phone_usage.summarize(lines)
+        assert "inserts with landed_count > 1: 2 (t1, t4)" in report
+
+    def test_takes_with_zero_ms_over_half_their_audio_are_named(self):
+        from experiments import phone_usage
+        lines = [
+            self.insert(1, zero_ms=30_001, audio_ms=60_000),
+            self.insert(2, zero_ms=30_000, audio_ms=60_000),
+            {"event": "discard", "id": "silent", "zero_ms": 501, "audio_ms": 1000},
+            {"event": "clipboard", "id": "clip", "zero_ms": 500, "audio_ms": 1000},
+            {"event": "discard", "id": "quiet", "zero_ms": 500, "audio_ms": 0},
+            self.insert(3),
+        ]
+        report = phone_usage.summarize(lines)
+        assert "takes with zero_ms over half their audio_ms: 2 (t1, silent)" in report
+
 
 class TestPhoneReplay:
     def test_only_takes_with_audio_are_listed_with_their_raw_text_and_what_ended_them(self, tmp_path):

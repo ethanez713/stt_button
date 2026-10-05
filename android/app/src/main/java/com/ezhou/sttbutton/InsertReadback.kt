@@ -10,15 +10,51 @@ object InsertReadback {
     /**
      * The write landed when the field holds the utterance more times than it did before. Holding it
      * at all proves nothing: a short phrase ("see", "that") is usually in the field already.
+     * Over 500 characters, gaining the first or last 400 counts as well: a field that rewrites line
+     * breaks, or a caret window that cannot hold the utterance, still shows an end.
      */
-    fun judge(before: View, after: View, needle: String): Verdict {
+    fun judge(before: View, after: View, needle: String): Verdict = measure(before, after, needle).verdict
+
+    /**
+     * Copies the verdict's view gained: the node when its verdict is [combine]'s, otherwise the caret
+     * text. Null when the read is blind.
+     */
+    fun landedCount(nodeBefore: View, nodeAfter: View, caretBefore: View, caretAfter: View, needle: String): Int? {
+        val node = measure(nodeBefore, nodeAfter, needle)
+        val caret = measure(caretBefore, caretAfter, needle)
+        val verdict = combine(node.verdict, caret.verdict)
+        if (verdict == Verdict.BLIND) return null
+        return if (node.verdict == verdict) node.gained else caret.gained
+    }
+
+    private class Measured(val verdict: Verdict, val gained: Int?)
+
+    private fun measure(before: View, after: View, needle: String): Measured {
         val wanted = needle.trim()
-        if (wanted.isEmpty()) return Verdict.LANDED
-        if (!after.readable) return Verdict.BLIND
+        if (wanted.isEmpty()) return Measured(Verdict.LANDED, null)
+        if (!after.readable) return Measured(Verdict.BLIND, null)
+        val gained = copiesGained(before, after, wanted)
+        val verdict = when {
+            gained > 0 -> Verdict.LANDED
+            before.readable && before.text == after.text -> Verdict.UNCHANGED
+            else -> Verdict.DIVERGED
+        }
+        return Measured(verdict, gained)
+    }
+
+    private fun copiesGained(before: View, after: View, wanted: String): Int {
+        val full = delta(before, after, wanted)
+        if (full > 0 || wanted.length <= LONG_UTTERANCE) return full
+        val byEnd = maxOf(
+            delta(before, after, wanted.take(END_CHARS)),
+            delta(before, after, wanted.takeLast(END_CHARS)),
+        )
+        return if (byEnd > 0) byEnd else full
+    }
+
+    private fun delta(before: View, after: View, wanted: String): Int {
         val had = if (before.readable) occurrences(before.text, wanted) else 0
-        if (occurrences(after.text, wanted) > had) return Verdict.LANDED
-        if (before.readable && before.text == after.text) return Verdict.UNCHANGED
-        return Verdict.DIVERGED
+        return occurrences(after.text, wanted) - had
     }
 
     private fun occurrences(text: String, wanted: String): Int {
@@ -65,4 +101,7 @@ object InsertReadback {
         if (node.text.isNotEmpty()) return true
         return caretText.readable && caretText.text.isEmpty()
     }
+
+    private const val LONG_UTTERANCE = 500
+    private const val END_CHARS = 400
 }

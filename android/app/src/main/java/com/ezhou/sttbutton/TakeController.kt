@@ -41,10 +41,13 @@ class TakeController(private val service: DictationService, private val overlay:
     private val releaseParked = Runnable { releaseParkedNow() }
     private val hiddenWatch = HiddenWatch(HIDDEN_GRACE_MS)
     private val hiddenCheck = Runnable { service.recheck() }
+    private var failedUntilMs = 0L
+    private val endFlash = Runnable { applyButtonMode() }
 
     private class Run(
         val take: Take, val pcm: File, val models: Models, val live: LiveTake, val recorder: Recorder,
         val cost: TakeCost, val sampler: CostSampler, val bubbleText: BubbleText, val preview: PreviewRecognizer,
+        val level: AudioLevel,
     ) {
         @Volatile var stopRequested = false
         @Volatile var aborted = false
@@ -59,6 +62,7 @@ class TakeController(private val service: DictationService, private val overlay:
     val stateName: String get() = run?.take?.state?.name ?: "NONE"
 
     fun onTap() {
+        if (SystemClock.uptimeMillis() < failedUntilMs) return
         val current = run
         when {
             current == null -> start()
@@ -91,6 +95,7 @@ class TakeController(private val service: DictationService, private val overlay:
     private fun start() {
         if (service.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             Log.w(tag, "tap ignored: the microphone permission is not granted")
+            flashFailed()
             return
         }
         tracker?.end()
@@ -114,15 +119,17 @@ class TakeController(private val service: DictationService, private val overlay:
         val live = LiveTake(models.recognizer, models::cleaner, cfg, bubbleText, models::prepareCleaner)
         val preview = PreviewRecognizer(models::awaitPreview, bubbleText::preview)
         val pcm = File(takesDir, "${take.id}.pcm")
+        val level = AudioLevel()
         val recorder = Recorder(pcm, onFailure = { e ->
             Log.e(tag, "recording failed", e)
             handler.post { run?.takeIf { it.pcm == pcm }?.let { stop(it, TRIGGER_MIC) } }
         }) { samples, length ->
+            level.add(samples, length)
             live.addSamples(samples, length)
             preview.offer(samples, length, live.slicer.paused)
         }
         val cost = TakeCost(AndroidCostProbe(service)).also { it.start() }
-        val current = Run(take, pcm, models, live, recorder, cost, CostSampler(cost), bubbleText, preview)
+        val current = Run(take, pcm, models, live, recorder, cost, CostSampler(cost), bubbleText, preview, level)
         try {
             recorder.start()
         } catch (e: Exception) {
@@ -139,7 +146,7 @@ class TakeController(private val service: DictationService, private val overlay:
         bubble.show()
         thread(name = "take-worker") { work(current) }
         handler.postDelayed(capRunnable, cfg.takeCapS * 1000L)
-        overlay.setMode(ButtonMode.RECORDING)
+        applyButtonMode()
     }
 
     private fun stop(current: Run, trigger: String = TRIGGER_STOP) {
@@ -147,7 +154,7 @@ class TakeController(private val service: DictationService, private val overlay:
         current.stopTrigger = trigger
         Log.i(tag, "take stop trigger=$trigger")
         handler.removeCallbacks(capRunnable)
-        overlay.setMode(ButtonMode.BUSY)
+        if (trigger == TRIGGER_MIC) flashFailed() else applyButtonMode()
         current.stoppedAtMs = SystemClock.elapsedRealtime()
         current.recorder.stop()
         current.stopRequested = true
@@ -159,11 +166,16 @@ class TakeController(private val service: DictationService, private val overlay:
     fun discard(reason: DiscardReason, trigger: String? = null) {
         val current = run ?: return
         if (!current.take.discard(reason)) return
-        log.write("discard", current.take.id, "reason" to reason.logName, "trigger" to trigger, *current.cost.lap().toTypedArray())
         current.aborted = true
         current.stopRequested = true
         handler.removeCallbacks(capRunnable)
         current.recorder.stop()
+        log.write(
+            "discard", current.take.id, "reason" to reason.logName, "trigger" to trigger,
+            "audio_ms" to current.level.audioMs, "zero_ms" to current.level.zeroMs, "peak_dbfs" to current.level.peakDbfs,
+            *current.cost.lap().toTypedArray(),
+        )
+        if (reason == DiscardReason.ERROR) flashFailed()
         current.models.cleaner().cancel()
         release(current)
     }
@@ -219,10 +231,11 @@ class TakeController(private val service: DictationService, private val overlay:
         log.write("insert", take.id,
             "pkg" to take.pkg, "raw" to result.raw, "cleaned" to body, "text_before" to outcome.textBefore,
             "insert_path" to outcome.path, "landed" to outcome.landed,
-            "readback" to outcome.readback, "attempts" to outcome.attempts, "copied" to outcome.copied,
+            "readback" to outcome.readback, "landed_count" to outcome.landedCount,
+            "attempts" to outcome.attempts, "copied" to outcome.copied,
             "sel_before" to caretBefore, "sel_after" to inserter.readCaret(field).end,
             "asr_ms" to result.asrMs, "clean_ms" to result.cleanMs, "asr_backend" to "cpu", "clean_backend" to "cpu",
-            "audio_ms" to result.audioMs,
+            "audio_ms" to result.audioMs, "zero_ms" to current.level.zeroMs, "peak_dbfs" to current.level.peakDbfs,
             "in_tokens" to result.inTokens, "out_tokens" to result.outTokens,
             "clean_mode" to result.cleanMode, "chunks" to result.chunks,
             "idle_cleans" to result.idleCleans, "idle_hits" to result.idleHits, "cue" to result.cue,
@@ -252,6 +265,7 @@ class TakeController(private val service: DictationService, private val overlay:
         log.write("clipboard", current.take.id,
             "pkg" to current.take.pkg, "reason" to reason.logName, "trigger" to trigger, "copied" to copied,
             "raw" to result.raw, "text" to clip, "clean_mode" to result.cleanMode, "audio_ms" to result.audioMs,
+            "zero_ms" to current.level.zeroMs, "peak_dbfs" to current.level.peakDbfs,
             *current.cost.lap().toTypedArray())
         current.take.discard(reason)
         release(current)
@@ -268,7 +282,7 @@ class TakeController(private val service: DictationService, private val overlay:
         current.sampler.stop()
         bubble.hide()
         if (run === current) run = null
-        overlay.setMode(ButtonMode.IDLE)
+        applyButtonMode()
         service.stopService(Intent(service, RecordingService::class.java))
         service.recheck()
     }
@@ -363,6 +377,24 @@ class TakeController(private val service: DictationService, private val overlay:
         }
     }
 
+    /** Red-orange for [FAILED_HOLD_MS], then resting, or busy when this take is still inserting. */
+    private fun flashFailed() {
+        failedUntilMs = SystemClock.uptimeMillis() + FAILED_HOLD_MS
+        handler.removeCallbacks(endFlash)
+        handler.postDelayed(endFlash, FAILED_HOLD_MS)
+        applyButtonMode()
+    }
+
+    private fun applyButtonMode() {
+        val mode = when {
+            SystemClock.uptimeMillis() < failedUntilMs -> ButtonMode.FAILED
+            run?.take?.state == TakeState.OPEN -> ButtonMode.RECORDING
+            run != null -> ButtonMode.BUSY
+            else -> ButtonMode.IDLE
+        }
+        overlay.setMode(mode)
+    }
+
     private fun pruneTakeAudio(recording: String) {
         val files = takesDir.listFiles()?.filter { it.isFile && it.extension == "pcm" } ?: return
         val drop = TakeAudio.toDelete(files.map {
@@ -383,5 +415,6 @@ class TakeController(private val service: DictationService, private val overlay:
         private const val BUBBLE_MS = 100L
         private const val WARM_MS = 30_000L
         private const val HIDDEN_GRACE_MS = 700L
+        private const val FAILED_HOLD_MS = 1_500L
     }
 }

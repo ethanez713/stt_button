@@ -30,8 +30,9 @@ data class ButtonStyle(
             ButtonMode.IDLE -> idleRgb
             ButtonMode.RECORDING -> recordingRgb
             ButtonMode.BUSY -> BUSY_RGB
+            ButtonMode.FAILED -> FAILED_RGB
         }
-        val alpha = if (pressed) 255 else 255 * opacityPct / 100
+        val alpha = if (pressed || mode == ButtonMode.FAILED) 255 else 255 * opacityPct / 100
         return (alpha shl 24) or (rgb and 0xFFFFFF)
     }
 
@@ -47,6 +48,8 @@ data class ButtonStyle(
         val GAP_RANGE = 0..200
         val PRESETS = listOf(0x00BCD4, 0xE53935, 0x43A047, 0xFB8C00, 0x8E24AA, 0x1E88E5, 0xFDD835, 0x546E7A)
         private const val BUSY_RGB = 0x9E9E9E
+        // Not a preset and not the user's idle or recording color: a failure has to stay recognizable.
+        private const val FAILED_RGB = 0xFF5722
         private const val KEY_PLACEMENT = "style_placement"
         private const val KEY_SIZE = "style_size_pct"
         private const val KEY_OPACITY = "style_opacity_pct"

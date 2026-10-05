@@ -19,7 +19,7 @@ import kotlin.math.hypot
  * so it has no FLAG_ALT_FOCUSABLE_IM: combined with FLAG_NOT_FOCUSABLE that flag would put it
  * behind the keyboard.
  */
-enum class ButtonMode { IDLE, RECORDING, BUSY }
+enum class ButtonMode { IDLE, RECORDING, BUSY, FAILED }
 
 class Overlay(
     private val context: Context,
@@ -176,7 +176,7 @@ class Overlay(
                 }
                 MotionEvent.ACTION_UP -> {
                     v.background = oval(style.color(mode))
-                    if (dragging) drop(zoneAt(event)) else onTap()
+                    if (dragging) drop(zoneAt(event)) else if (mode != ButtonMode.FAILED) onTap()
                 }
                 MotionEvent.ACTION_CANCEL -> {
                     v.background = oval(style.color(mode))

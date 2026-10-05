@@ -41,4 +41,13 @@ class ButtonStyleTest {
         assertEquals(0xFF112233.toInt(), style.color(ButtonMode.IDLE, pressed = true))
         assertEquals(0x669E9E9E, style.color(ButtonMode.BUSY))
     }
+
+    @Test
+    fun given_any_chosen_colors_when_failed_then_the_color_is_the_fixed_red_orange() {
+        val faded = ButtonStyle(opacityPct = 5, idleRgb = 0x112233, recordingRgb = 0x445566)
+        val solid = ButtonStyle(opacityPct = 100, idleRgb = 0x00FF00, recordingRgb = 0x0000FF)
+        assertEquals(0xFFFF5722.toInt(), faded.color(ButtonMode.FAILED))
+        assertEquals(faded.color(ButtonMode.FAILED), solid.color(ButtonMode.FAILED))
+        assertEquals(faded.color(ButtonMode.FAILED), faded.color(ButtonMode.FAILED, pressed = true))
+    }
 }
