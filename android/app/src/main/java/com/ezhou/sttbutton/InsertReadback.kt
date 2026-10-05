@@ -7,13 +7,28 @@ object InsertReadback {
     /** [readable] is false when the editor exposed no text, which is not the same as an empty field. */
     data class View(val text: String, val readable: Boolean)
 
+    /**
+     * The write landed when the field holds the utterance more times than it did before. Holding it
+     * at all proves nothing: a short segment ("see", "that") is usually in the field already.
+     */
     fun judge(before: View, after: View, needle: String): Verdict {
         val wanted = needle.trim()
         if (wanted.isEmpty()) return Verdict.LANDED
-        if (after.readable && after.text.contains(wanted, ignoreCase = true)) return Verdict.LANDED
         if (!after.readable) return Verdict.BLIND
+        val had = if (before.readable) occurrences(before.text, wanted) else 0
+        if (occurrences(after.text, wanted) > had) return Verdict.LANDED
         if (before.readable && before.text == after.text) return Verdict.UNCHANGED
         return Verdict.DIVERGED
+    }
+
+    private fun occurrences(text: String, wanted: String): Int {
+        var count = 0
+        var at = text.indexOf(wanted, ignoreCase = true)
+        while (at >= 0) {
+            count++
+            at = text.indexOf(wanted, at + wanted.length, ignoreCase = true)
+        }
+        return count
     }
 
     /**

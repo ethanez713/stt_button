@@ -16,6 +16,24 @@ class InsertReadbackTest {
     }
 
     @Test
+    fun given_an_unchanged_field_that_already_held_the_utterance_when_read_back_then_it_is_unchanged() {
+        val before = view("Where we can click into to see the full shopping")
+        assertEquals(InsertReadback.Verdict.UNCHANGED, InsertReadback.judge(before, before, "see"))
+    }
+
+    @Test
+    fun given_the_utterance_a_second_time_in_the_field_when_read_back_then_it_landed() {
+        val verdict = InsertReadback.judge(view("so that"), view("so that that"), "that")
+        assertEquals(InsertReadback.Verdict.LANDED, verdict)
+    }
+
+    @Test
+    fun given_a_field_that_changed_elsewhere_and_already_held_the_utterance_when_read_back_then_it_diverged() {
+        val verdict = InsertReadback.judge(view("to see the list"), view("to see the list?"), "see")
+        assertEquals(InsertReadback.Verdict.DIVERGED, verdict)
+    }
+
+    @Test
     fun given_a_readable_field_that_did_not_change_when_read_back_then_it_is_unchanged() {
         val before = view("Help me find some ")
         assertEquals(InsertReadback.Verdict.UNCHANGED, InsertReadback.judge(before, before, "laundry"))

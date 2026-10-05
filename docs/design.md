@@ -124,7 +124,7 @@ The utterance is inserted at the caret. Characters already in the field stay. A 
 
 The clipboard is left alone when the field takes the text. Android shows a copy toast for every normal clipboard write, and a clip marked sensitive is kept out of the keyboard's clipboard history, so those two cannot be separated. The paste fallback therefore uses a sensitive clip, and that clip is cleared if the text then lands. Only a field that is still unchanged after the fallbacks is copied as a normal clip, which puts it in clipboard history and raises the copy toast.
 
-The write is checked by reading the field back, through the accessibility text and through the text before the input connection's caret. A match is case-insensitive. The paths, in order:
+The write is checked by reading the field back, through the accessibility text and through the text before the input connection's caret. The text has landed when the field holds it more times than before the write, compared case-insensitively: a short segment is usually in the field already, so holding it proves nothing. The paths, in order:
 
 1. `commitText` on `AccessibilityService.getInputMethod()`'s current connection. Once focus has left the take's field this path is skipped, because the connection then belongs to the field focus moved to.
 2. Paste, when that read-back shows the field unchanged, or when there was no connection to commit through. The clip it pastes is marked sensitive. Paste is skipped when that clip could not be set, so some other clip is not pasted in its place.
