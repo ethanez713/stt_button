@@ -289,3 +289,51 @@ class TestPhoneUsage:
         report = phone_usage.summarize(lines)
         assert "cue matches: actually 2, make it 1" in report
         assert "edited afterwards: 1 of 2" in report
+
+
+class TestPhoneReplay:
+    def test_only_takes_with_audio_are_listed_with_their_raw_text_and_what_ended_them(self, tmp_path):
+        from experiments import phone_replay
+        (tmp_path / "kept.pcm").write_bytes(b"")
+        (tmp_path / "empty.pcm").write_bytes(b"")
+        lines = [
+            {"event": "start", "id": "pruned", "ts": "t0"}, {"event": "insert", "id": "pruned", "raw": "gone"},
+            {"event": "start", "id": "kept", "ts": "t1"},
+            {"event": "insert", "id": "kept", "raw": "Send it to Paris.", "trigger": "silence"},
+            {"event": "edit", "id": "kept", "text_after": "Send it to Paris."},
+            {"event": "start", "id": "empty", "ts": "t2"},
+            {"event": "discard", "id": "empty", "reason": "empty", "trigger": "stop"},
+            {"event": "exit", "reason": "USER_REQUESTED"},
+        ]
+        assert phone_replay.logged_takes(lines, tmp_path) == [
+            {"id": "kept", "ts": "t1", "ended": "insert:silence", "raw": "Send it to Paris."},
+            {"id": "empty", "ts": "t2", "ended": "discard:stop", "raw": ""},
+        ]
+
+    def test_a_word_diff_ignores_case_and_punctuation_and_names_each_side(self):
+        from experiments import phone_replay
+        assert phone_replay.word_diff("Putting it in the curring house chores.", "putting it in the recurring house chores") == [
+            ("curring", "recurring")]
+        assert phone_replay.word_diff("see the full shopping", "See the full shopping list") == [("", "list")]
+        assert phone_replay.word_diff("Same words, here.", "same words here") == []
+
+    def test_pcm_is_read_as_floats_and_an_odd_trailing_byte_is_dropped(self, tmp_path):
+        import numpy as np
+
+        from experiments import phone_replay
+        path = tmp_path / "take.pcm"
+        path.write_bytes(np.array([0, 16384, -32768], dtype="<i2").tobytes() + b"\x01")
+        assert phone_replay.read_pcm(path).tolist() == [0.0, 0.5, -1.0]
+
+    def test_a_replay_feeds_the_take_in_pieces_and_returns_the_recognized_text(self):
+        import numpy as np
+
+        from experiments import phone_replay
+        from stt_button import config
+
+        class Recognizer:
+            def recognize(self, samples):
+                return f"{len(samples)} samples"
+
+        assert phone_replay.replay(Recognizer(), np.zeros(4000, dtype=np.float32), config.load()) == "4000 samples"
+
