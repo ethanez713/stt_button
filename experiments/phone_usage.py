@@ -106,17 +106,18 @@ def totals(lines: list[dict], capacity_mah: float) -> list[str]:
 
 
 def warm_split(lines: list[dict]) -> list[str]:
-    """How many takes started with the models kept from the take before, and what a first segment cost either way."""
+    """How many takes started with the models kept from the take before, and what a take's first insert cost either way."""
     warm_by_take = {r["id"]: r["models_warm"] for r in lines if r.get("event") == "start" and r.get("models_warm") is not None}
     if not warm_by_take:
         return []
     out = [f"\nwarm starts: {sum(warm_by_take.values())} of {len(warm_by_take)}"]
-    firsts = [r for r in lines if r.get("event") == "insert" and r.get("segment") == 0 and r.get("id") in warm_by_take
+    # The phone's log also holds takes whose inserts are numbered from 0; only a take's first counts.
+    firsts = [r for r in lines if r.get("event") == "insert" and not r.get("segment") and r.get("id") in warm_by_take
               and r.get("cpu_ms") is not None and not r.get("plugged")]
     for warm, label in ((True, "warm"), (False, "cold")):
         rows = [r for r in firsts if warm_by_take[r["id"]] == warm]
         per_second = per(rows, "cpu_ms", lambda r: (r.get("audio_ms") or 0) / 1000)
-        out.append(f"  first segment cpu_ms per audio second [{label}]: {fmt(median(per_second))} over {len(rows)}")
+        out.append(f"  first insert cpu_ms per audio second [{label}]: {fmt(median(per_second))} over {len(rows)}")
     return out
 
 

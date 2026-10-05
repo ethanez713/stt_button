@@ -270,11 +270,11 @@ class TestPhoneUsage:
         assert "cost sampler's own share of cpu_ms: 1.0%" in report
         assert "outside takes: 5.0 CPU s per hour and 200 accessibility events per hour, over 2.0 h" in report
 
-    def test_first_segments_are_split_by_whether_the_models_were_warm(self):
+    def test_first_inserts_are_split_by_whether_the_models_were_warm(self):
         from experiments import phone_usage
         lines = [
             {"event": "start", "id": "t1", "models_warm": False}, self.insert(1, segment=0, cpu_ms=60_000),
-            {"event": "start", "id": "t2", "models_warm": True}, self.insert(2, segment=0, cpu_ms=30_000),
+            {"event": "start", "id": "t2", "models_warm": True}, self.insert(2, cpu_ms=30_000),
             {"event": "start", "id": "t3", "models_warm": True}, self.insert(3, segment=1, cpu_ms=1),
         ]
         report = phone_usage.summarize(lines)
