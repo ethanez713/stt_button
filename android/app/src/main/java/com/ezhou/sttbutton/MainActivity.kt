@@ -2,6 +2,8 @@ package com.ezhou.sttbutton
 
 import android.Manifest
 import android.app.Activity
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.ComponentName
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -10,6 +12,7 @@ import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.provider.Settings
 import android.text.InputType
+import android.util.Log
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
@@ -25,6 +28,11 @@ import android.widget.RadioGroup
 import android.widget.ScrollView
 import android.widget.SeekBar
 import android.widget.TextView
+import java.io.File
+import java.io.IOException
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.time.format.FormatStyle
 
 /** Setup status and the button's style. The style is read by [Overlay] from the same preferences as it changes. */
 class MainActivity : Activity() {
@@ -43,6 +51,7 @@ class MainActivity : Activity() {
     private lateinit var gapSlider: SeekBar
     private lateinit var idleSwatches: LinearLayout
     private lateinit var recordingSwatches: LinearLayout
+    private lateinit var recentList: LinearLayout
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -64,6 +73,9 @@ class MainActivity : Activity() {
         content.addView(header(R.string.section_about))
         content.addView(text(getString(R.string.restricted_settings_hint), 13f))
         content.addView(text(getString(R.string.licenses), 12f))
+        content.addView(header(R.string.section_recent))
+        recentList = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        content.addView(recentList)
         setContentView(scroll)
         restyle()
     }
@@ -148,6 +160,48 @@ class MainActivity : Activity() {
         serviceStatus.setText(if (serviceEnabled()) R.string.service_on else R.string.service_off)
         refreshMicrophone()
         unhide.isEnabled = Overlay.isHidden(this)
+        showRecent()
+    }
+
+    private fun showRecent() {
+        recentList.removeAllViews()
+        val takes = try {
+            RecentTakes.read(File(filesDir, "logs/edits.jsonl"))
+        } catch (e: IOException) {
+            Log.w(DictationService.TAG, "could not read the edit log", e)
+            emptyList()
+        }
+        if (takes.isEmpty()) {
+            recentList.addView(text(getString(R.string.recent_empty), 15f))
+            return
+        }
+        for (take in takes) recentList.addView(recentRow(take))
+    }
+
+    private fun recentRow(take: RecentTake) = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
+        minimumHeight = dp(48)
+        setPadding(0, dp(6), 0, dp(6))
+        isClickable = true
+        isFocusable = true
+        val ripple = TypedValue()
+        theme.resolveAttribute(android.R.attr.selectableItemBackground, ripple, true)
+        setBackgroundResource(ripple.resourceId)
+        layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+        addView(text(getString(R.string.recent_meta, formatWhen(take), take.pkg), 13f))
+        addView(text(take.text, 15f))
+        setOnClickListener { copyDictation(take.text) }
+    }
+
+    private fun formatWhen(take: RecentTake): String =
+        DateTimeFormatter.ofLocalizedDateTime(FormatStyle.SHORT).format(take.at.atZone(ZoneId.systemDefault()))
+
+    private fun copyDictation(value: String) {
+        try {
+            getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("dictation", value))
+        } catch (e: RuntimeException) {
+            Log.w(DictationService.TAG, "could not copy the dictation", e)
+        }
     }
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) = refreshMicrophone()

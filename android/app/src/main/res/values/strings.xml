@@ -30,4 +30,7 @@
     <string name="idle_color">Resting color</string>
     <string name="recording_color">Recording color</string>
     <string name="preview_label">Resting and recording</string>
+    <string name="section_recent">Recent dictations</string>
+    <string name="recent_empty">No dictations yet</string>
+    <string name="recent_meta">%1$s · %2$s</string>
 </resources>

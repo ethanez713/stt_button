@@ -337,3 +337,89 @@ class TestPhoneReplay:
 
         assert phone_replay.replay(Recognizer(), np.zeros(4000, dtype=np.float32), config.load()) == "4000 samples"
 
+
+class TestTakeTails:
+    @staticmethod
+    def samples(*parts, extra=0):
+        import numpy as np
+
+        from stt_button import asr
+
+        win = int(asr.CUT_WINDOW_S * asr.SAMPLE_RATE)
+        chunks = [np.full(win * n, 8000 if kind == "tone" else 0, dtype="<i2") for kind, n in parts]
+        if extra:
+            chunks.append(np.full(extra, 8000, dtype="<i2"))
+        return np.concatenate(chunks)
+
+    def test_only_the_last_full_window_counts_and_it_uses_the_slicers_threshold(self):
+        from experiments import take_tails
+
+        assert take_tails.ends_in_speech(self.samples(("silence", 5), ("tone", 1)))
+        # Earlier windows are speech; the stop landed in the silence after them.
+        assert not take_tails.ends_in_speech(self.samples(("silence", 5), ("tone", 2), ("silence", 3)))
+        # A flat take never clears its own floor, so a fixed loudness threshold would disagree.
+        assert not take_tails.ends_in_speech(self.samples(("tone", 20)))
+        # A loud tail shorter than one window is not a window.
+        assert not take_tails.ends_in_speech(self.samples(("silence", 3), extra=800))
+        assert not take_tails.ends_in_speech(self.samples(("tone", 1))[:100])
+
+    def test_the_table_joins_pcm_to_the_log_and_says_when_stop_takes_are_few(self, tmp_path):
+        import json
+
+        from experiments import take_tails
+
+        takes = tmp_path / "takes"
+        takes.mkdir()
+        (takes / "loud-stop.pcm").write_bytes(self.samples(("silence", 5), ("tone", 1)).tobytes())
+        (takes / "quiet-stop.pcm").write_bytes(self.samples(("silence", 5), ("tone", 1), ("silence", 2)).tobytes())
+        (takes / "walked.pcm").write_bytes(self.samples(("silence", 4)).tobytes())
+        (takes / "start-only.pcm").write_bytes(self.samples(("silence", 2)).tobytes())
+        (takes / "orphan.pcm").write_bytes(self.samples(("silence", 3), ("tone", 1)).tobytes() + b"\xff")
+        lines = [
+            {"event": "start", "id": "loud-stop"},
+            {"event": "insert", "id": "loud-stop", "trigger": "stop", "cleaned": "hi"},
+            {"event": "clipboard", "id": "quiet-stop", "trigger": "stop", "text": "held"},
+            {"event": "discard", "id": "walked", "trigger": "silence", "reason": "empty"},
+            {"event": "start", "id": "start-only"},
+            {"event": "insert", "id": "no-audio", "trigger": "stop", "cleaned": "gone"},
+        ]
+        (tmp_path / "edits.jsonl").write_text("".join(json.dumps(line) + "\n" for line in lines))
+
+        assert take_tails.report(tmp_path) == (
+            "stop: 2 takes, 1 ending in speech\n"
+            "silence: 1 takes, 0 ending in speech\n"
+            "null: 1 takes, 0 ending in speech\n"
+            "takes without a log line: 1\n"
+            "fewer than 20 stop-triggered takes (2)\n"
+        )
+
+    def test_twenty_stop_takes_do_not_say_the_count_is_short(self, tmp_path):
+        import json
+
+        from experiments import take_tails
+
+        takes = tmp_path / "takes"
+        takes.mkdir()
+        pcm = self.samples(("silence", 1)).tobytes()
+        lines = []
+        for i in range(20):
+            (takes / f"t{i:02d}.pcm").write_bytes(pcm)
+            lines.append({"event": "insert", "id": f"t{i:02d}", "trigger": "stop", "cleaned": "x"})
+        (takes / "mic.pcm").write_bytes(pcm)
+        lines.append({"event": "clipboard", "id": "mic", "trigger": "mic", "text": "x"})
+        (tmp_path / "edits.jsonl").write_text("".join(json.dumps(line) + "\n" for line in lines))
+
+        text = take_tails.report(tmp_path)
+        assert "stop: 20 takes, 0 ending in speech" in text
+        assert "mic: 1 takes, 0 ending in speech" in text
+        assert "fewer than 20" not in text
+        assert "takes without a log line: 0" in text
+
+    def test_a_missing_directory_says_there_are_not_enough_stop_takes(self, tmp_path):
+        from experiments import take_tails
+
+        assert take_tails.report(tmp_path / "absent") == (
+            "takes without a log line: 0\n"
+            "fewer than 20 stop-triggered takes (0)\n"
+        )
+
