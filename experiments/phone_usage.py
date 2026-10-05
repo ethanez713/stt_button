@@ -38,13 +38,16 @@ def per(rows: list[dict], numerator: str, denominator) -> list[float]:
     return values
 
 
+COSTED_EVENTS = ("insert", "discard", "clipboard", "end")
+
+
 def died_takes(lines: list[dict]) -> list[tuple[dict, dict]]:
     died, open_start = [], None
     for line in lines:
         event = line.get("event")
         if event == "start":
             open_start = line
-        elif event in ("insert", "discard") and open_start and line.get("id") == open_start["id"]:
+        elif event in COSTED_EVENTS and open_start and line.get("id") == open_start["id"]:
             open_start = None
         elif event == "exit" and open_start:
             died.append((open_start, line))
@@ -58,9 +61,6 @@ def edited_share(lines: list[dict]) -> tuple[int, int]:
     inserts = [line for line in lines if line.get("event") == "insert" and line["id"] in after]
     edited = sum(line["cleaned"].strip() not in after[line["id"]] for line in inserts)
     return edited, len(inserts)
-
-
-COSTED_EVENTS = ("insert", "discard", "clipboard")
 
 
 def outside_takes(lines: list[dict]) -> tuple[float, float, float]:
@@ -89,7 +89,7 @@ def totals(lines: list[dict], capacity_mah: float) -> list[str]:
         return []
     mah = lambda rows: sum(r["charge_uah"] for r in rows) / 1000  # noqa: E731
     cpu_s = lambda rows: sum(r.get("cpu_ms") or 0 for r in rows) / 1000  # noqa: E731
-    unplaced = [r for r in costed if r["event"] != "insert"]
+    unplaced = [r for r in costed if r["event"] in ("discard", "clipboard")]
     days = len({r["ts"][:10] for r in costed if r.get("ts")}) or 1
     out = [f"\nunplugged total: {fmt(mah(costed), 1)} mAh and {fmt(cpu_s(costed))} CPU s over {days} days "
            f"({fmt(mah(costed) / days / capacity_mah * 100, 2)}% of the battery per day)",

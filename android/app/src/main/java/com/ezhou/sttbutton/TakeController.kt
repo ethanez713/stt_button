@@ -181,10 +181,11 @@ class TakeController(private val service: DictationService, private val overlay:
         service.recheck()
     }
 
-    fun discard(reason: DiscardReason) {
+    /** [trigger] is the stop that found nothing to insert, or null when no stop led here. */
+    fun discard(reason: DiscardReason, trigger: String? = null) {
         val current = run ?: return
         if (!current.take.discard(reason)) return
-        log.write("discard", current.take.id, "reason" to reason.logName, *current.cost.lap().toTypedArray())
+        log.write("discard", current.take.id, "reason" to reason.logName, "trigger" to trigger, *current.cost.lap().toTypedArray())
         current.aborted = true
         current.stopRequested = true
         handler.removeCallbacks(capRunnable)
@@ -234,7 +235,11 @@ class TakeController(private val service: DictationService, private val overlay:
         if (text.isBlank()) {
             if (!last) return
             if (current.unplaced.isNotEmpty()) copyUnplaced(current, result, trigger)
-            else if (take.finishWithoutText()) release(current) else discard(DiscardReason.EMPTY)
+            else if (take.finishWithoutText()) {
+                log.write("end", take.id, "trigger" to trigger, "caret_source" to current.caretSource,
+                    "audio_ms" to result.audioMs, *current.cost.lap().toTypedArray())
+                release(current)
+            } else discard(DiscardReason.EMPTY, trigger)
             return
         }
         noteFocus(current)

@@ -229,6 +229,29 @@ class TestPhoneUsage:
         report = phone_usage.summarize(lines)
         assert "take b died: LOW_MEMORY" in report and "process exits: LOW_MEMORY 1" in report
 
+    def test_a_take_that_ended_on_the_clipboard_or_without_text_did_not_die(self):
+        from experiments import phone_usage
+        lines = [
+            {"event": "start", "id": "a"}, {"event": "clipboard", "id": "a", "reason": "no_field"},
+            {"event": "exit", "reason": "USER_REQUESTED"},
+            {"event": "start", "id": "b"}, self.insert("b", id="b"), {"event": "end", "id": "b", "trigger": "caret"},
+            {"event": "exit", "reason": "USER_REQUESTED"},
+        ]
+        assert phone_usage.died_takes(lines) == []
+
+    def test_an_end_line_costs_battery_without_counting_as_a_discarded_take(self):
+        from experiments import phone_usage
+        day = {"ts": "2026-10-02T10:00:00Z"}
+        lines = [
+            {**self.insert(1), **day},
+            {"event": "end", "id": "t1", **day, "trigger": "caret", "charge_uah": 5_000, "cpu_ms": 4_000, "plugged": False},
+        ]
+        with_end = phone_usage.summarize(lines)
+        without = phone_usage.summarize(lines[:1])
+        assert "discarded or clipboard takes: 0, 0.0 mAh, 0 CPU s" in with_end
+        mah = lambda report: float(report.split("unplugged total: ")[1].split(" mAh")[0])  # noqa: E731
+        assert mah(with_end) == mah(without) + 5.0
+
     def test_totals_count_discarded_takes_and_cpu_outside_takes_within_one_process(self):
         from experiments import phone_usage
         start = lambda i, cpu, age_h, events: {  # noqa: E731
