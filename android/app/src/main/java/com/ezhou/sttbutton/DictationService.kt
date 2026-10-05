@@ -1,6 +1,7 @@
 package com.ezhou.sttbutton
 
 import android.accessibilityservice.AccessibilityService
+import android.accessibilityservice.InputMethod
 import android.database.ContentObserver
 import android.graphics.Rect
 import android.os.Handler
@@ -61,7 +62,9 @@ class DictationService : AccessibilityService() {
         reconcile()
     }
 
-    /** `adb shell setprop log.tag.SttTrace DEBUG` logs what each event found: the take, the focused field and every window. */
+    override fun onCreateInputMethod(): InputMethod = SessionInputMethod(this)
+
+    /** `adb shell setprop log.tag.SttTrace DEBUG` logs what each event found: the take, the focused field, every window, and the input session beside the field placement read. */
     private fun trace(event: AccessibilityEvent) {
         if (!Log.isLoggable(TRACE, Log.DEBUG)) return
         val wins = windows.joinToString("; ") { w ->
@@ -77,10 +80,19 @@ class DictationService : AccessibilityService() {
             "$type#${w.id} ${root?.packageName ?: "noroot"} ${Rect().also(w::getBoundsInScreen).toShortString()}" +
                 "${if (w.isFocused) " F" else ""}${if (w.isActive) " A" else ""}$mic"
         }
-        val focus = findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
-            ?.let { "${it.packageName}/${it.className} id=${it.viewIdResourceName} editable=${it.isEditable} focused=${it.isFocused} vis=${it.isVisibleToUser} win#${it.windowId}" }
+        val node = findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
+        val focus = node?.let { "${it.packageName}/${it.className} id=${it.viewIdResourceName} editable=${it.isEditable} focused=${it.isFocused} vis=${it.isVisibleToUser} win#${it.windowId}" }
+        val session = (inputMethod as? SessionInputMethod)?.snapshot() ?: InputSession.EMPTY
+        // The field place() reads: the focused node, otherwise the editor standing in for one.
+        val agrees = if (node != null) {
+            session.agrees(node.packageName?.toString(), node.isPassword, node.inputType)
+        } else {
+            val editor = unreadField()
+            session.agrees(editor?.packageName, false, editor?.inputType ?: 0)
+        }
         Log.d(TRACE, "ev=${AccessibilityEvent.eventTypeToString(event.eventType)} changes=0x${event.windowChanges.toString(16)} pkg=${event.packageName}" +
-            " | take=${controller.stateName} | focus=${focus ?: "none"} | wins=[$wins]")
+            " | take=${controller.stateName} | focus=${focus ?: "none"} | wins=[$wins]" +
+            " | session pkg=${session.packageName} inputType=0x${session.inputType.toString(16)} starts=${session.starts} finishes=${session.finishes} agrees=$agrees")
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent) {
