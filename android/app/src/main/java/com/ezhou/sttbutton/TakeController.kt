@@ -48,6 +48,11 @@ class TakeController(private val service: DictationService, private val overlay:
         if (current.swap.poll(SystemClock.uptimeMillis())) returnKeyboard(current)
     }
 
+    private val keyboardStopCheck = Runnable {
+        val current = run ?: return@Runnable
+        if (current.swap.keyboardStopDue(SystemClock.uptimeMillis())) stop(current, TRIGGER_KEYBOARD)
+    }
+
     /** True while the take's own keyboard is up or coming, so a keyboard setting change is not the user leaving English. */
     val swapHoldsTake: Boolean get() = run?.swap?.holdsTake == true
 
@@ -86,6 +91,10 @@ class TakeController(private val service: DictationService, private val overlay:
      */
     fun onButtonShown(shown: Boolean) {
         handler.removeCallbacks(hiddenCheck)
+        if (run?.swap?.holdsTake == true) {
+            hiddenWatch.stopInMs(shown = true, recording = false, SystemClock.uptimeMillis())
+            return
+        }
         if (!shown) bubble.hide()
         val current = run?.takeIf { it.take.state == TakeState.OPEN }
         val wait = hiddenWatch.stopInMs(shown, current != null, SystemClock.uptimeMillis())
@@ -163,9 +172,17 @@ class TakeController(private val service: DictationService, private val overlay:
         ImeLink.busy = false
         ImeLink.stopKey = StopKeyPlacement.inPanel(overlay.lastShown, overlay.screen().bottom, panelHeightPx())
         ImeLink.onStop = { run?.takeIf { it === current }?.let(::stop) }
+        ImeLink.onViewFinish = { onViewFinished(current) }
+        ImeLink.onExcludedField = { if (run === current && current.swap.holdsTake) stop(current, TRIGGER_KEYBOARD) }
         current.swap = service.swapper.begin(SystemClock.uptimeMillis())
         ImeLink.swap = current.swap
         if (current.swap.phase == SwapPhase.PENDING) handler.postDelayed(swapCheck, SwapState.PENDING_TIMEOUT_MS)
+    }
+
+    private fun onViewFinished(current: Run) {
+        if (run === current && current.swap.onViewFinish(SystemClock.uptimeMillis())) {
+            handler.postDelayed(keyboardStopCheck, SwapState.KEYBOARD_STOP_MS)
+        }
     }
 
     private fun panelHeightPx(): Int =
@@ -314,8 +331,11 @@ class TakeController(private val service: DictationService, private val overlay:
         bubble.hide()
         if (run === current) run = null
         handler.removeCallbacks(swapCheck)
+        handler.removeCallbacks(keyboardStopCheck)
         ImeLink.swap = null
         ImeLink.onStop = null
+        ImeLink.onViewFinish = null
+        ImeLink.onExcludedField = null
         ImeLink.busy = false
         returnKeyboard(current)
         applyButtonMode()

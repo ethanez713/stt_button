@@ -77,4 +77,28 @@ class SwapStateTest {
         val timedOut = SwapState.started(true, 0).also { it.poll(1_000) }
         assertFalse(timedOut.holdsTake)
     }
+
+    @Test
+    fun given_live_when_theViewFinishes_then_theKeyboardStopIsDueAt700AndNotAt699() {
+        val swap = SwapState.started(true, 0).also { it.onViewStart(10) }
+        assertTrue(swap.onViewFinish(5_000))
+        assertFalse(swap.keyboardStopDue(5_699))
+        assertTrue(swap.keyboardStopDue(5_700))
+    }
+
+    @Test
+    fun given_anArmedStop_when_theViewStartsInsideTheWindow_then_itIsCancelled() {
+        val swap = SwapState.started(true, 0).also { it.onViewStart(10) }
+        swap.onViewFinish(5_000)
+        swap.onViewStart(5_400)
+        assertFalse(swap.keyboardStopDue(6_000))
+    }
+
+    @Test
+    fun given_notLive_when_theViewFinishes_then_nothingIsArmed() {
+        val pending = SwapState.started(true, 0)
+        assertFalse(pending.onViewFinish(100))
+        assertFalse(pending.keyboardStopDue(10_000))
+        assertFalse(SwapState.off().onViewFinish(0))
+    }
 }

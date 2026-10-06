@@ -24,6 +24,12 @@ object ImeLink {
     /** Put the user's keyboard back; set by the service, called by the keyboard when it is up with no take to hold it. */
     @Volatile var onStranded: (() -> Unit)? = null
 
+    /** Called on the main thread when the keyboard's view closes. */
+    @Volatile var onViewFinish: (() -> Unit)? = null
+
+    /** Called on the main thread when the keyboard attaches to a field the button would not show on. */
+    @Volatile var onExcludedField: (() -> Unit)? = null
+
     /** True when no keyboard could be returned to, so the panel offers the system's keyboard picker. */
     @Volatile var stranded = false
 

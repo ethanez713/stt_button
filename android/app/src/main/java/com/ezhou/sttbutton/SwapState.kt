@@ -12,6 +12,7 @@ class SwapState private constructor(phase: SwapPhase, private val startedAtMs: L
     var phase = phase
         private set
     private var returned = false
+    private var viewFinishedAtMs: Long? = null
 
     /** The default keyboard was changed by this take and not yet put back. */
     val returnOwed: Boolean get() = switched && !returned
@@ -26,8 +27,19 @@ class SwapState private constructor(phase: SwapPhase, private val startedAtMs: L
         return true
     }
 
+    /** Arms the stop that follows the keyboard's view closing; true when it was armed. */
+    fun onViewFinish(nowMs: Long): Boolean {
+        if (phase != SwapPhase.LIVE) return false
+        viewFinishedAtMs = nowMs
+        return true
+    }
+
+    /** Whether the view has stayed closed for [KEYBOARD_STOP_MS]. */
+    fun keyboardStopDue(nowMs: Long): Boolean = viewFinishedAtMs?.let { nowMs - it >= KEYBOARD_STOP_MS } == true
+
     fun onViewStart(nowMs: Long): ViewStart {
         poll(nowMs)
+        viewFinishedAtMs = null
         return when (phase) {
             SwapPhase.PENDING -> ViewStart.LIVE.also { phase = SwapPhase.LIVE }
             SwapPhase.LIVE -> ViewStart.STAYED
@@ -41,6 +53,7 @@ class SwapState private constructor(phase: SwapPhase, private val startedAtMs: L
 
     companion object {
         const val PENDING_TIMEOUT_MS = 1_000L
+        const val KEYBOARD_STOP_MS = 700L
 
         fun off() = SwapState(SwapPhase.OFF, 0, switched = false)
 

@@ -39,6 +39,16 @@ class DictationIme : InputMethodService() {
         refreshPanel()
     }
 
+    override fun onFinishInputView(finishingInput: Boolean) {
+        super.onFinishInputView(finishingInput)
+        ImeLink.onViewFinish?.invoke()
+    }
+
+    override fun onStartInput(attribute: EditorInfo, restarting: Boolean) {
+        super.onStartInput(attribute, restarting)
+        if (FieldPolicy.exclusion(password = false, attribute.inputType) != null) ImeLink.onExcludedField?.invoke()
+    }
+
     fun refreshPanel() {
         panel?.requestLayout()
         panel?.invalidate()
