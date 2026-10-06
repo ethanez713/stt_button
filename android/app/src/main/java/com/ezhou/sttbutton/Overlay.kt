@@ -47,6 +47,10 @@ class Overlay(
     val isHidden: Boolean get() = isHidden(context)
     val isShowing: Boolean get() = view != null
 
+    /** Where the button was last drawn, in screen coordinates; it stays after the button is removed. */
+    var lastShown: Bounds? = null
+        private set
+
     /** Where the microphone last settled with this screen size, or null before the first settle. */
     fun rememberedBounds(): Bounds? =
         prefs.getString(settledKey(), null)?.split(",")?.mapNotNull(String::toIntOrNull)
@@ -65,6 +69,7 @@ class Overlay(
         params.height = styled.bottom - styled.top
         params.x = dragged?.x ?: styled.left
         params.y = dragged?.y ?: styled.top
+        lastShown = Bounds(params.x, params.y, params.x + params.width, params.y + params.height)
         val current = view
         if (current == null) {
             // Zones first, so they sit under the button. Adding or re-adding a window during a drag

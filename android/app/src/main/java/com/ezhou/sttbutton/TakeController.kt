@@ -43,12 +43,20 @@ class TakeController(private val service: DictationService, private val overlay:
     private val hiddenCheck = Runnable { service.recheck() }
     private var failedUntilMs = 0L
     private val endFlash = Runnable { applyButtonMode() }
+    private val swapCheck = Runnable {
+        val current = run ?: return@Runnable
+        if (current.swap.poll(SystemClock.uptimeMillis())) returnKeyboard(current)
+    }
+
+    /** True while the take's own keyboard is up or coming, so a keyboard setting change is not the user leaving English. */
+    val swapHoldsTake: Boolean get() = run?.swap?.holdsTake == true
 
     private class Run(
         val take: Take, val pcm: File, val models: Models, val live: LiveTake, val recorder: Recorder,
         val cost: TakeCost, val sampler: CostSampler, val bubbleText: BubbleText, val preview: PreviewRecognizer,
         val level: AudioLevel,
     ) {
+        var swap: SwapState = SwapState.off()
         @Volatile var stopRequested = false
         @Volatile var aborted = false
         @Volatile var stopTrigger = TRIGGER_STOP
@@ -142,11 +150,32 @@ class TakeController(private val service: DictationService, private val overlay:
         current.field = field
         pruneTakeAudio(pcm.name)
         run = current
+        startSwap(current)
         Log.i(tag, "take start pkg=$pkg")
         bubble.show()
         thread(name = "take-worker") { work(current) }
         handler.postDelayed(capRunnable, cfg.takeCapS * 1000L)
         applyButtonMode()
+    }
+
+    private fun startSwap(current: Run) {
+        ImeLink.stranded = false
+        ImeLink.busy = false
+        ImeLink.stopKey = StopKeyPlacement.inPanel(overlay.lastShown, overlay.screen().bottom, panelHeightPx())
+        ImeLink.onStop = { run?.takeIf { it === current }?.let(::stop) }
+        current.swap = service.swapper.begin(SystemClock.uptimeMillis())
+        ImeLink.swap = current.swap
+        if (current.swap.phase == SwapPhase.PENDING) handler.postDelayed(swapCheck, SwapState.PENDING_TIMEOUT_MS)
+    }
+
+    private fun panelHeightPx(): Int =
+        ImeLink.panelHeightPx.takeIf { it > 0 } ?: (TakePanel.DEFAULT_HEIGHT_DP * service.resources.displayMetrics.density).toInt()
+
+    /** Puts the user's keyboard back, once per take. */
+    private fun returnKeyboard(current: Run): String? {
+        if (!current.swap.returnOwed) return null
+        current.swap.markReturned()
+        return service.swapper.returnKeyboard()
     }
 
     private fun stop(current: Run, trigger: String = TRIGGER_STOP) {
@@ -156,6 +185,8 @@ class TakeController(private val service: DictationService, private val overlay:
         handler.removeCallbacks(capRunnable)
         if (trigger == TRIGGER_MIC) flashFailed() else applyButtonMode()
         current.stoppedAtMs = SystemClock.elapsedRealtime()
+        ImeLink.busy = true
+        ImeLink.current?.refreshPanel()
         current.recorder.stop()
         current.stopRequested = true
         if (trigger == TRIGGER_KEYBOARD || trigger == TRIGGER_PACKAGE) bubble.hide()
@@ -282,6 +313,11 @@ class TakeController(private val service: DictationService, private val overlay:
         current.sampler.stop()
         bubble.hide()
         if (run === current) run = null
+        handler.removeCallbacks(swapCheck)
+        ImeLink.swap = null
+        ImeLink.onStop = null
+        ImeLink.busy = false
+        returnKeyboard(current)
         applyButtonMode()
         service.stopService(Intent(service, RecordingService::class.java))
         service.recheck()

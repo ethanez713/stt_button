@@ -23,6 +23,8 @@ class DictationService : AccessibilityService() {
     private lateinit var overlay: Overlay
     private lateinit var bubble: BubbleOverlay
     private lateinit var controller: TakeController
+    lateinit var swapper: ImeSwapper
+        private set
     /** true English, false another language, null unresolved. */
     private var english: Boolean? = null
     private var lastState: String? = null
@@ -39,7 +41,7 @@ class DictationService : AccessibilityService() {
     private val imeObserver = object : ContentObserver(Handler(Looper.getMainLooper())) {
         override fun onChange(selfChange: Boolean) {
             english = resolveEnglish()
-            if (english == false && ::controller.isInitialized) controller.discard(DiscardReason.LANGUAGE)
+            if (english == false && ::controller.isInitialized && !controller.swapHoldsTake) controller.discard(DiscardReason.LANGUAGE)
             reconcile()
         }
     }
@@ -53,6 +55,11 @@ class DictationService : AccessibilityService() {
         bubble = BubbleOverlay(this)
         controller = TakeController(this, overlay, bubble).also {
             it.logProcessExits()
+        }
+        swapper = ImeSwapper(this).also {
+            it.enableOnConnect()
+            ImeLink.onStranded = { it.returnKeyboard() }
+            it.returnIfStranded()
         }
         for (key in listOf(Settings.Secure.SELECTED_INPUT_METHOD_SUBTYPE, Settings.Secure.DEFAULT_INPUT_METHOD)) {
             contentResolver.registerContentObserver(Settings.Secure.getUriFor(key), false, imeObserver)
@@ -126,6 +133,7 @@ class DictationService : AccessibilityService() {
     }
 
     override fun onDestroy() {
+        ImeLink.onStranded = null
         contentResolver.unregisterContentObserver(imeObserver)
         handler.removeCallbacks(reread)
         if (::controller.isInitialized) controller.shutdown()
@@ -142,12 +150,9 @@ class DictationService : AccessibilityService() {
             Log.i(TAG, "subtype unresolved: value=$value ime=$imeId imeVisible=${info != null}")
             return null
         }
-        val subtypes = (0 until info.subtypeCount).map(info::getSubtypeAt) +
-            imm.getEnabledInputMethodSubtypeList(info, true)
-        // hashCode() is the explicit subtype id when one was set, and the settings value is that same number.
-        val subtype = subtypes.firstOrNull { it.hashCode() == value }
+        val subtype = ImeSubtypes.find(imm, imeId, value)
         if (subtype == null) {
-            Log.i(TAG, "subtype $value not among ${subtypes.size} subtypes of $imeId")
+            Log.i(TAG, "subtype $value not among the subtypes of $imeId")
             return null
         }
         @Suppress("DEPRECATION")
@@ -178,6 +183,7 @@ class DictationService : AccessibilityService() {
         val motion = slide.read(imeBounds.top, imeBounds.bottom, overlay.screen().bottom)
         if (motion == KeyboardMotion.LEAVING) return removed("keyboard sliding out")
         bubble.setAnchor(imeBounds)
+        if (ime.root?.packageName == packageName) return removed("own keyboard")
         val field = findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
         val fieldShape = if (field != null) {
             if (field.packageName == packageName && field.viewIdResourceName != TRY_FIELD_ID) return removed("own app")

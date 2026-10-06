@@ -1,6 +1,5 @@
 package com.ezhou.sttbutton
 
-import android.graphics.Rect
 import java.lang.ref.WeakReference
 
 /**
@@ -11,13 +10,22 @@ object ImeLink {
     private var ime = WeakReference<DictationIme>(null)
 
     /** Where the stop key sits in the panel, in the panel's own coordinates; null puts it at the top-right corner. */
-    @Volatile var stopKey: Rect? = null
+    @Volatile var stopKey: Bounds? = null
 
     /** The panel's height in px, or 0 for the default. */
     @Volatile var panelHeightPx = 0
 
     /** Called on the main thread when the stop key is tapped. */
     @Volatile var onStop: (() -> Unit)? = null
+
+    /** The open take's swap, or null between takes; the keyboard's callbacks ask it what a view start means. */
+    @Volatile var swap: SwapState? = null
+
+    /** Put the user's keyboard back; set by the service, called by the keyboard when it is up with no take to hold it. */
+    @Volatile var onStranded: (() -> Unit)? = null
+
+    /** True when no keyboard could be returned to, so the panel offers the system's keyboard picker. */
+    @Volatile var stranded = false
 
     /** True from the stop until the keyboard returns, so the panel can show the take is finishing. */
     @Volatile var busy = false
