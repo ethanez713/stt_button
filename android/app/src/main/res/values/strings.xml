@@ -33,4 +33,8 @@
     <string name="section_recent">Recent dictations</string>
     <string name="recent_empty">No dictations yet</string>
     <string name="recent_meta">%1$s · %2$s</string>
+    <string name="ime_label">STT Button recording</string>
+    <string name="ime_subtype_label">English (recording panel)</string>
+    <string name="ime_stop">Stop dictation</string>
+    <string name="ime_pick_keyboard">Choose keyboard</string>
 </resources>
