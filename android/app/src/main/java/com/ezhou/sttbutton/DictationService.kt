@@ -36,10 +36,14 @@ class DictationService : AccessibilityService() {
     private val imePrefs by lazy { getSharedPreferences("ime", MODE_PRIVATE) }
     /** Whether this install has ever found Gboard's voice key; until then its absence proves nothing. */
     private var voiceKeySeen = false
+    private var gboardAtRest = false
+    private var gboardProbed = false
+    private var ownImeHeight: Int? = null
 
     // TYPE_WINDOWS_CHANGED does not fire for a globe or space-bar language switch; this does.
     private val imeObserver = object : ContentObserver(Handler(Looper.getMainLooper())) {
         override fun onChange(selfChange: Boolean) {
+            if (::swapper.isInitialized) swapper.noteDefaultChanged()
             english = resolveEnglish()
             if (english == false && ::controller.isInitialized && !controller.swapHoldsTake) controller.discard(DiscardReason.LANGUAGE)
             reconcile()
@@ -107,6 +111,37 @@ class DictationService : AccessibilityService() {
         trace(event)
         controller.onAccessibilityEvent(event)
         if (event.eventType and FIELD_EVENTS == 0) reconcile()
+        if (event.eventType == AccessibilityEvent.TYPE_WINDOWS_CHANGED) probeGboard()
+    }
+
+    fun a11yConnection(): Boolean = inputMethod?.currentInputConnection != null
+
+    /** The height Gboard's window had at rest on this screen, or null before one was seen. */
+    fun rememberedImeHeight(): Int? = imePrefs.getInt(imeHeightKey(), 0).takeIf { it > 0 }
+
+    /** This app's keyboard window's height at rest minus Gboard's, null when either is unknown. */
+    fun imeHeightDelta(): Int? {
+        val own = ownImeHeight ?: return null
+        val gboard = rememberedImeHeight() ?: return null
+        return own - gboard
+    }
+
+    private fun imeHeightKey(): String = overlay.screen().let { "ime_height_${it.width()}x${it.height()}" }
+
+    /** One SttTrace line, once per process, with Gboard's window and every labelled node in it: the evidence for matching its layout. */
+    private fun probeGboard() {
+        if (gboardProbed || !gboardAtRest) return
+        val ime = windows.firstOrNull { it.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD } ?: return
+        val root = ime.root ?: return
+        gboardProbed = true
+        val nodes = ArrayList<String>()
+        fun walk(node: AccessibilityNodeInfo) {
+            val label = node.text?.toString()?.takeIf { it.isNotEmpty() } ?: node.contentDescription?.toString()?.takeIf { it.isNotEmpty() }
+            if (label != null) nodes += "$label@${Rect().also(node::getBoundsInScreen).toShortString()}"
+            for (i in 0 until node.childCount) if (nodes.size < PROBE_MAX_NODES) node.getChild(i)?.let(::walk)
+        }
+        walk(root)
+        Log.i(TRACE, "gboard layout window=${Rect().also(ime::getBoundsInScreen).toShortString()} nodes=${nodes.size} [${nodes.joinToString("; ")}]")
     }
 
     /** A take changed state or its button has been away a while; either changes what belongs on screen. */
@@ -183,7 +218,13 @@ class DictationService : AccessibilityService() {
         val motion = slide.read(imeBounds.top, imeBounds.bottom, overlay.screen().bottom)
         if (motion == KeyboardMotion.LEAVING) return removed("keyboard sliding out")
         bubble.setAnchor(imeBounds)
-        if (ime.root?.packageName == packageName) return removed("own keyboard")
+        val imePackage = ime.root?.packageName
+        gboardAtRest = motion == KeyboardMotion.RESTING && imePackage == MicLocator.GBOARD
+        if (motion == KeyboardMotion.RESTING) {
+            if (imePackage == MicLocator.GBOARD) imePrefs.edit().putInt(imeHeightKey(), imeBounds.height()).apply()
+            else if (imePackage == packageName) ownImeHeight = imeBounds.height()
+        }
+        if (imePackage == packageName) return removed("own keyboard")
         val field = findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
         val fieldShape = if (field != null) {
             if (field.packageName == packageName && field.viewIdResourceName != TRY_FIELD_ID) return removed("own app")
@@ -213,7 +254,8 @@ class DictationService : AccessibilityService() {
             mic != null -> "shown-on-node $mic"
             else -> "shown-fallback"
         }
-        return "$placement language=${english ?: "unresolved"} $fieldShape"
+        val button = overlay.lastShown?.takeIf { overlay.isShowing }?.let { " button=${it.left},${it.top},${it.right},${it.bottom}" } ?: ""
+        return "$placement$button language=${english ?: "unresolved"} $fieldShape"
     }
 
     /** The editor the keyboard is typing into when its field has no accessibility node, or null when there is none. */
@@ -263,6 +305,7 @@ class DictationService : AccessibilityService() {
         private const val FALLBACK_DP = 48
         private const val TRY_FIELD_ID = "com.ezhou.sttbutton:id/try_field"
         private const val REREAD_MS = 100L
+        private const val PROBE_MAX_NODES = 300
         private const val KEY_VOICE_KEY_SEEN = "voice_key_seen"
         private const val FIELD_EVENTS = AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED
     }

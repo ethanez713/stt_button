@@ -9,6 +9,7 @@ half their audio_ms, are named.
 """
 
 import argparse
+import math
 import statistics
 import sys
 from collections import Counter, defaultdict
@@ -147,6 +148,39 @@ def take_diagnostics(lines: list[dict]) -> list[str]:
     ]
 
 
+def percentile(values: list[float], q: float) -> float | None:
+    if not values:
+        return None
+    ordered = sorted(values)
+    return ordered[max(math.ceil(q * len(ordered)) - 1, 0)]
+
+
+def swap_table(lines: list[dict]) -> list[str]:
+    """How the keyboard swap went: outcomes, timings, and takes that asked for a swap and left no `ime` line."""
+    takes = [r for r in lines if r.get("event") in ("insert", "discard", "clipboard") and r.get("ime_swap")]
+    ime_lines = [r for r in lines if r.get("event") == "ime"]
+    if not takes and not ime_lines:
+        return []
+    swaps = Counter(r["ime_swap"] for r in takes)
+    returns = Counter(r.get("ime_return") for r in ime_lines)
+    swap_ms = [r["ime_swap_ms"] for r in takes if r.get("ime_swap_ms") is not None]
+    return_ms = [r["ime_return_ms"] for r in ime_lines if r.get("ime_return_ms") is not None]
+    timing = lambda label, values: (  # noqa: E731
+        f"  {label}: median {fmt(median(values))} p90 {fmt(percentile(values, 0.9))} over {len(values)}")
+    seen = {r.get("id") for r in ime_lines}
+    unlined = [r["id"] for r in takes if r["ime_swap"] != "off" and r["id"] not in seen]
+    return [
+        f"\nkeyboard swap: {len(takes)} takes",
+        "  ime_swap: " + (", ".join(f"{k} {n}" for k, n in sorted(swaps.items())) or "none"),
+        "  ime_return: " + (", ".join(f"{k} {n}" for k, n in sorted(returns.items(), key=str)) or "none"),
+        timing("ime_swap_ms", swap_ms),
+        timing("ime_return_ms", return_ms),
+        f"  ime_subtype_ok false: {sum(r.get('ime_subtype_ok') is False for r in ime_lines)}",
+        f"  ime_height_delta_px non-zero: {sum(bool(r.get('ime_height_delta_px')) for r in ime_lines)}",
+        "  takes with a swap and no ime line: " + _ids(unlined),
+    ]
+
+
 def summarize(lines: list[dict], capacity_mah: float = 5000) -> str:
     inserts = [line for line in lines if line.get("event") == "insert"]
     unplugged = [r for r in inserts if not r.get("plugged")]
@@ -186,6 +220,7 @@ def summarize(lines: list[dict], capacity_mah: float = 5000) -> str:
     edited, total = edited_share(lines)
     out.append(f"inserts whose text was edited afterwards: {edited} of {total} with an edit line")
     out.extend(take_diagnostics(lines))
+    out.extend(swap_table(lines))
 
     exits = Counter(line.get("reason") for line in lines if line.get("event") == "exit")
     out.append("process exits: " + (", ".join(f"{k} {n}" for k, n in exits.most_common()) or "none"))

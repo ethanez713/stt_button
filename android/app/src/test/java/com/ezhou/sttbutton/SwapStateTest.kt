@@ -101,4 +101,16 @@ class SwapStateTest {
         assertFalse(pending.keyboardStopDue(10_000))
         assertFalse(SwapState.off().onViewFinish(0))
     }
+
+    @Test
+    fun given_eachOutcome_then_theLogNameAndSwapTimeFollow() {
+        assertEquals("off", SwapState.off().logName)
+        assertEquals("failed", SwapState.started(false, 0).logName)
+        val ok = SwapState.started(true, 100).also { it.onViewStart(450) }
+        assertEquals("ok", ok.logName)
+        assertEquals(350L, ok.swapMs)
+        val timedOut = SwapState.started(true, 0).also { it.poll(1_000) }
+        assertEquals("failed", timedOut.logName)
+        assertEquals(null, timedOut.swapMs)
+    }
 }

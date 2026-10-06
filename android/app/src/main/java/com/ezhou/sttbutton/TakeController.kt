@@ -170,6 +170,7 @@ class TakeController(private val service: DictationService, private val overlay:
     private fun startSwap(current: Run) {
         ImeLink.stranded = false
         ImeLink.busy = false
+        ImeLink.panelHeightPx = service.rememberedImeHeight() ?: 0
         ImeLink.stopKey = StopKeyPlacement.inPanel(overlay.lastShown, overlay.screen().bottom, panelHeightPx())
         ImeLink.onStop = { run?.takeIf { it === current }?.let(::stop) }
         ImeLink.onViewFinish = { onViewFinished(current) }
@@ -192,8 +193,19 @@ class TakeController(private val service: DictationService, private val overlay:
     private fun returnKeyboard(current: Run): String? {
         if (!current.swap.returnOwed) return null
         current.swap.markReturned()
-        return service.swapper.returnKeyboard()
+        val method = service.swapper.returnKeyboard()
+        handler.postDelayed({ writeImeLine(current.take.id, method) }, IME_LINE_DELAY_MS)
+        return method
     }
+
+    private fun writeImeLine(takeId: String, method: String?) {
+        val (returnMs, subtypeOk) = service.swapper.returnReport()
+        log.write("ime", takeId, "ime_return" to (method ?: "failed"), "ime_return_ms" to returnMs,
+            "ime_subtype_ok" to subtypeOk, "ime_height_delta_px" to service.imeHeightDelta())
+    }
+
+    private fun swapFields(current: Run): Array<Pair<String, Any?>> =
+        arrayOf("ime_swap" to current.swap.logName, "ime_swap_ms" to current.swap.swapMs)
 
     private fun stop(current: Run, trigger: String = TRIGGER_STOP) {
         if (!current.take.requestStop()) return
@@ -221,7 +233,7 @@ class TakeController(private val service: DictationService, private val overlay:
         log.write(
             "discard", current.take.id, "reason" to reason.logName, "trigger" to trigger,
             "audio_ms" to current.level.audioMs, "zero_ms" to current.level.zeroMs, "peak_dbfs" to current.level.peakDbfs,
-            *current.cost.lap().toTypedArray(),
+            *swapFields(current), *current.cost.lap().toTypedArray(),
         )
         if (reason == DiscardReason.ERROR) flashFailed()
         current.models.cleaner().cancel()
@@ -288,7 +300,7 @@ class TakeController(private val service: DictationService, private val overlay:
             "clean_mode" to result.cleanMode, "chunks" to result.chunks,
             "idle_cleans" to result.idleCleans, "idle_hits" to result.idleHits, "cue" to result.cue,
             "context_decodes" to result.contextDecodes, "context_fallbacks" to result.contextFallbacks, "drifts" to result.drifts, "corrections" to result.corrections, "corrections_kept" to result.correctionsKept,
-            "trigger" to trigger,
+            "trigger" to trigger, *swapFields(current), "a11y_conn" to service.a11yConnection(),
             "asr_ms_after_stop" to result.asrMsAfterStop, "clean_ms_after_stop" to result.cleanMsAfterStop,
             "stop_to_insert_ms" to SystemClock.elapsedRealtime() - triggerAtMs,
             *current.cost.lap().toTypedArray())
@@ -314,7 +326,7 @@ class TakeController(private val service: DictationService, private val overlay:
             "pkg" to current.take.pkg, "reason" to reason.logName, "trigger" to trigger, "copied" to copied,
             "raw" to result.raw, "text" to clip, "clean_mode" to result.cleanMode, "audio_ms" to result.audioMs,
             "zero_ms" to current.level.zeroMs, "peak_dbfs" to current.level.peakDbfs,
-            *current.cost.lap().toTypedArray())
+            *swapFields(current), *current.cost.lap().toTypedArray())
         current.take.discard(reason)
         release(current)
     }
@@ -471,6 +483,7 @@ class TakeController(private val service: DictationService, private val overlay:
         private const val BUBBLE_MS = 100L
         private const val WARM_MS = 30_000L
         private const val HIDDEN_GRACE_MS = 700L
+        private const val IME_LINE_DELAY_MS = 500L
         private const val FAILED_HOLD_MS = 1_500L
     }
 }

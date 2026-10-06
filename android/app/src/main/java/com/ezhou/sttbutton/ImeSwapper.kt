@@ -4,6 +4,7 @@ import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.AccessibilityService.SoftKeyboardController
 import android.content.ComponentName
 import android.content.Context
+import android.os.SystemClock
 import android.provider.Settings
 import android.util.Log
 import android.view.inputmethod.InputMethodManager
@@ -18,6 +19,8 @@ class ImeSwapper(private val service: AccessibilityService) {
     private val imm = service.getSystemService(InputMethodManager::class.java)
     private val ourId = ComponentName(service, DictationIme::class.java).flattenToShortString()
     private var enabled = false
+    private var returnedAtMs: Long? = null
+    private var defaultBackAtMs: Long? = null
 
     val currentDefault: String? get() = Settings.Secure.getString(service.contentResolver, Settings.Secure.DEFAULT_INPUT_METHOD)
 
@@ -40,6 +43,8 @@ class ImeSwapper(private val service: AccessibilityService) {
 
     /** Puts the user's keyboard back; the name of the first method that worked, or null when none did. */
     fun returnKeyboard(): String? {
+        returnedAtMs = SystemClock.uptimeMillis()
+        defaultBackAtMs = null
         val ime = ImeLink.current
         val plan = ImeReturn.plan(saved(), gboardId(), imeAlive = ime != null)
         for (step in plan) {
@@ -68,6 +73,19 @@ class ImeSwapper(private val service: AccessibilityService) {
         ImeLink.stranded = true
         ImeLink.current?.refreshPanel()
         return null
+    }
+
+    /** The keyboard setting changed; stamps the first time after a return that it names the saved keyboard again. */
+    fun noteDefaultChanged() {
+        val returned = returnedAtMs ?: return
+        if (defaultBackAtMs == null && currentDefault == saved()?.id) defaultBackAtMs = SystemClock.uptimeMillis() - returned
+    }
+
+    /** Milliseconds from the return call to the setting naming the saved keyboard again, null if it had not; and whether the subtype setting equals the saved one, null when none was saved. */
+    fun returnReport(): Pair<Long?, Boolean?> {
+        val saved = saved()?.subtypeHash
+        val now = Settings.Secure.getString(service.contentResolver, Settings.Secure.SELECTED_INPUT_METHOD_SUBTYPE)?.toIntOrNull()
+        return defaultBackAtMs to (saved?.let { it == now })
     }
 
     /** A process death mid-take leaves this app's keyboard as the default. */

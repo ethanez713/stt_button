@@ -229,6 +229,39 @@ class TestPhoneUsage:
         report = phone_usage.summarize(lines)
         assert "take b died: LOW_MEMORY" in report and "process exits: LOW_MEMORY 1" in report
 
+    def test_the_swap_table_counts_outcomes_timings_and_takes_without_an_ime_line(self):
+        from experiments import phone_usage
+        lines = [
+            self.insert(1, ime_swap="ok", ime_swap_ms=300), self.insert(2, ime_swap="ok", ime_swap_ms=500),
+            self.insert(3, ime_swap="failed", ime_swap_ms=None), self.insert(4, ime_swap="off", ime_swap_ms=None),
+            {"event": "ime", "id": "t1", "ime_return": "subtype", "ime_return_ms": 120, "ime_subtype_ok": True,
+             "ime_height_delta_px": 0},
+            {"event": "ime", "id": "t2", "ime_return": "failed", "ime_return_ms": None, "ime_subtype_ok": False,
+             "ime_height_delta_px": 40},
+        ]
+        report = phone_usage.summarize(lines)
+        assert "keyboard swap: 4 takes" in report
+        assert "ime_swap: failed 1, off 1, ok 2" in report
+        assert "ime_return: failed 1, subtype 1" in report
+        assert "ime_swap_ms: median 400 p90 500 over 2" in report
+        assert "ime_return_ms: median 120 p90 120 over 1" in report
+        assert "ime_subtype_ok false: 1" in report and "ime_height_delta_px non-zero: 1" in report
+        assert "takes with a swap and no ime line: 1 (t3)" in report
+
+    def test_a_report_of_takes_from_before_the_swap_has_no_swap_table(self):
+        from experiments import phone_usage
+        assert "keyboard swap" not in phone_usage.summarize([self.insert(1)])
+
+    def test_an_ime_line_does_not_change_which_takes_the_process_died_in(self):
+        from experiments import phone_usage
+        lines = [
+            {"event": "start", "id": "a"}, self.insert("a", id="a"),
+            {"event": "start", "id": "b"},
+            {"event": "ime", "id": "a", "ime_return": "subtype"},
+            {"event": "exit", "reason": "LOW_MEMORY", "pss_kb": 1, "description": "lmkd"},
+        ]
+        assert [(s["id"], e["reason"]) for s, e in phone_usage.died_takes(lines)] == [("b", "LOW_MEMORY")]
+
     def test_a_take_that_ended_on_the_clipboard_or_without_text_did_not_die(self):
         from experiments import phone_usage
         lines = [
