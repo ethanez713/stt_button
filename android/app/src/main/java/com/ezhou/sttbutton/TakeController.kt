@@ -483,10 +483,8 @@ class TakeController(private val service: DictationService, private val overlay:
     }
 
     private fun pruneTakeAudio(recording: String) {
-        val files = takesDir.listFiles()?.filter { it.isFile && it.extension == "pcm" } ?: return
-        val drop = TakeAudio.toDelete(files.map {
-            TakeAudioFile(it.name, it.length(), if (it.name == recording) Long.MAX_VALUE else it.lastModified())
-        }).toSet()
+        val files = takesDir.listFiles()?.filter { it.isFile } ?: return
+        val drop = TakeAudio.toDelete(files.map { TakeAudioFile(it.name, it.length(), it.lastModified()) }, inProgress = recording).toSet()
         for (file in files) if (file.name in drop) file.delete()
     }
 
