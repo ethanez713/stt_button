@@ -11,6 +11,7 @@
   "chunk_max_tokens": 1000,
   "chunk_min_tokens": 128,
   "skip_max_words": 40,
+  "field_revise": "stop",
   "cleaner_load_after_s": 6,
   "self_correction_cues": [
     "actually",

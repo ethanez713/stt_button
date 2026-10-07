@@ -16,6 +16,7 @@ class PipelineConfig(json: JSONObject) {
     val chunkMinTokens = json.getInt("chunk_min_tokens")
     val chunkMaxTokens = json.getInt("chunk_max_tokens")
     val skipMaxWords = json.getInt("skip_max_words")
+    val fieldRevise: String = json.optString("field_revise", "stop")
     val cleanerLoadAfterS = json.getDouble("cleaner_load_after_s")
     val selfCorrectionCues: List<String> = json.getJSONArray("self_correction_cues").let { a -> List(a.length(), a::getString) }
     private val cleaner = json.getJSONObject("cleaners").getJSONObject(json.getString("cleaner"))

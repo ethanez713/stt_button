@@ -13,6 +13,7 @@ class JobRecord(
     val fromMs: Long? = null,
     val toMs: Long? = null,
     val context: Boolean? = null,
+    val scope: String? = null,
 )
 
 sealed interface JobResult
@@ -64,7 +65,12 @@ class TakeEngine(
 
     val policyName: String get() = policy.name
 
-    private val region = TakeRegion(document.read()?.text?.length ?: 0)
+    private val region = TakeRegion(document.read()?.selectionEnd ?: 0)
+    private var lead = 0
+    private var cleans = 0
+    private var editsInside = 0
+    private var revisionDropped = false
+    private var previousInline = false
     private val texts = mutableListOf<String>()
     private val kept = HashMap<String, Kept>()
     private val chunks = mutableListOf<String>()
@@ -73,7 +79,6 @@ class TakeEngine(
     private var finalSlice: IntArray? = null
     private var finalTaken = false
     private var sliceLanded = false
-    private var previousWasUnit = false
     private var running: Job? = null
     private var asrMs = 0L
     private var cleanMs = 0L
@@ -95,6 +100,7 @@ class TakeEngine(
 
     init {
         document.onEdit = { edit ->
+            if (edit.at <= region.end && edit.at + edit.deleted >= region.start) editsInside++
             region.apply(edit)
             onWoken?.invoke()
         }
@@ -199,7 +205,13 @@ class TakeEngine(
             val tailStart = region.cleanEnd
             val tail = text.substring(tailStart, region.end.coerceAtMost(text.length))
             val plan = try {
-                policy.next(PolicyView(tail, tailStart, chunks.isNotEmpty() || region.cleanEnd > region.start, kept.keys.toSet(), counter()), moment)
+                policy.next(
+                    PolicyView(
+                        tail, tailStart, chunks.isNotEmpty() || region.cleanEnd > region.start + lead, kept.keys.toSet(), counter(),
+                        RegionFacts(text.substring(region.start + lead, region.end.coerceAtMost(text.length)), region.start + lead, cleans, editsInside, revisionDropped),
+                    ),
+                    moment,
+                )
             } catch (e: NeedsCleaner) {
                 return loadJob(moment)
             }
@@ -261,7 +273,8 @@ class TakeEngine(
         if (decoded.fellBack) contextFallbacks++
         val text = document.read()?.text ?: throw IllegalStateException("the document is gone")
         var from = region.end
-        var written = if (decoded.text.isEmpty()) "" else (if (texts.any { it.isNotEmpty() }) " " else "") + decoded.text
+        val opener = if (texts.any { it.isNotEmpty() }) " " else Pipeline.takeOpener(text, region.start)
+        var written = if (decoded.text.isEmpty()) "" else opener + decoded.text
         val previous = texts.lastOrNull().orEmpty()
         if (decoded.mark != null && previous.isNotEmpty()) {
             val old = Pipeline.trailingMark(previous)
@@ -273,10 +286,15 @@ class TakeEngine(
                 written = settled + written
             }
         }
+        val first = texts.none { it.isNotEmpty() } && decoded.text.isNotEmpty()
         texts += decoded.text
         if (written.isNotEmpty() || from != region.end) {
             document.replace(from, region.end, written)
             region.appended(written.length - (region.end - from))
+        }
+        if (first) {
+            lead = opener.length
+            region.skipLead(lead)
         }
         jobs(JobRecord("asr", job.moment.name.lowercase(), decoded.ms, null, decoded.text, if (decoded.fellBack) "fallback" else "applied",
             fromMs = slice[0].toLong() / (Slicer.SAMPLE_RATE / 1000), toMs = slice[1].toLong() / (Slicer.SAMPLE_RATE / 1000), context = decoded.usedContext))
@@ -312,7 +330,8 @@ class TakeEngine(
         val flight = region.flight
         val record = { outcome: String, output: String? ->
             jobs(JobRecord("clean", job.moment.name.lowercase(), cleaned.ms, plan.target, output, outcome,
-                cleaned.inTokens.takeIf { cleaned.text != null }, cleaned.outTokens.takeIf { cleaned.text != null }))
+                cleaned.inTokens.takeIf { cleaned.text != null }, cleaned.outTokens.takeIf { cleaned.text != null },
+                scope = if (plan.region) "region" else "chunk"))
         }
         if (cleaned.text != null) {
             inTokens += cleaned.inTokens
@@ -331,11 +350,12 @@ class TakeEngine(
             }
             flight == null || flight.dirty -> {
                 region.dropFlight()
+                if (plan.region) revisionDropped = true
                 record("dropped", cleaned.text)
             }
             else -> {
                 val text = cleaned.text ?: Spoken.convert(plan.target)
-                apply(flight.from, flight.to, text, plan.target)
+                apply(flight.from, flight.to, text, plan)
                 record(if (cleaned.text == null || cleaned.drifted) "fallback" else "applied", text)
             }
         }
@@ -344,7 +364,7 @@ class TakeEngine(
     private fun applyKept(plan: CleanPlan) {
         region.flightOver(plan.from, plan.to)
         idleHits++
-        apply(plan.from, plan.to, kept.getValue(plan.target).text, plan.target)
+        apply(plan.from, plan.to, kept.getValue(plan.target).text, plan)
     }
 
     private fun applyLocal(plan: CleanPlan) {
@@ -356,18 +376,28 @@ class TakeEngine(
     }
 
     /** Writes [output] over the flight, set off from the cleaned text before it as `Pipeline.joinCleaned` sets chunks off. */
-    private fun apply(from: Int, to: Int, output: String, target: String) {
+    private fun apply(from: Int, to: Int, output: String, plan: CleanPlan) {
         val text = document.read()?.text ?: throw IllegalStateException("the document is gone")
-        val cleanedBefore = text.substring(region.start, region.cleanEnd)
+        if (plan.region) {
+            document.replace(from, to, output)
+            region.flightReplaced(output.length)
+            cleans = 1
+            editsInside = 0
+            onText?.invoke(regionText())
+            return
+        }
+        val target = plan.target
+        val cleanedBefore = text.substring(region.start + lead, region.cleanEnd.coerceAtLeast(region.start + lead))
         val unit = Pipeline.isCorrectionUnit(target, cfg.selfCorrectionCues)
         val separator = when {
             output.isEmpty() || cleanedBefore.isEmpty() -> ""
-            (previousWasUnit || unit) && !cleanedBefore.substringAfterLast('\n').startsWith("- ") -> " "
+            (previousInline || unit) && !cleanedBefore.substringAfterLast('\n').startsWith("- ") -> " "
             else -> "\n\n"
         }
-        previousWasUnit = unit
+        previousInline = unit || plan.spaceAfter
         chunks += target
         outputs += output
+        cleans++
         document.replace(from, to, separator + output)
         region.flightReplaced((separator + output).length)
         onText?.invoke(regionText())

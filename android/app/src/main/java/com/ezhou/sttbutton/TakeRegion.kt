@@ -24,6 +24,11 @@ class TakeRegion(start: Int = 0, cleanEnd: Int = start, end: Int = cleanEnd) {
         end += by
     }
 
+    /** The first [length] characters of the region are the opener before the take's own words, so they are not the tail. */
+    fun skipLead(length: Int) {
+        cleanEnd = (start + length).coerceAtMost(end)
+    }
+
     fun flightOver(from: Int, to: Int) {
         flight = Flight(from, to)
     }
