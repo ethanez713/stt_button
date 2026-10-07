@@ -564,3 +564,79 @@ class TestConfigIds:
         from experiments import corrections
         assert corrections.main([self.write(tmp_path, None, "aaa")]) == 1
         assert "unknown 1 takes" in capsys.readouterr().out
+
+
+class TestCorrectionReplay:
+    def build(self, tmp_path, takes):
+        """takes: (id, ts, cleaned, user_left); the recording's first sample is the take's index."""
+        import numpy as np
+        lines = []
+        (tmp_path / "takes").mkdir(exist_ok=True)
+        for index, (take_id, ts, cleaned, left) in enumerate(takes):
+            samples = np.full(1600, index + 1, dtype="<i2")
+            (tmp_path / "takes" / f"{take_id}.pcm").write_bytes(samples.tobytes())
+            lines.append({"event": "insert", "id": take_id, "ts": ts, "pkg": "app", "cleaned": cleaned,
+                          "text_before": "", "clean_mode": "skip"})
+            text_after = " " + left
+            lines.append({"event": "edit", "id": take_id, "text_after": text_after, "span_start": 0, "span_end": len(text_after)})
+        return lines
+
+    TAKES = [
+        ("a", "2026-10-01T10:00:00Z", "Hello there.", "Hello there."),
+        ("b", "2026-10-01T11:00:00Z", "Send the phalanx report.", "Send the failing report."),
+        ("c", "2026-10-01T12:00:00Z", "Meet me at noon.", "Totally different thing entirely now."),
+        ("d", "2026-10-01T13:00:00Z", "Call Max today.", "Call Max today."),
+    ]
+
+    def references(self):
+        return {index + 1: left for index, (_, _, _, left) in enumerate(self.TAKES)}
+
+    def test_a_candidate_that_reproduces_the_reference_scores_everything(self, tmp_path):
+        from experiments import correction_replay as cr
+        lines = self.build(tmp_path, self.TAKES)
+        refs = self.references()
+        candidate = cr.Candidate.of("oracle", "test", lambda audio, before, earlier: refs[int(audio[0] * 32768)])
+        result = cr.score(lines, tmp_path / "takes", candidate, cache=tmp_path / "cache")
+        assert [r.take.id for r in result.rows] == ["a", "b", "d"]
+        assert all(r.exact and r.by_words for r in result.rows)
+        assert [r.take.id for r in result.fixed] == ["b"]
+        assert result.broke == []
+
+    def test_a_candidate_that_reproduces_the_logged_text_fixes_and_breaks_nothing(self, tmp_path):
+        from experiments import correction_replay as cr
+        lines = self.build(tmp_path, self.TAKES)
+        result = cr.score(lines, tmp_path / "takes", cr.logged_candidate(lines), cache=tmp_path / "cache")
+        assert result.fixed == [] and result.broke == []
+        assert [r.by_words for r in result.rows] == [True, False, True]
+
+    def test_a_take_classed_gone_is_skipped(self, tmp_path):
+        from experiments import correction_replay as cr
+        lines = self.build(tmp_path, self.TAKES)
+        assert "c" not in [t.id for t in cr.corpus(lines, tmp_path / "takes")]
+
+    def test_a_candidate_is_never_handed_a_correction_from_a_later_take(self, tmp_path):
+        from experiments import correction_replay as cr
+        lines = self.build(tmp_path, self.TAKES)
+        handed = {}
+
+        def fn(audio, before, earlier):
+            handed[int(audio[0] * 32768)] = [(c.before, c.after) for c in earlier]
+            return ""
+
+        cr.score(lines, tmp_path / "takes", cr.Candidate.of("spy", "test", fn), cache=tmp_path / "cache")
+        assert handed[1] == []
+        assert handed[2] == []
+        assert handed[4] == [("phalanx", "failing")]
+
+    def test_outputs_are_cached_per_candidate_and_model(self, tmp_path):
+        from experiments import correction_replay as cr
+        lines = self.build(tmp_path, self.TAKES)
+        calls = []
+
+        def fn(audio, before, earlier):
+            calls.append(1)
+            return "x"
+
+        for model in ("m1", "m1", "m2"):
+            cr.score(lines, tmp_path / "takes", cr.Candidate.of("c", model, fn), cache=tmp_path / "cache")
+        assert len(calls) == 6

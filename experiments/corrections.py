@@ -40,25 +40,25 @@ def widen(text: str, start: int, end: int) -> tuple[int, int]:
     return start, end
 
 
-def classify(cleaned: str, text_after: str, span_start: int, span_end: int) -> tuple[str, list[tuple[list[str], list[str]]]]:
-    """The class of a take and its word runs as (cleaned words, words now) pairs; empty unless `words`."""
+def classify(cleaned: str, text_after: str, span_start: int, span_end: int) -> tuple[str, list[tuple[list[str], list[str]]], str]:
+    """The class of a take, its word runs as (cleaned words, words now) pairs (empty unless `words`), and the span's text now."""
     start, end = widen(text_after, min(span_start, len(text_after)), min(span_end, len(text_after)))
     now = text_after[start:end]
     if now.strip() == cleaned.strip():
-        return "untouched", []
+        return "untouched", [], now
     before, after = words(cleaned), words(now)
     if before == after:
-        return "marks", []
+        return "marks", [], now
     matcher = difflib.SequenceMatcher(a=before, b=after, autojunk=False)
     kept = sum(block.size for block in matcher.get_matching_blocks())
     if start == end or kept < SURVIVING_SHARE * len(before):
-        return "gone", []
+        return "gone", [], now
     runs = [(before[i1:i2], after[j1:j2]) for tag, i1, i2, j1, j2 in matcher.get_opcodes() if tag != "equal"]
-    return "words", runs
+    return "words", runs, now
 
 
 def analyse(lines: list[dict]) -> tuple[list[dict], Counter]:
-    """Counted takes as {id, pkg, clean_mode, class, runs}, and how many inserted takes were not counted, by reason."""
+    """Counted takes as {id, ts, pkg, clean_mode, cleaned, text_before, reference, class, runs}, and how many inserted takes were not counted, by reason."""
     inserts, edits = defaultdict(list), {}
     for line in lines:
         if line.get("event") == "insert":
@@ -76,9 +76,10 @@ def analyse(lines: list[dict]) -> tuple[list[dict], Counter]:
             skipped["null span"] += 1
         else:
             insert = rows[0]
-            cls, runs = classify(insert["cleaned"], edit["text_after"], edit["span_start"], edit["span_end"])
-            counted.append({"id": take_id, "pkg": insert.get("pkg"), "clean_mode": insert.get("clean_mode"),
-                            "class": cls, "runs": runs})
+            cls, runs, reference = classify(insert["cleaned"], edit["text_after"], edit["span_start"], edit["span_end"])
+            counted.append({"id": take_id, "ts": insert.get("ts"), "pkg": insert.get("pkg"), "clean_mode": insert.get("clean_mode"),
+                            "cleaned": insert["cleaned"], "text_before": insert.get("text_before") or "",
+                            "reference": reference.strip(), "class": cls, "runs": runs})
     return counted, skipped
 
 
