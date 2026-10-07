@@ -9,6 +9,7 @@ class PipelineConfig(json: JSONObject) {
     val sliceSearchS = json.getDouble("slice_search_s")
     val pauseS: Double? = if (json.isNull("pause_s")) null else json.getDouble("pause_s")
     val stopSilenceS: Double? = if (json.isNull("stop_silence_s")) null else json.getDouble("stop_silence_s")
+    val stopSilenceDbfs = json.getDouble("stop_silence_dbfs")
     val sliceMinS = json.getDouble("slice_min_s")
     val contextS = json.getDouble("context_s")
     val junctionSqueezeS: Double? = if (json.isNull("junction_squeeze_s")) null else json.getDouble("junction_squeeze_s")

@@ -14,12 +14,14 @@ class Slicer(
     private val pauseS: Double? = null,
     sliceMinS: Double = 2.0,
     pauseMarginDb: Double = 10.0,
+    loudDbfs: Double = -48.0,
 ) {
     private val maxLen = (sliceMaxS * SAMPLE_RATE).toInt()
     private val search = (searchS * SAMPLE_RATE).toInt()
     private val pauseWindows = pauseS?.let { Math.round(it / CUT_WINDOW_S).toInt() }
     private val minLen = (sliceMinS * SAMPLE_RATE).toInt()
     private val margin = Math.pow(10.0, pauseMarginDb / 10)
+    private val loudEnergy = WIN.toDouble() * 32768.0 * 32768.0 * Math.pow(10.0, loudDbfs / 10.0)
     private val floorMin = WIN.toDouble() * 32768.0 * 32768.0 * Math.pow(10.0, NOISE_FLOOR_DBFS / 10.0)
 
     private var pcm = ShortArray(SAMPLE_RATE * 30)
@@ -29,6 +31,7 @@ class Slicer(
     private var energies = 0
     private val sorted = ArrayList<Long>()
     private var lastSpeech = -1
+    private var lastLoud = -1
     private val speech = ArrayList<Boolean>()
 
     private val closed = ArrayList<IntArray>()
@@ -41,6 +44,9 @@ class Slicer(
 
     /** Sample offset where the last non-silent window ended, or -1. */
     val lastSpeechEnd: Int get() = synchronized(this) { if (lastSpeech < 0) -1 else (lastSpeech + 1) * WIN }
+
+    /** Sample offset where the last window at or above `stop_silence_dbfs` ended, or -1. Independent of the noise floor, so room noise under that level is silence. */
+    val lastLoudEnd: Int get() = synchronized(this) { if (lastLoud < 0) -1 else (lastLoud + 1) * WIN }
 
     /** Appends audio; returns the slices it completed as (start, end) sample offsets. */
     fun feed(chunk: ShortArray, length: Int = chunk.size): List<IntArray> = synchronized(this) {
@@ -90,6 +96,7 @@ class Slicer(
         val floor = max(sorted[(sorted.size - 1) / 10].toDouble(), floorMin)
         speech.add(energy.toDouble() >= floor * margin)
         if (speech.last()) lastSpeech = energies
+        if (energy.toDouble() >= loudEnergy) lastLoud = energies
         energies++
     }
 
@@ -142,6 +149,6 @@ class Slicer(
         private const val NOISE_FLOOR_DBFS = -70.0
 
         fun fromConfig(cfg: PipelineConfig) =
-            Slicer(cfg.sliceMaxS, cfg.sliceSearchS, cfg.pauseS, cfg.sliceMinS, cfg.pauseMarginDb)
+            Slicer(cfg.sliceMaxS, cfg.sliceSearchS, cfg.pauseS, cfg.sliceMinS, cfg.pauseMarginDb, cfg.stopSilenceDbfs)
     }
 }

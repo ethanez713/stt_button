@@ -131,8 +131,8 @@ class TakeEngine(
 
     val raw: String get() = Pipeline.joinSlices(texts)
 
-    /** Seconds since the last speech, or since the take opened when none has been heard. */
-    fun silenceS(): Double = (slicer.sampleCount - maxOf(slicer.lastSpeechEnd, 0)).toDouble() / Slicer.SAMPLE_RATE
+    /** Seconds since the last window at or above `stop_silence_dbfs`, or since the take opened when there has been none. */
+    fun silenceS(): Double = (slicer.sampleCount - maxOf(slicer.lastLoudEnd, 0)).toDouble() / Slicer.SAMPLE_RATE
 
     /** Recorder thread, after each feed of the slicer. */
     fun onAudio() {

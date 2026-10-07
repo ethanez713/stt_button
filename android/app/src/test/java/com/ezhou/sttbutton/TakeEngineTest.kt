@@ -180,6 +180,24 @@ class TakeEngineTest {
     }
 
     @Test
+    fun given_room_noise_below_the_stop_level_after_speech_when_asked_then_it_counts_as_silence() {
+        val rig = Rig(cfg, ScriptedRecognizer("Okay sounds good", "unused"))
+
+        rig.feedInPieces(Fixtures.signal(JSONArray("""[["silence",0.3],["noise",1.5,8000],["noise",4.0,100]]""")))
+
+        assertEquals(4.0, rig.engine.silenceS(), 0.15)
+    }
+
+    @Test
+    fun given_noise_above_the_stop_level_after_speech_when_asked_then_the_silence_restarts() {
+        val rig = Rig(cfg, ScriptedRecognizer("Okay sounds good", "unused"))
+
+        rig.feedInPieces(Fixtures.signal(JSONArray("""[["silence",0.3],["noise",1.5,8000],["noise",2.0,600],["silence",1.0]]""")))
+
+        assertEquals(1.0, rig.engine.silenceS(), 0.15)
+    }
+
+    @Test
     fun given_no_speech_at_all_when_asked_then_the_silence_runs_from_the_start() {
         val rig = Rig(cfg, ScriptedRecognizer("unused"))
         rig.feed(ShortArray(3 * Slicer.SAMPLE_RATE))

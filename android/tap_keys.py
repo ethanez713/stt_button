@@ -5,6 +5,10 @@
 Tokens are comma-separated: letters are tapped in turn, `~word` swipes across the word's keys. Key positions are
 those of Gboard on the 1440x3120 S25 in portrait with the number row off; they are not discovered.
 """
+import subprocess
+import sys
+import time
+
 S=sys.argv[1]; seq=sys.argv[2]; gap=float(sys.argv[3]) if len(sys.argv)>3 else 0.7
 rows=[("qwertyuiop",[50,141,232,322,414,506,597,688,780,872],2278),("asdfghjkl",[95,187,278,368,460,552,643,735,826],2462),("zxcvbnm",[186,277,368,459,551,643,735],2649)]
 pos={}

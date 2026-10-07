@@ -4,6 +4,7 @@
   "slice_search_s": 5,
   "pause_s": 1.6,
   "stop_silence_s": 30,
+  "stop_silence_dbfs": -48,
   "slice_min_s": 2,
   "pause_margin_db": 10,
   "context_s": 4,
