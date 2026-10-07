@@ -531,3 +531,36 @@ class TestCorrections:
         text = corrections.report(lines)
         assert "zero-edit rate: 50% (1 of 2)" in text
         assert "c: phalanx → failing" in text
+
+
+class TestConfigIds:
+    def write(self, tmp_path, *ids):
+        path = tmp_path / "edits.jsonl"
+        rows = [{"event": "start", "id": f"t{i}", **({"config_id": c} if c else {})} for i, c in enumerate(ids)]
+        path.write_text("".join(json.dumps(r) + "\n" for r in rows))
+        return str(path)
+
+    @pytest.mark.parametrize("module", ["corrections", "phone_usage"])
+    def test_two_ids_stop_the_report_and_are_named(self, module, tmp_path, capsys):
+        import importlib
+        main = importlib.import_module(f"experiments.{module}").main
+        assert main([self.write(tmp_path, "aaa", "aaa", "bbb")]) == 1
+        out = capsys.readouterr().out
+        assert "aaa 2 takes" in out and "bbb 1 takes" in out
+
+    @pytest.mark.parametrize("module", ["corrections", "phone_usage"])
+    def test_all_configs_pools_them(self, module, tmp_path):
+        import importlib
+        main = importlib.import_module(f"experiments.{module}").main
+        assert main([self.write(tmp_path, "aaa", "bbb"), "--all-configs"]) == 0
+
+    @pytest.mark.parametrize("module", ["corrections", "phone_usage"])
+    def test_one_id_goes_on(self, module, tmp_path):
+        import importlib
+        main = importlib.import_module(f"experiments.{module}").main
+        assert main([self.write(tmp_path, "aaa", "aaa")]) == 0
+
+    def test_a_take_without_the_field_counts_as_unknown(self, tmp_path, capsys):
+        from experiments import corrections
+        assert corrections.main([self.write(tmp_path, None, "aaa")]) == 1
+        assert "unknown 1 takes" in capsys.readouterr().out

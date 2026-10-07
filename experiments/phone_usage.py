@@ -15,7 +15,7 @@ import sys
 from collections import Counter, defaultdict
 from pathlib import Path
 
-from experiments import paths
+from experiments import config_ids, paths
 
 COST_FIELDS = ["charge_uah", "counter_used_uah", "plugged", "battery_pct", "peak_pss_kb", "avail_mem_min_kb",
                "low_memory", "trim_level_max", "cpu_ms", "thermal_max"]
@@ -230,12 +230,18 @@ def summarize(lines: list[dict], capacity_mah: float = 5000) -> str:
     return "\n".join(out)
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("edits", type=Path)
     parser.add_argument("--capacity-mah", type=float, default=5000)
-    args = parser.parse_args()
-    print(summarize(paths.read_jsonl(args.edits), args.capacity_mah))
+    parser.add_argument("--all-configs", action="store_true", help="pool takes whose configurations differ")
+    args = parser.parse_args(argv)
+    lines = paths.read_jsonl(args.edits)
+    header, ok = config_ids.check(lines, args.all_configs)
+    print(header)
+    if not ok:
+        return 1
+    print(summarize(lines, args.capacity_mah))
     return 0
 
 

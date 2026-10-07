@@ -26,7 +26,11 @@ import kotlin.concurrent.thread
 class TakeController(private val service: DictationService, private val overlay: Overlay, private val bubble: BubbleOverlay) {
     private val tag = DictationService.TAG
     private val handler = Handler(Looper.getMainLooper())
-    private val cfg = PipelineConfig(org.json.JSONObject(service.assets.open("pipeline.json").bufferedReader().readText()))
+    private val configBytes = service.assets.open("pipeline.json").use { it.readBytes() }
+    private val cfg = PipelineConfig(org.json.JSONObject(String(configBytes)))
+    private val configId by lazy {
+        ConfigId.of(configBytes, ModelFiles.required.map { it to File(service.filesDir, it).length() })
+    }
     private val log = EditLog(File(service.filesDir, "logs/edits.jsonl"))
     private val inserter = Inserter(service)
     private val takesDir = File(service.filesDir, "takes")
@@ -122,7 +126,7 @@ class TakeController(private val service: DictationService, private val overlay:
         val warm = parked
         parked = null
         handler.removeCallbacks(releaseParked)
-        log.write("start", take.id, "pkg" to pkg, "models_warm" to (warm != null),
+        log.write("start", take.id, "pkg" to pkg, "models_warm" to (warm != null), "config_id" to configId,
             "proc_cpu_ms" to Process.getElapsedCpuTime(),
             "proc_age_ms" to SystemClock.elapsedRealtime() - Process.getStartElapsedRealtime(),
             "proc_events" to eventsSeen)

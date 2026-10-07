@@ -15,7 +15,7 @@ import sys
 from collections import Counter, defaultdict
 from pathlib import Path
 
-from experiments import paths
+from experiments import config_ids, paths
 
 DEFAULT_EDITS = paths.REPO / "data" / "phone" / "edits.jsonl"
 CLASSES = ("untouched", "marks", "words", "gone")
@@ -111,11 +111,17 @@ def report(lines: list[dict]) -> str:
     return "\n".join(out)
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("edits", type=Path, nargs="?", default=DEFAULT_EDITS)
-    args = parser.parse_args()
-    print(report(paths.read_jsonl(args.edits)))
+    parser.add_argument("--all-configs", action="store_true", help="pool takes whose configurations differ")
+    args = parser.parse_args(argv)
+    lines = paths.read_jsonl(args.edits)
+    header, ok = config_ids.check(lines, args.all_configs)
+    print(header)
+    if not ok:
+        return 1
+    print(report(lines))
     return 0
 
 
