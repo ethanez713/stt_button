@@ -58,7 +58,7 @@ class FieldProbe(private val service: DictationService, private val out: File) {
     }
 
     private fun write(mode: String, before: Seen, after: Seen, expectedText: String?, expectedCaret: Int?, ms: Long, selections: Int) {
-        val ok = expectedText != null && after.text == expectedText && after.caret == expectedCaret
+        val ok = if (mode == "read") before.fieldRead == "full" else expectedText != null && after.text == expectedText && after.caret == expectedCaret
         val line = JSONObject().put("mode", mode).put("pkg", service.focusedField()?.packageName?.toString() ?: JSONObject.NULL)
             .put("field_read", before.fieldRead).put("len_before", before.text.length).put("len_after", after.text.length)
             .put("caret_before", before.caret).put("caret_after", after.caret).put("caret_expected", expectedCaret ?: JSONObject.NULL)
