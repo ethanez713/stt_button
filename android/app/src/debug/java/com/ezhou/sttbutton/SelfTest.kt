@@ -84,10 +84,18 @@ class SelfTest : Service() {
         val bubble = BubbleText()
         val slicer = Slicer.fromConfig(cfg)
         val chosen = if (policy == "revise") RevisePolicy(cfg) else ChunkPolicy(cfg)
-        val engine = TakeEngine(BufferDocument(seed), slicer, models.recognizer, models.cleaner(), chosen, cfg, prepareCleaner = models::prepareCleaner)
+        val engine = TakeEngine(BufferDocument(seed), slicer, models.recognizer, models.cleaner(), chosen, cfg, jobs = { r ->
+            Log.i(TAG, "selftest job ${r.kind} ${r.moment} ${r.outcome} ms=${r.ms} in=${r.input?.length} out=${r.output?.length}")
+        }, prepareCleaner = models::prepareCleaner)
         engine.onText = bubble::region
         engine.onCovered = bubble::covered
-        val executor = java.util.concurrent.Executors.newSingleThreadExecutor()
+        val executor = java.util.concurrent.Executors.newSingleThreadExecutor { task ->
+            Thread {
+                val allowed = File("/proc/thread-self/status").readLines().first { it.startsWith("Cpus_allowed_list") }.substringAfter(':').trim()
+                Log.i(TAG, "selftest worker cpus_allowed=$allowed priority=${android.os.Process.getThreadPriority(android.os.Process.myTid())}")
+                task.run()
+            }
+        }
         val done = java.util.concurrent.CountDownLatch(1)
         var result: LiveResult? = null
         var failure: Throwable? = null
@@ -99,6 +107,9 @@ class SelfTest : Service() {
             bubble.preview(words)
         })
         driver.start()
+        thread(isDaemon = true, name = "selftest-watchdog") {
+            if (!done.await(STUCK_S, java.util.concurrent.TimeUnit.SECONDS)) dumpThreads()
+        }
         val piece = Slicer.SAMPLE_RATE / 10
         for (at in audio.indices step piece) {
             if (policy == "revise") driver.settle()
@@ -155,6 +166,9 @@ class SelfTest : Service() {
         val out = File(dir, "replay.jsonl")
         val files = inputs.listFiles { f -> f.isFile && f.extension in listOf("pcm", "wav") }.orEmpty().sortedBy { it.name }
         val models = Models.forFiles(context.filesDir, cfg)
+        // A process started from the shell moves to a smaller set of cores a few seconds in, and a clean that
+        // began on the larger set then runs its 6 threads on 4 cores and takes minutes. Replays start after it.
+        Thread.sleep(SETTLE_S * 1000)
         try {
             for (file in files) {
                 val audio = if (file.extension == "wav") readWav(file) else readPcm(file)
@@ -178,6 +192,13 @@ class SelfTest : Service() {
         val out = File(context.filesDir, "selftest/probe.jsonl")
         FieldProbe(service, out).run(mode, intent.getIntExtra("from", 0), intent.getIntExtra("to", 0), intent.getStringExtra("text").orEmpty())
         Log.i(TAG, "selftest probe done $mode")
+    }
+
+    /** A take that has not finished after [STUCK_S] seconds names where every thread of the process is waiting. */
+    private fun dumpThreads() {
+        for ((thread, frames) in Thread.getAllStackTraces()) {
+            Log.w(TAG, "selftest stuck: ${thread.name} ${thread.state}\n" + frames.take(14).joinToString("\n") { "    at $it" })
+        }
     }
 
     private fun readPcm(file: File): ShortArray {
@@ -222,5 +243,7 @@ class SelfTest : Service() {
     companion object {
         private const val TAG = DictationService.TAG
         private const val REPLAY_SPEED = 8
+        private const val STUCK_S = 90L
+        private const val SETTLE_S = 20L
     }
 }

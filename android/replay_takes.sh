@@ -22,6 +22,13 @@ PKG=com.ezhou.sttbutton
 STAGE=/data/local/tmp/stt_replay
 DIR=files/selftest/replay
 
+# With the screen off Android shrinks the process's cores mid-clean, and the cleaner's threads then spin
+# against each other for minutes; keep the screen on for the run and put the user's timeout back after.
+old_timeout="$(adb -s "$S" shell settings get system screen_off_timeout | tr -d '\r')"
+trap 'adb -s "$S" shell settings put system screen_off_timeout "$old_timeout" >/dev/null' EXIT
+adb -s "$S" shell settings put system screen_off_timeout 1800000
+adb -s "$S" shell input keyevent KEYCODE_WAKEUP
+
 adb -s "$S" shell "rm -rf $STAGE; mkdir -p $STAGE"
 adb -s "$S" push "$@" "$STAGE/" >/dev/null
 [ -z "$config" ] || adb -s "$S" push "$config" "$STAGE/pipeline.json" >/dev/null
