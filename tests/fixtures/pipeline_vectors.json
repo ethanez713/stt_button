@@ -1048,6 +1048,502 @@
    "chunks": []
   }
  ],
+ "takes": [
+  {
+   "name": "one_slice_under_the_skip_limit",
+   "steps": [
+    [
+     "audio",
+     [
+      [
+       "silence",
+       0.3
+      ],
+      [
+       "noise",
+       3,
+       8000
+      ]
+     ]
+    ]
+   ],
+   "slices": [
+    [
+     "Meet me at noon.",
+     "."
+    ]
+   ],
+   "cfg": {
+    "chunk_min_tokens": 15,
+    "chunk_max_tokens": 1000,
+    "skip_max_words": 5,
+    "pause_s": 0.8,
+    "slice_min_s": 2
+   },
+   "result": {
+    "raw": "Meet me at noon.",
+    "cleaned": "Meet me at noon",
+    "clean_mode": "raw",
+    "chunks": 0
+   }
+  },
+  {
+   "name": "skip_limit_take_with_a_correction_cue",
+   "steps": [
+    [
+     "audio",
+     [
+      [
+       "silence",
+       0.3
+      ],
+      [
+       "noise",
+       3,
+       8000
+      ]
+     ]
+    ]
+   ],
+   "slices": [
+    [
+     "Meet Tuesday, actually Wednesday.",
+     "."
+    ]
+   ],
+   "cfg": {
+    "chunk_min_tokens": 15,
+    "chunk_max_tokens": 1000,
+    "skip_max_words": 5,
+    "pause_s": 0.8,
+    "slice_min_s": 2
+   },
+   "result": {
+    "raw": "Meet Tuesday, actually Wednesday.",
+    "cleaned": "MEET TUESDAY ACTUALLY WEDNESDAY",
+    "clean_mode": "chunks",
+    "chunks": 1
+   }
+  },
+  {
+   "name": "mark_change_at_the_junction",
+   "steps": [
+    [
+     "audio",
+     [
+      [
+       "silence",
+       0.3
+      ],
+      [
+       "noise",
+       3,
+       8000
+      ],
+      [
+       "silence",
+       1.2
+      ],
+      [
+       "noise",
+       3,
+       8000
+      ]
+     ]
+    ]
+   ],
+   "slices": [
+    [
+     "Update the plan.",
+     "."
+    ],
+    [
+     "have some monitoring now",
+     "?"
+    ]
+   ],
+   "cfg": {
+    "chunk_min_tokens": 15,
+    "chunk_max_tokens": 1000,
+    "skip_max_words": 5,
+    "pause_s": 0.8,
+    "slice_min_s": 2
+   },
+   "result": {
+    "raw": "Update the plan? have some monitoring now",
+    "cleaned": "UPDATE THE PLAN? HAVE SOME MONITORING NOW",
+    "clean_mode": "chunks",
+    "chunks": 1
+   }
+  },
+  {
+   "name": "two_chunks_close_before_the_stop",
+   "steps": [
+    [
+     "audio",
+     [
+      [
+       "silence",
+       0.3
+      ],
+      [
+       "noise",
+       3,
+       8000
+      ],
+      [
+       "silence",
+       1.2
+      ],
+      [
+       "noise",
+       3,
+       8000
+      ],
+      [
+       "silence",
+       1.2
+      ],
+      [
+       "noise",
+       3,
+       8000
+      ]
+     ]
+    ]
+   ],
+   "slices": [
+    [
+     "a1 a1 a1 a1 a1 a1 a1 a1 a1. a2 a2 a2 a2 a2 a2 a2 a2 a2. a3 a3 a3 a3 a3 a3 a3 a3 a3.",
+     "."
+    ],
+    [
+     "b1 b1 b1 b1 b1 b1 b1 b1 b1. b2 b2 b2 b2 b2 b2 b2 b2 b2. b3 b3 b3 b3 b3 b3 b3 b3 b3.",
+     "."
+    ],
+    [
+     "c1 c1 c1 c1 c1 c1 c1 c1 c1.",
+     "."
+    ]
+   ],
+   "cfg": {
+    "chunk_min_tokens": 15,
+    "chunk_max_tokens": 1000,
+    "skip_max_words": 5,
+    "pause_s": 0.8,
+    "slice_min_s": 2
+   },
+   "result": {
+    "raw": "a1 a1 a1 a1 a1 a1 a1 a1 a1. a2 a2 a2 a2 a2 a2 a2 a2 a2. a3 a3 a3 a3 a3 a3 a3 a3 a3. b1 b1 b1 b1 b1 b1 b1 b1 b1. b2 b2 b2 b2 b2 b2 b2 b2 b2. b3 b3 b3 b3 b3 b3 b3 b3 b3. c1 c1 c1 c1 c1 c1 c1 c1 c1.",
+    "cleaned": "A1 A1 A1 A1 A1 A1 A1 A1 A1. A2 A2 A2 A2 A2 A2 A2 A2 A2.\n\nA3 A3 A3 A3 A3 A3 A3 A3 A3. B1 B1 B1 B1 B1 B1 B1 B1 B1.\n\nB2 B2 B2 B2 B2 B2 B2 B2 B2. B3 B3 B3 B3 B3 B3 B3 B3 B3.\n\nC1 C1 C1 C1 C1 C1 C1 C1 C1.",
+    "clean_mode": "chunks",
+    "chunks": 4
+   }
+  },
+  {
+   "name": "pause_clean_interrupted_by_speech",
+   "steps": [
+    [
+     "audio",
+     [
+      [
+       "silence",
+       0.3
+      ],
+      [
+       "noise",
+       3,
+       8000
+      ],
+      [
+       "silence",
+       1.2
+      ],
+      [
+       "noise",
+       3,
+       8000
+      ],
+      [
+       "silence",
+       1.2
+      ]
+     ]
+    ],
+    [
+     "idle",
+     [
+      [
+       "noise",
+       0.5,
+       8000
+      ]
+     ]
+    ],
+    [
+     "audio",
+     [
+      [
+       "noise",
+       3,
+       8000
+      ]
+     ]
+    ]
+   ],
+   "slices": [
+    [
+     "a1 a1 a1 a1 a1 a1 a1 a1 a1. b1 b1 b1 b1 b1 b1 b1 b1 b1.",
+     "."
+    ],
+    [
+     "c1 c1 c1 c1 c1 c1 c1 c1 c1. c2 c2 c2 c2 c2 c2 c2 c2 c2.",
+     "."
+    ],
+    [
+     "tail end here.",
+     "."
+    ]
+   ],
+   "cfg": {
+    "chunk_min_tokens": 15,
+    "chunk_max_tokens": 1000,
+    "skip_max_words": 5,
+    "pause_s": 0.8,
+    "slice_min_s": 2
+   },
+   "result": {
+    "raw": "a1 a1 a1 a1 a1 a1 a1 a1 a1. b1 b1 b1 b1 b1 b1 b1 b1 b1. c1 c1 c1 c1 c1 c1 c1 c1 c1. c2 c2 c2 c2 c2 c2 c2 c2 c2. tail end here.",
+    "cleaned": "A1 A1 A1 A1 A1 A1 A1 A1 A1. B1 B1 B1 B1 B1 B1 B1 B1 B1.\n\nC1 C1 C1 C1 C1 C1 C1 C1 C1. C2 C2 C2 C2 C2 C2 C2 C2 C2.\n\nTAIL END HERE.",
+    "clean_mode": "chunks",
+    "chunks": 3
+   }
+  },
+  {
+   "name": "pause_clean_completes_and_is_reused",
+   "steps": [
+    [
+     "audio",
+     [
+      [
+       "silence",
+       0.3
+      ],
+      [
+       "noise",
+       3,
+       8000
+      ],
+      [
+       "silence",
+       1.2
+      ],
+      [
+       "noise",
+       3,
+       8000
+      ],
+      [
+       "silence",
+       1.2
+      ]
+     ]
+    ],
+    [
+     "idle",
+     []
+    ]
+   ],
+   "slices": [
+    [
+     "a1 a1 a1 a1 a1 a1 a1 a1 a1. b1 b1 b1 b1 b1 b1 b1 b1 b1.",
+     "."
+    ],
+    [
+     "c1 c1 c1 c1 c1 c1 c1 c1 c1. c2 c2 c2 c2 c2 c2 c2 c2 c2.",
+     "."
+    ],
+    [
+     "",
+     "."
+    ]
+   ],
+   "cfg": {
+    "chunk_min_tokens": 15,
+    "chunk_max_tokens": 1000,
+    "skip_max_words": 5,
+    "pause_s": 0.8,
+    "slice_min_s": 2
+   },
+   "result": {
+    "raw": "a1 a1 a1 a1 a1 a1 a1 a1 a1. b1 b1 b1 b1 b1 b1 b1 b1 b1. c1 c1 c1 c1 c1 c1 c1 c1 c1. c2 c2 c2 c2 c2 c2 c2 c2 c2.",
+    "cleaned": "A1 A1 A1 A1 A1 A1 A1 A1 A1. B1 B1 B1 B1 B1 B1 B1 B1 B1.\n\nC1 C1 C1 C1 C1 C1 C1 C1 C1. C2 C2 C2 C2 C2 C2 C2 C2 C2.",
+    "clean_mode": "chunks",
+    "chunks": 2
+   }
+  },
+  {
+   "name": "pause_clean_completes_before_more_speech",
+   "steps": [
+    [
+     "audio",
+     [
+      [
+       "silence",
+       0.3
+      ],
+      [
+       "noise",
+       3,
+       8000
+      ],
+      [
+       "silence",
+       1.2
+      ]
+     ]
+    ],
+    [
+     "idle",
+     []
+    ],
+    [
+     "audio",
+     [
+      [
+       "noise",
+       3,
+       8000
+      ],
+      [
+       "silence",
+       1.2
+      ],
+      [
+       "noise",
+       3,
+       8000
+      ]
+     ]
+    ]
+   ],
+   "slices": [
+    [
+     "one nine word sentence sits right here.",
+     "."
+    ],
+    [
+     "b1 b1 b1 b1 b1 b1 b1 b1 b1. b2 b2 b2 b2 b2 b2 b2 b2 b2.",
+     "."
+    ],
+    [
+     "c1 c1 c1 c1 c1 c1 c1 c1 c1. c2 c2 c2 c2 c2 c2 c2 c2 c2.",
+     "."
+    ]
+   ],
+   "cfg": {
+    "chunk_min_tokens": 15,
+    "chunk_max_tokens": 1000,
+    "skip_max_words": 5,
+    "pause_s": 0.8,
+    "slice_min_s": 2
+   },
+   "result": {
+    "raw": "one nine word sentence sits right here. b1 b1 b1 b1 b1 b1 b1 b1 b1. b2 b2 b2 b2 b2 b2 b2 b2 b2. c1 c1 c1 c1 c1 c1 c1 c1 c1. c2 c2 c2 c2 c2 c2 c2 c2 c2.",
+    "cleaned": "ONE NINE WORD SENTENCE SITS RIGHT HERE. B1 B1 B1 B1 B1 B1 B1 B1 B1.\n\nB2 B2 B2 B2 B2 B2 B2 B2 B2. C1 C1 C1 C1 C1 C1 C1 C1 C1.\n\nC2 C2 C2 C2 C2 C2 C2 C2 C2.",
+    "clean_mode": "chunks",
+    "chunks": 3
+   }
+  },
+  {
+   "name": "fact_drift_falls_back_to_the_chunk_as_heard",
+   "steps": [
+    [
+     "audio",
+     [
+      [
+       "silence",
+       0.3
+      ],
+      [
+       "noise",
+       3,
+       8000
+      ]
+     ]
+    ]
+   ],
+   "cleaner": [
+    [
+     "S20",
+     "S25"
+    ]
+   ],
+   "slices": [
+    [
+     "Put it on the S20 Ultra please now today.",
+     "."
+    ]
+   ],
+   "cfg": {
+    "chunk_min_tokens": 15,
+    "chunk_max_tokens": 1000,
+    "skip_max_words": 5,
+    "pause_s": 0.8,
+    "slice_min_s": 2
+   },
+   "result": {
+    "raw": "Put it on the S20 Ultra please now today.",
+    "cleaned": "Put it on the S20 Ultra please now today.",
+    "clean_mode": "chunks",
+    "chunks": 1
+   }
+  },
+  {
+   "name": "spoken_question_mark_at_a_chunks_end",
+   "steps": [
+    [
+     "audio",
+     [
+      [
+       "silence",
+       0.3
+      ],
+      [
+       "noise",
+       3,
+       8000
+      ]
+     ]
+    ]
+   ],
+   "cleaner": [
+    [
+     " QUESTION MARK",
+     "."
+    ]
+   ],
+   "slices": [
+    [
+     "then ask if anyone wants it sooner question mark",
+     "."
+    ]
+   ],
+   "cfg": {
+    "chunk_min_tokens": 15,
+    "chunk_max_tokens": 1000,
+    "skip_max_words": 5,
+    "pause_s": 0.8,
+    "slice_min_s": 2
+   },
+   "result": {
+    "raw": "then ask if anyone wants it sooner question mark",
+    "cleaned": "THEN ASK IF ANYONE WANTS IT SOONER?",
+    "clean_mode": "chunks",
+    "chunks": 1
+   }
+  }
+ ],
  "correction_chunks": [
   {
    "name": "correction_after_a_closed_chunk",

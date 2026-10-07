@@ -14,6 +14,7 @@ import numpy as np
 from stt_button import asr, config
 from stt_button.asr import context_audio, settled_mark, split_at_junction
 from stt_button.bubble import Bubble
+from stt_button.live import LiveTake
 from stt_button.cleaner import casual, fact_drift, join_cleaned, live_chunks, opens_with_cue, matched_cue, skips_cleaner
 from stt_button.spoken import keep_spoken_ending, spoken_punctuation
 
@@ -185,6 +186,118 @@ BUBBLE_SEQUENCES = {
 }
 
 
+def labelled(prefix: str, count: int) -> str:
+    return " ".join(" ".join([f"{prefix}{i}"] * 8) + f" {prefix}{i}." for i in range(1, count + 1))
+
+
+TAKE_CFG = {"chunk_min_tokens": 15, "chunk_max_tokens": 1000, "skip_max_words": 5, "pause_s": 0.8, "slice_min_s": 2}
+SPEECH = ["noise", 3, 8000]
+PAUSE_1S = ["silence", 1.2]
+LEAD = ["silence", 0.3]
+
+# A take script drives one take. `steps` run in order and the take then stops. ["audio", segments] feeds
+# `pcm_signal(segments)` in 100 ms pieces; ["idle", segments] runs one pause-time clean step, during which
+# the take reads `pcm_signal(segments)` as the audio that arrived meanwhile. `slices` is what the recognizer
+# returns, in the order the slicer cuts: [text, mark], the mark being what a decode with the speech before it
+# adds. The cleaner returns the chunk upper-cased with each [find, replace] of `replace` applied, and gives
+# up when speech arrives during a pause-time clean. `cfg` overrides the pipeline's configuration.
+TAKE_SCRIPTS = [
+    {"name": "one_slice_under_the_skip_limit", "steps": [["audio", [LEAD, SPEECH]]],
+     "slices": [["Meet me at noon.", "."]]},
+    {"name": "skip_limit_take_with_a_correction_cue", "steps": [["audio", [LEAD, SPEECH]]],
+     "slices": [["Meet Tuesday, actually Wednesday.", "."]]},
+    {"name": "mark_change_at_the_junction", "steps": [["audio", [LEAD, SPEECH, PAUSE_1S, SPEECH]]],
+     "slices": [["Update the plan.", "."], ["have some monitoring now", "?"]]},
+    {"name": "two_chunks_close_before_the_stop", "steps": [["audio", [LEAD, SPEECH, PAUSE_1S, SPEECH, PAUSE_1S, SPEECH]]],
+     "slices": [[labelled("a", 3), "."], [labelled("b", 3), "."], [labelled("c", 1), "."]]},
+    {"name": "pause_clean_interrupted_by_speech",
+     "steps": [["audio", [LEAD, SPEECH, PAUSE_1S, SPEECH, PAUSE_1S]], ["idle", [["noise", 0.5, 8000]]], ["audio", [SPEECH]]],
+     "slices": [[labelled("a", 1) + " " + labelled("b", 1), "."], [labelled("c", 2), "."], ["tail end here.", "."]]},
+    {"name": "pause_clean_completes_and_is_reused",
+     "steps": [["audio", [LEAD, SPEECH, PAUSE_1S, SPEECH, PAUSE_1S]], ["idle", []]],
+     "slices": [[labelled("a", 1) + " " + labelled("b", 1), "."], [labelled("c", 2), "."], ["", "."]]},
+    {"name": "pause_clean_completes_before_more_speech",
+     "steps": [["audio", [LEAD, SPEECH, PAUSE_1S]], ["idle", []], ["audio", [SPEECH, PAUSE_1S, SPEECH]]],
+     "slices": [["one nine word sentence sits right here.", "."], [labelled("b", 2), "."], [labelled("c", 2), "."]]},
+    {"name": "fact_drift_falls_back_to_the_chunk_as_heard", "steps": [["audio", [LEAD, SPEECH]]],
+     "cleaner": [["S20", "S25"]], "slices": [["Put it on the S20 Ultra please now today.", "."]]},
+    {"name": "spoken_question_mark_at_a_chunks_end", "steps": [["audio", [LEAD, SPEECH]]],
+     "cleaner": [[" QUESTION MARK", "."]], "slices": [["then ask if anyone wants it sooner question mark", "."]]},
+]
+
+
+class ScriptedRecognizer:
+    def __init__(self, slices: list[list[str]]):
+        self.queue = [list(s) for s in slices]
+
+    def recognize(self, samples):
+        return self.queue.pop(0)[0]
+
+    def recognize_after(self, audio, junction_s):
+        text, mark = self.queue.pop(0)
+        return mark, text
+
+
+class MarkingCleaner:
+    def __init__(self, replacements: list[list[str]]):
+        self.replacements = replacements
+
+    def count_tokens(self, text: str) -> int:
+        return words(text)
+
+    def clean_chunk(self, chunk: str, cancelled=None):
+        if cancelled and cancelled():
+            return None
+        out = chunk.upper()
+        for find, replace in self.replacements:
+            out = out.replace(find, replace)
+        return out, 1
+
+
+def run_take_script(script: dict, with_idle: bool = True) -> dict:
+    cfg = {**config.load(), **TAKE_CFG, **script.get("cfg", {})}
+    recognizer = ScriptedRecognizer(script["slices"])
+    take = LiveTake(recognizer, lambda: MarkingCleaner(script.get("cleaner", [])), cfg)
+    piece = SR // 10
+    for kind, segments in script["steps"]:
+        audio = to_float(pcm_signal(segments)) if segments else np.zeros(0, dtype=np.float32)
+        if kind == "audio":
+            for at in range(0, len(audio), piece):
+                take.feed(audio[at:at + piece])
+        elif with_idle:
+            arrived = [audio]
+            take.idle_step(lambda: arrived.pop() if arrived else np.zeros(0, dtype=np.float32))
+    take.mark_stop()
+    result = take.finish()
+    assert not recognizer.queue, f"{script['name']}: {len(recognizer.queue)} scripted slices were never cut"
+    return {"raw": result.raw, "cleaned": result.cleaned, "clean_mode": result.clean_mode, "chunks": result.chunks,
+            "idle_cleans": result.idle_cleans, "idle_hits": result.idle_hits}
+
+
+def take_vectors() -> list[dict]:
+    out = []
+    for script in TAKE_SCRIPTS:
+        result = run_take_script(script)
+        if any(kind == "idle" for kind, _ in script["steps"]):
+            plain = run_take_script(script, with_idle=False)
+            assert {k: result[k] for k in ("raw", "cleaned", "clean_mode", "chunks")} == \
+                {k: plain[k] for k in ("raw", "cleaned", "clean_mode", "chunks")}, f"{script['name']}: idle cleaning changed the text"
+        if script["name"] == "pause_clean_completes_and_is_reused":
+            assert result["idle_hits"] >= 1, "the pause-time clean was never reused"
+        if script["name"] in ("pause_clean_interrupted_by_speech", "pause_clean_completes_before_more_speech"):
+            assert result["idle_cleans"] >= 1 and result["idle_hits"] == 0, f"{script['name']}: {result}"
+        out.append({**script, "cfg": {**TAKE_CFG, **script.get("cfg", {})},
+                    "result": {k: result[k] for k in ("raw", "cleaned", "clean_mode", "chunks")}})
+    by_name = {v["name"]: v for v in out}
+    assert by_name["one_slice_under_the_skip_limit"]["result"]["clean_mode"] == "raw"
+    assert by_name["skip_limit_take_with_a_correction_cue"]["result"]["clean_mode"] == "chunks"
+    assert by_name["mark_change_at_the_junction"]["result"]["raw"] == "Update the plan? have some monitoring now"
+    assert by_name["two_chunks_close_before_the_stop"]["result"]["chunks"] >= 3
+    assert by_name["fact_drift_falls_back_to_the_chunk_as_heard"]["result"]["cleaned"].startswith("Put it on the S20")
+    assert by_name["spoken_question_mark_at_a_chunks_end"]["result"]["cleaned"].endswith("?")
+    return out
+
+
 def replay_bubble(events: list[list]) -> list[list[str]]:
     bubble, shown = Bubble(), []
     for kind, *args in events:
@@ -211,6 +324,7 @@ def vectors() -> dict:
         "slicer": slicer,
         "bubble": [{"name": n, "events": e, "after_each": replay_bubble(e)} for n, e in BUBBLE_SEQUENCES.items()],
         "live_chunks": chunks,
+        "takes": take_vectors(),
         "correction_chunks": [
             {"name": n, "text": " ".join(t.split()[:k]), "min_tokens": 20, "max_tokens": 100, "final": final,
              "cues": cfg["self_correction_cues"],
