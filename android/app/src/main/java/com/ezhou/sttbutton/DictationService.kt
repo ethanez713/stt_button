@@ -45,7 +45,7 @@ class DictationService : AccessibilityService() {
         override fun onChange(selfChange: Boolean) {
             if (::swapper.isInitialized) swapper.noteDefaultChanged()
             english = resolveEnglish()
-            if (english == false && ::controller.isInitialized && !controller.swapHoldsTake) controller.discard(DiscardReason.LANGUAGE)
+            if (english == false && ::controller.isInitialized && !controller.swapHoldsTake) controller.onLanguageLeft()
             reconcile()
         }
     }
@@ -61,11 +61,11 @@ class DictationService : AccessibilityService() {
         controller = TakeController(this, overlay, bubble).also {
             it.logProcessExits()
         }
-        swapper = ImeSwapper(this).also {
+        swapper = ImeSwapper(this) { controller.swapHoldsTake }.also {
             it.enableOnConnect()
-            ImeLink.onStranded = { it.returnKeyboard() }
             it.returnIfStranded()
         }
+        ImeLink.host = controller
         for (key in listOf(Settings.Secure.SELECTED_INPUT_METHOD_SUBTYPE, Settings.Secure.DEFAULT_INPUT_METHOD)) {
             contentResolver.registerContentObserver(Settings.Secure.getUriFor(key), false, imeObserver)
         }
@@ -170,7 +170,7 @@ class DictationService : AccessibilityService() {
 
     override fun onDestroy() {
         if (live === this) live = null
-        ImeLink.onStranded = null
+        ImeLink.host = null
         contentResolver.unregisterContentObserver(imeObserver)
         handler.removeCallbacks(reread)
         if (::controller.isInitialized) controller.shutdown()

@@ -1,7 +1,6 @@
 package com.ezhou.sttbutton
 
 import android.inputmethodservice.InputMethodService
-import android.os.SystemClock
 import android.view.View
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
@@ -28,25 +27,24 @@ class DictationIme : InputMethodService() {
     override fun onCreateInputView(): View {
         val prefs = getSharedPreferences(ButtonStyle.PREFS, MODE_PRIVATE)
         val onPick = { getSystemService(InputMethodManager::class.java).showInputMethodPicker() }
-        return TakePanel(this, { ButtonStyle.load(prefs) }, { ImeLink.onStop?.invoke() }, onPick).also { panel = it }
+        return TakePanel(this, { ButtonStyle.load(prefs) }, { ImeLink.host?.stopKeyTapped() }, onPick, { ImeLink.host?.panel() ?: PanelState.EMPTY })
+            .also { panel = it }
     }
 
     override fun onStartInputView(info: EditorInfo, restarting: Boolean) {
         super.onStartInputView(info, restarting)
-        val swap = ImeLink.swap
-        val stranded = swap == null || swap.onViewStart(SystemClock.uptimeMillis()) == ViewStart.STRANDED
-        if (stranded) ImeLink.onStranded?.invoke()
+        ImeLink.host?.viewStarted()
         refreshPanel()
     }
 
     override fun onFinishInputView(finishingInput: Boolean) {
         super.onFinishInputView(finishingInput)
-        ImeLink.onViewFinish?.invoke()
+        ImeLink.host?.viewFinished()
     }
 
     override fun onStartInput(attribute: EditorInfo, restarting: Boolean) {
         super.onStartInput(attribute, restarting)
-        if (FieldPolicy.exclusion(password = false, attribute.inputType) != null) ImeLink.onExcludedField?.invoke()
+        if (FieldPolicy.exclusion(password = false, attribute.inputType) != null) ImeLink.host?.inputStartedOnExcludedField()
     }
 
     fun refreshPanel() {

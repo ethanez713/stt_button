@@ -16,14 +16,21 @@ import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import java.io.File
 import java.util.UUID
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.concurrent.thread
 
 /**
- * Runs takes for the accessibility service. The tap, the cap, silence, the button leaving the screen,
- * or a package change stops one, and its text is inserted once then. Everything here is called on the
- * main thread except the worker's own loop, which hands its result back through the handler.
+ * Carries out takes for the accessibility service. Android's callbacks become [TakeEvent]s for a
+ * [TakeSession], which decides; this class executes the [TakeEffect]s it returns and holds no decision of
+ * its own. Everything here runs on the main thread except the recorder's, the models' and the worker's.
  */
-class TakeController(private val service: DictationService, private val overlay: Overlay, private val bubble: BubbleOverlay) {
+class TakeController(
+    private val service: DictationService,
+    private val overlay: Overlay,
+    private val bubble: BubbleOverlay,
+) : KeyboardHost {
     private val tag = DictationService.TAG
     private val handler = Handler(Looper.getMainLooper())
     private val configBytes = service.assets.open("pipeline.json").use { it.readBytes() }
@@ -34,99 +41,157 @@ class TakeController(private val service: DictationService, private val overlay:
     private val log = EditLog(File(service.filesDir, "logs/edits.jsonl"))
     private val inserter = Inserter(service)
     private val takesDir = File(service.filesDir, "takes")
-    private var run: Run? = null
-    private val bubbleQueued = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    /** The latest take's session: open, ending, or flashing its failure on the button. */
+    private var session: TakeSession? = null
+    private val runs = HashMap<TakeSession, Run>()
+    private var fieldAtTap: AccessibilityNodeInfo? = null
+    private val returnedBy = HashMap<String, String?>()
+    private val bubbleQueued = AtomicBoolean(false)
     private var tracker: FieldTracker? = null
+
     /** Accessibility events this process has handled, so the log shows the traffic between takes. */
     private var eventsSeen = 0L
-    private val capRunnable = Runnable { run?.let { stop(it, TRIGGER_CAP) } }
     private var parked: Models? = null
     private var shutDown = false
     private val releaseParked = Runnable { releaseParkedNow() }
-    private val hiddenWatch = HiddenWatch(HIDDEN_GRACE_MS)
-    private val hiddenCheck = Runnable { service.recheck() }
-    private var failedUntilMs = 0L
-    private val endFlash = Runnable { applyButtonMode() }
-    private val swapCheck = Runnable {
-        val current = run ?: return@Runnable
-        if (current.swap.poll(SystemClock.uptimeMillis())) returnKeyboard(current)
-    }
-
-    private val keyboardStopCheck = Runnable {
-        val current = run ?: return@Runnable
-        if (current.swap.keyboardStopDue(SystemClock.uptimeMillis())) stop(current, TRIGGER_KEYBOARD)
-    }
-
-    /** True while the take's own keyboard is up or coming, so a keyboard setting change is not the user leaving English. */
-    val swapHoldsTake: Boolean get() = run?.swap?.holdsTake == true
+    private var stopKey: Bounds? = null
+    private var panelHeight = 0
+    private var panelBusy = false
 
     private class Run(
-        val take: Take, val pcm: File, val models: Models, val live: LiveTake, val recorder: Recorder,
+        val take: Take, val models: Models, val engine: TakeEngine, val driver: TakeDriver, val recorder: Recorder,
         val cost: TakeCost, val sampler: CostSampler, val bubbleText: BubbleText, val preview: PreviewRecognizer,
-        val level: AudioLevel,
+        val level: AudioLevel, val executor: ExecutorService,
     ) {
-        var swap: SwapState = SwapState.off()
-        @Volatile var stopRequested = false
-        @Volatile var aborted = false
-        @Volatile var stopTrigger = TRIGGER_STOP
-        var stoppedAtMs = 0L
-
         /** The field the take was started in. Text goes to the focused field, or to this one when nothing is. */
         var field: AccessibilityNodeInfo? = null
+        var result: LiveResult? = null
+        var placement: Placement? = null
+        var stoppedAtMs = 0L
     }
+
+    /** Where a finished take's text goes, as the field stood when the engine finished. */
+    private class Placement(val field: AccessibilityNodeInfo?, val fieldText: String?, val body: String)
+
+    private val open: TakeSession? get() = session?.takeIf { !it.ended }
+
+    /** True while the take's own keyboard is up or coming, so a keyboard setting change is not the user leaving English. */
+    val swapHoldsTake: Boolean get() = session?.holdsTake == true
 
     /** The open take's state for the trace log, NONE between takes. */
-    val stateName: String get() = run?.take?.state?.name ?: "NONE"
+    val stateName: String get() = open?.take?.state?.name ?: "NONE"
 
     fun onTap() {
-        if (SystemClock.uptimeMillis() < failedUntilMs) return
-        val current = run
-        when {
-            current == null -> start()
-            current.take.state == TakeState.OPEN -> stop(current)
-            else -> Unit
-        }
-    }
-
-    /**
-     * Called with every placement. A take records only while its button is on screen: the bubble
-     * leaves with the button, and a button that stays away for [HIDDEN_GRACE_MS] stops the take
-     * as a tap would.
-     */
-    fun onButtonShown(shown: Boolean) {
-        handler.removeCallbacks(hiddenCheck)
-        if (run?.swap?.holdsTake == true) {
-            hiddenWatch.stopInMs(shown = true, recording = false, SystemClock.uptimeMillis())
+        val current = session?.takeIf { !it.finished }
+        if (current != null) {
+            dispatch(current, TakeEvent.Tap(micGranted()))
             return
         }
-        if (!shown) bubble.hide()
-        val current = run?.takeIf { it.take.state == TakeState.OPEN }
-        val wait = hiddenWatch.stopInMs(shown, current != null, SystemClock.uptimeMillis())
-        if (current == null) return
-        when (wait) {
-            null -> if (!bubble.isShowing) {
+        val field = service.focusedField()
+        val pkg = field?.packageName?.toString() ?: service.activePackage() ?: UNKNOWN_PACKAGE
+        val fresh = TakeSession(Take(UUID.randomUUID().toString(), pkg, SystemClock.elapsedRealtime()), cfg.takeCapS * 1000L) {
+            SystemClock.uptimeMillis()
+        }
+        session = fresh
+        fieldAtTap = field
+        dispatch(fresh, TakeEvent.Tap(micGranted()))
+    }
+
+    private fun micGranted(): Boolean {
+        val granted = service.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+        if (!granted) Log.w(tag, "tap ignored: the microphone permission is not granted")
+        return granted
+    }
+
+    /** Called with every placement: a take records only while its button is on screen. */
+    fun onButtonShown(shown: Boolean) {
+        val current = open
+        if (current == null) {
+            if (!shown) bubble.hide()
+            return
+        }
+        dispatch(current, TakeEvent.ButtonShown(shown))
+    }
+
+    /** The keyboard setting changed to a language other than English. */
+    fun onLanguageLeft() {
+        open?.let { dispatch(it, TakeEvent.LanguageLeft) }
+    }
+
+    fun onAccessibilityEvent(event: AccessibilityEvent) {
+        eventsSeen++
+        open?.let { current ->
+            val focused = service.focusedField()?.packageName?.toString()
+            if (focused != null && current.take.pkg != UNKNOWN_PACKAGE && focused != current.take.pkg) dispatch(current, TakeEvent.PackageChanged)
+        }
+        tracker?.onEvent(event)
+    }
+
+    override fun stopKeyTapped() {
+        open?.let { dispatch(it, TakeEvent.Tap(micGranted())) }
+    }
+
+    override fun viewStarted() {
+        val current = open
+        if (current == null) service.swapper.returnKeyboard() else dispatch(current, TakeEvent.ViewStarted)
+    }
+
+    override fun viewFinished() {
+        open?.let { dispatch(it, TakeEvent.ViewFinished) }
+    }
+
+    override fun inputStartedOnExcludedField() {
+        open?.let { dispatch(it, TakeEvent.ExcludedField) }
+    }
+
+    override fun panel() = PanelState(stopKey, panelHeight, panelBusy, service.swapper.stranded)
+
+    private fun dispatch(current: TakeSession, event: TakeEvent) {
+        val run = runs[current]
+        for (effect in current.on(event)) execute(current, run, effect)
+    }
+
+    private fun execute(current: TakeSession, run: Run?, effect: TakeEffect) {
+        when (effect) {
+            TakeEffect.StartTake -> startTake(current)
+            TakeEffect.AskSwap -> askSwap(current)
+            TakeEffect.StopRecorder -> run?.let(::stopRecorder)
+            TakeEffect.StopEngine -> run?.let { stopEngine(current, it) }
+            TakeEffect.CancelCleaner -> run?.models?.cleaner()?.cancel()
+            is TakeEffect.ReturnKeyboard -> {
+                val method = service.swapper.returnKeyboard()
+                if (!effect.stranded) returnedBy[current.take.id] = method
+            }
+            TakeEffect.WriteImeLine -> writeImeLine(current.take.id, returnedBy.remove(current.take.id))
+            TakeEffect.ShowBubble -> {
                 bubble.show()
                 scheduleBubble()
             }
-            0L -> stop(current, TRIGGER_KEYBOARD)
-            else -> handler.postDelayed(hiddenCheck, wait)
+            TakeEffect.HideBubble -> bubble.hide()
+            is TakeEffect.PanelBusy -> {
+                panelBusy = effect.busy
+                ImeLink.current?.refreshPanel()
+            }
+            is TakeEffect.SetButton -> overlay.setMode(effect.mode)
+            TakeEffect.Recheck -> service.recheck()
+            is TakeEffect.Insert -> run?.let { insert(current, it, effect.trigger) }
+            is TakeEffect.CopyUnplaced -> run?.let { copyUnplaced(current, it, effect.reason, effect.trigger) }
+            is TakeEffect.LogDiscard -> run?.let { logDiscard(current, it, effect.reason, effect.trigger) }
+            TakeEffect.Release -> run?.let { release(current, it) }
+            TakeEffect.ParkModels -> run?.let(::settleAndPark)
+            is TakeEffect.Schedule -> handler.postDelayed({ dispatch(current, effect.event) }, effect.delayMs)
         }
     }
 
-    private fun start() {
-        if (service.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-            Log.w(tag, "tap ignored: the microphone permission is not granted")
-            flashFailed()
-            return
-        }
+    private fun startTake(current: TakeSession) {
+        val take = current.take
         tracker?.end()
-        val field = service.focusedField()
-        val pkg = field?.packageName?.toString() ?: service.activePackage() ?: UNKNOWN_PACKAGE
-        val take = Take(UUID.randomUUID().toString(), pkg, SystemClock.elapsedRealtime())
+        val field = fieldAtTap
         val warm = parked
         parked = null
         handler.removeCallbacks(releaseParked)
-        log.write("start", take.id, "pkg" to pkg, "models_warm" to (warm != null), "config_id" to configId,
+        log.write("start", take.id, "pkg" to take.pkg, "models_warm" to (warm != null), "config_id" to configId,
             "proc_cpu_ms" to Process.getElapsedCpuTime(),
             "proc_age_ms" to SystemClock.elapsedRealtime() - Process.getStartElapsedRealtime(),
             "proc_events" to eventsSeen)
@@ -137,153 +202,101 @@ class TakeController(private val service: DictationService, private val overlay:
         }
         val models = warm ?: Models.forFiles(service.filesDir, cfg)
         val bubbleText = BubbleText().apply { onChange = ::scheduleBubble }
-        val live = LiveTake(models.recognizer, models::cleaner, cfg, bubbleText, models::prepareCleaner)
+        val slicer = Slicer.fromConfig(cfg)
+        val engine = TakeEngine(
+            BufferDocument(), slicer, models.recognizer, models.cleaner(), ChunkPolicy(cfg), cfg,
+            jobs = { writeJob(take.id, it) }, prepareCleaner = models::prepareCleaner,
+        ).also {
+            it.onText = bubbleText::region
+            it.onCovered = bubbleText::covered
+        }
+        val executor = Executors.newSingleThreadExecutor { Thread(it, "take-worker") }
+        val driver = TakeDriver(
+            engine, worker = { executor.execute(it) },
+            onDone = { result -> runs[current]?.let { onEngineDone(current, it, result) } },
+            onError = { e ->
+                Log.e(tag, "take failed", e)
+                dispatch(current, TakeEvent.Error)
+            },
+            onTick = { runs[current]?.let { if (cfg.stopSilenceS?.let { limit -> engine.silenceS() >= limit } == true) dispatch(current, TakeEvent.Silence) } },
+        )
         val preview = PreviewRecognizer(models::awaitPreview, bubbleText::preview)
         val pcm = File(takesDir, "${take.id}.pcm")
         val level = AudioLevel()
         val recorder = Recorder(pcm, onFailure = { e ->
             Log.e(tag, "recording failed", e)
-            handler.post { run?.takeIf { it.pcm == pcm }?.let { stop(it, TRIGGER_MIC) } }
+            handler.post { dispatch(current, TakeEvent.MicFailed) }
         }) { samples, length ->
             level.add(samples, length)
-            live.addSamples(samples, length)
-            preview.offer(samples, length, live.slicer.paused)
+            val slices = slicer.feed(samples, length)
+            engine.onAudio()
+            if (slices.isNotEmpty()) driver.wake()
+            preview.offer(samples, length, slicer.paused)
         }
         val cost = TakeCost(AndroidCostProbe(service)).also { it.start() }
-        val current = Run(take, pcm, models, live, recorder, cost, CostSampler(cost), bubbleText, preview, level)
+        val run = Run(take, models, engine, driver, recorder, cost, CostSampler(cost), bubbleText, preview, level, executor)
+        run.field = field
+        runs[current] = run
         try {
             recorder.start()
         } catch (e: Exception) {
             Log.e(tag, "recording failed to start", e)
-            run = current
-            discard(DiscardReason.ERROR)
-            park(models)
+            dispatch(current, TakeEvent.RecorderStartFailed)
             return
         }
-        current.field = field
         pruneTakeAudio(pcm.name)
-        run = current
-        startSwap(current)
-        Log.i(tag, "take start pkg=$pkg")
-        bubble.show()
-        thread(name = "take-worker") { work(current) }
-        handler.postDelayed(capRunnable, cfg.takeCapS * 1000L)
-        applyButtonMode()
+        Log.i(tag, "take start pkg=${take.pkg}")
+        driver.start()
+        dispatch(current, TakeEvent.RecorderStarted)
     }
 
-    private fun startSwap(current: Run) {
-        ImeLink.stranded = false
-        ImeLink.busy = false
-        ImeLink.panelHeightPx = service.rememberedImeHeight() ?: 0
-        ImeLink.stopKey = StopKeyPlacement.inPanel(overlay.lastShown, overlay.screen().bottom, panelHeightPx())
-        ImeLink.onStop = { run?.takeIf { it === current }?.let(::stop) }
-        ImeLink.onViewFinish = { onViewFinished(current) }
-        ImeLink.onExcludedField = { if (run === current && current.swap.holdsTake) stop(current, TRIGGER_KEYBOARD) }
-        current.swap = service.swapper.begin(SystemClock.uptimeMillis())
-        ImeLink.swap = current.swap
-        if (current.swap.phase == SwapPhase.PENDING) handler.postDelayed(swapCheck, SwapState.PENDING_TIMEOUT_MS)
-    }
-
-    private fun onViewFinished(current: Run) {
-        if (run === current && current.swap.onViewFinish(SystemClock.uptimeMillis())) {
-            handler.postDelayed(keyboardStopCheck, SwapState.KEYBOARD_STOP_MS)
-        }
+    private fun askSwap(current: TakeSession) {
+        service.swapper.clearStranded()
+        panelBusy = false
+        panelHeight = service.rememberedImeHeight() ?: 0
+        stopKey = StopKeyPlacement.inPanel(overlay.lastShown, overlay.screen().bottom, panelHeightPx())
+        dispatch(current, TakeEvent.SwapAsked(service.swapper.begin(SystemClock.uptimeMillis())))
     }
 
     private fun panelHeightPx(): Int =
-        ImeLink.panelHeightPx.takeIf { it > 0 } ?: (TakePanel.DEFAULT_HEIGHT_DP * service.resources.displayMetrics.density).toInt()
+        panelHeight.takeIf { it > 0 } ?: (TakePanel.DEFAULT_HEIGHT_DP * service.resources.displayMetrics.density).toInt()
 
-    /** Puts the user's keyboard back, once per take. */
-    private fun returnKeyboard(current: Run): String? {
-        if (!current.swap.returnOwed) return null
-        current.swap.markReturned()
-        val method = service.swapper.returnKeyboard()
-        handler.postDelayed({ writeImeLine(current.take.id, method) }, IME_LINE_DELAY_MS)
-        return method
-    }
-
-    private fun writeImeLine(takeId: String, method: String?) {
-        val (returnMs, subtypeOk) = service.swapper.returnReport()
-        log.write("ime", takeId, "ime_return" to (method ?: "failed"), "ime_return_ms" to returnMs,
-            "ime_subtype_ok" to subtypeOk, "ime_height_delta_px" to service.imeHeightDelta())
-    }
-
-    private fun swapFields(current: Run): Array<Pair<String, Any?>> =
-        arrayOf("ime_swap" to current.swap.logName, "ime_swap_ms" to current.swap.swapMs)
-
-    private fun stop(current: Run, trigger: String = TRIGGER_STOP) {
-        if (!current.take.requestStop()) return
-        current.stopTrigger = trigger
-        Log.i(tag, "take stop trigger=$trigger")
-        handler.removeCallbacks(capRunnable)
-        if (trigger == TRIGGER_MIC) flashFailed() else applyButtonMode()
-        current.stoppedAtMs = SystemClock.elapsedRealtime()
-        ImeLink.busy = true
-        ImeLink.current?.refreshPanel()
-        current.recorder.stop()
-        current.stopRequested = true
-        if (trigger == TRIGGER_KEYBOARD || trigger == TRIGGER_PACKAGE) bubble.hide()
-        service.recheck()
-    }
-
-    /** [trigger] is the stop that found nothing to insert, or null when no stop led here. */
-    fun discard(reason: DiscardReason, trigger: String? = null) {
-        val current = run ?: return
-        if (!current.take.discard(reason)) return
-        current.aborted = true
-        current.stopRequested = true
-        handler.removeCallbacks(capRunnable)
-        current.recorder.stop()
-        log.write(
-            "discard", current.take.id, "reason" to reason.logName, "trigger" to trigger,
-            "audio_ms" to current.level.audioMs, "zero_ms" to current.level.zeroMs, "peak_dbfs" to current.level.peakDbfs,
-            *swapFields(current), *current.cost.lap().toTypedArray(),
-        )
-        if (reason == DiscardReason.ERROR) flashFailed()
-        current.models.cleaner().cancel()
-        release(current)
-    }
-
-    private fun work(current: Run) {
+    private fun stopRecorder(run: Run) {
         try {
-            while (!current.stopRequested) {
-                if (current.live.step()) continue
-                if (cfg.stopSilenceS?.let { current.live.silenceS() >= it } == true) {
-                    handler.post { stop(current, TRIGGER_SILENCE) }
-                    while (!current.stopRequested) Thread.sleep(IDLE_POLL_MS)
-                    break
-                }
-                Thread.sleep(IDLE_POLL_MS)
-            }
-            if (!current.aborted) {
-                current.live.markStop()
-                val result = current.live.finish()
-                handler.post { insert(current, result, current.stopTrigger, current.stoppedAtMs) }
-            }
-        } catch (e: Throwable) {
-            Log.e(tag, "take failed", e)
-            handler.post { if (run === current) discard(DiscardReason.ERROR) }
-        } finally {
-            current.preview.stop()
-            handler.post { park(current.models) }
+            run.recorder.stop()
+        } catch (e: Exception) {
+            Log.w(tag, "recorder did not stop cleanly", e)
         }
     }
 
-    private fun insert(current: Run, result: LiveResult, trigger: String, triggerAtMs: Long) {
-        val take = current.take
-        if (take.finished || take.state != TakeState.STOPPING) return
-        val field = targetField(current)
+    private fun stopEngine(current: TakeSession, run: Run) {
+        Log.i(tag, "take stop trigger=${current.stopTrigger}")
+        run.stoppedAtMs = SystemClock.elapsedRealtime()
+        run.driver.stop()
+    }
+
+    private fun onEngineDone(current: TakeSession, run: Run, result: LiveResult) {
+        run.result = result
+        val take = run.take
+        val field = targetField(run)
         val otherPackage = field != null && take.pkg != UNKNOWN_PACKAGE && field.packageName?.toString() != take.pkg
         val fieldText = if (field != null && !otherPackage) inserter.textOf(field) else null
         val body = if (fieldText != null && fieldText.isEmpty()) Pipeline.casual(result.cleaned, cfg) else result.cleaned
-        if (body.isBlank()) {
-            discard(DiscardReason.EMPTY, trigger)
-            return
-        }
-        if (field == null || fieldText == null) {
-            copyUnplaced(current, result, body, trigger, if (otherPackage) DiscardReason.PACKAGE else DiscardReason.NO_FIELD)
-            return
-        }
+        run.placement = Placement(field, fieldText, body)
+        dispatch(current, TakeEvent.EngineFinished(when {
+            body.isBlank() -> Delivery.BLANK
+            field == null || fieldText == null -> if (otherPackage) Delivery.OTHER_PACKAGE else Delivery.NO_FIELD
+            else -> Delivery.INSERT
+        }))
+    }
+
+    private fun insert(current: TakeSession, run: Run, trigger: String) {
+        val take = run.take
+        val result = checkNotNull(run.result)
+        val placement = checkNotNull(run.placement)
+        val field = checkNotNull(placement.field)
+        val fieldText = checkNotNull(placement.fieldText)
+        val body = placement.body
         val caret = inserter.readCaret(field)
         val caretBefore = if (caret.known) caret.end else field.textSelectionEnd
         val written = Pipeline.takeOpener(fieldText, caretBefore) + body
@@ -291,8 +304,7 @@ class TakeController(private val service: DictationService, private val overlay:
         if (outcome.copied && outcome.readback == "unchanged") {
             Toast.makeText(service, R.string.copied_to_clipboard, Toast.LENGTH_LONG).show()
         }
-        take.markInserted()
-        current.sampler.stop()
+        run.sampler.stop()
         val caretAfter = inserter.readCaret(field)
         log.write("insert", take.id,
             "pkg" to take.pkg, "raw" to result.raw, "cleaned" to body, "text_before" to outcome.textBefore,
@@ -301,25 +313,26 @@ class TakeController(private val service: DictationService, private val overlay:
             "attempts" to outcome.attempts, "copied" to outcome.copied,
             "sel_before" to caretBefore, "sel_after" to caretAfter.end,
             "asr_ms" to result.asrMs, "clean_ms" to result.cleanMs, "asr_backend" to "cpu", "clean_backend" to "cpu",
-            "audio_ms" to result.audioMs, "zero_ms" to current.level.zeroMs, "peak_dbfs" to current.level.peakDbfs,
+            "audio_ms" to result.audioMs, "zero_ms" to run.level.zeroMs, "peak_dbfs" to run.level.peakDbfs,
             "in_tokens" to result.inTokens, "out_tokens" to result.outTokens,
-            "clean_mode" to result.cleanMode, "chunks" to result.chunks,
+            "clean_mode" to result.cleanMode, "clean_policy" to run.engine.policyName, "chunks" to result.chunks,
             "idle_cleans" to result.idleCleans, "idle_hits" to result.idleHits, "cue" to result.cue,
-            "context_decodes" to result.contextDecodes, "context_fallbacks" to result.contextFallbacks, "drifts" to result.drifts, "corrections" to result.corrections, "corrections_kept" to result.correctionsKept,
+            "context_decodes" to result.contextDecodes, "context_fallbacks" to result.contextFallbacks, "drifts" to result.drifts,
+            "corrections" to result.corrections, "corrections_kept" to result.correctionsKept,
             "trigger" to trigger, *swapFields(current), "a11y_conn" to service.a11yConnection(),
             "asr_ms_after_stop" to result.asrMsAfterStop, "clean_ms_after_stop" to result.cleanMsAfterStop,
-            "stop_to_insert_ms" to SystemClock.elapsedRealtime() - triggerAtMs,
-            *current.cost.lap().toTypedArray())
+            "stop_to_insert_ms" to SystemClock.elapsedRealtime() - run.stoppedAtMs,
+            *run.cost.lap().toTypedArray())
         track(take, field, if (outcome.readback == "landed") written else null, caretAfter.end.takeIf { caretAfter.known })
-        release(current)
     }
 
     /**
      * The field the take was for is gone or belongs to another app, so the text has nowhere to go:
      * it is put on the clipboard and the user is told, instead of losing what they dictated.
      */
-    private fun copyUnplaced(current: Run, result: LiveResult, text: String, trigger: String, reason: DiscardReason) {
-        val clip = text.trim()
+    private fun copyUnplaced(current: TakeSession, run: Run, reason: DiscardReason, trigger: String) {
+        val result = checkNotNull(run.result)
+        val clip = checkNotNull(run.placement).body.trim()
         val copied = try {
             service.getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("dictation", clip))
             true
@@ -328,13 +341,35 @@ class TakeController(private val service: DictationService, private val overlay:
             false
         }
         if (copied) Toast.makeText(service, R.string.copied_to_clipboard, Toast.LENGTH_LONG).show()
-        log.write("clipboard", current.take.id,
-            "pkg" to current.take.pkg, "reason" to reason.logName, "trigger" to trigger, "copied" to copied,
-            "raw" to result.raw, "text" to clip, "clean_mode" to result.cleanMode, "audio_ms" to result.audioMs,
-            "zero_ms" to current.level.zeroMs, "peak_dbfs" to current.level.peakDbfs,
-            *swapFields(current), *current.cost.lap().toTypedArray())
-        current.take.discard(reason)
-        release(current)
+        log.write("clipboard", run.take.id,
+            "pkg" to run.take.pkg, "reason" to reason.logName, "trigger" to trigger, "copied" to copied,
+            "raw" to result.raw, "text" to clip, "clean_mode" to result.cleanMode, "clean_policy" to run.engine.policyName,
+            "audio_ms" to result.audioMs, "zero_ms" to run.level.zeroMs, "peak_dbfs" to run.level.peakDbfs,
+            *swapFields(current), *run.cost.lap().toTypedArray())
+    }
+
+    private fun logDiscard(current: TakeSession, run: Run, reason: DiscardReason, trigger: String?) {
+        log.write(
+            "discard", run.take.id, "reason" to reason.logName, "trigger" to trigger, "clean_policy" to run.engine.policyName,
+            "audio_ms" to run.level.audioMs, "zero_ms" to run.level.zeroMs, "peak_dbfs" to run.level.peakDbfs,
+            *swapFields(current), *run.cost.lap().toTypedArray(),
+        )
+    }
+
+    private fun writeJob(takeId: String, record: JobRecord) {
+        log.write("job", takeId, "kind" to record.kind, "moment" to record.moment, "ms" to record.ms,
+            "in" to record.input, "out" to record.output, "outcome" to record.outcome,
+            "in_tokens" to record.inTokens, "out_tokens" to record.outTokens,
+            "from_ms" to record.fromMs, "to_ms" to record.toMs, "context" to record.context, "scope" to record.scope)
+    }
+
+    private fun swapFields(current: TakeSession): Array<Pair<String, Any?>> =
+        arrayOf("ime_swap" to current.swap.logName, "ime_swap_ms" to current.swap.swapMs)
+
+    private fun writeImeLine(takeId: String, method: String?) {
+        val (returnMs, subtypeOk) = service.swapper.returnReport()
+        log.write("ime", takeId, "ime_return" to (method ?: "failed"), "ime_return_ms" to returnMs,
+            "ime_subtype_ok" to subtypeOk, "ime_height_delta_px" to service.imeHeightDelta())
     }
 
     private fun track(take: Take, field: AccessibilityNodeInfo, landed: String?, caretAfter: Int?) {
@@ -343,52 +378,46 @@ class TakeController(private val service: DictationService, private val overlay:
         else tracker = FieldTracker(take.id, field, inserter.textOf(field), landed, caretAfter)
     }
 
-    private fun release(current: Run) {
-        Log.i(tag, "take end state=${current.take.state} reason=${current.take.discardReason?.logName}")
-        current.sampler.stop()
+    private fun release(current: TakeSession, run: Run) {
+        Log.i(tag, "take end state=${run.take.state} reason=${run.take.discardReason?.logName}")
+        run.sampler.stop()
         bubble.hide()
-        if (run === current) run = null
-        handler.removeCallbacks(swapCheck)
-        handler.removeCallbacks(keyboardStopCheck)
-        ImeLink.swap = null
-        ImeLink.onStop = null
-        ImeLink.onViewFinish = null
-        ImeLink.onExcludedField = null
-        ImeLink.busy = false
-        returnKeyboard(current)
-        applyButtonMode()
+        runs.remove(current)
+        panelBusy = false
+        ImeLink.current?.refreshPanel()
         service.stopService(Intent(service, RecordingService::class.java))
-        service.recheck()
     }
 
-    fun onAccessibilityEvent(event: AccessibilityEvent) {
-        eventsSeen++
-        run?.let { current ->
-            val focused = service.focusedField()?.packageName?.toString()
-            if (focused != null && current.take.pkg != UNKNOWN_PACKAGE && focused != current.take.pkg) stop(current, TRIGGER_PACKAGE)
+    /** The preview and the models are let go once no job is using them. */
+    private fun settleAndPark(run: Run) {
+        run.executor.shutdown()
+        run.driver.abandon {
+            thread(name = "take-end") {
+                run.preview.stop()
+                handler.post { park(run.models) }
+            }
         }
-        tracker?.onEvent(event)
     }
 
-    private fun targetField(current: Run): AccessibilityNodeInfo? = service.focusedField() ?: current.field?.takeIf { it.refresh() }
+    private fun targetField(run: Run): AccessibilityNodeInfo? = service.focusedField() ?: run.field?.takeIf { it.refresh() }
 
-    /** Redraws the bubble from the worker's and the preview thread's latest text, at most every [BUBBLE_MS]. */
+    /** Redraws the bubble from the engine's and the preview thread's latest text, at most every [BUBBLE_MS]. */
     private fun scheduleBubble() {
         if (!bubbleQueued.compareAndSet(false, true)) return
         handler.postDelayed({
             bubbleQueued.set(false)
-            run?.let { bubble.update(it.bubbleText.text()) }
+            open?.let { runs[it] }?.let { bubble.update(it.bubbleText.text()) }
         }, BUBBLE_MS)
     }
 
     fun onTrimMemory(level: Int) {
-        run?.cost?.noteTrim(level)
+        open?.let { runs[it] }?.cost?.noteTrim(level)
         if (level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) releaseParkedNow()
     }
 
     /** Keeps a finished take's models for [WARM_MS] so a take that follows starts without loading them. */
     private fun park(models: Models) {
-        if (shutDown || run != null || parked != null || !models.reusable) {
+        if (shutDown || open != null || parked != null || !models.reusable) {
             closeInBackground(models)
             return
         }
@@ -412,7 +441,7 @@ class TakeController(private val service: DictationService, private val overlay:
     fun shutdown() {
         shutDown = true
         releaseParkedNow()
-        discard(DiscardReason.ERROR)
+        open?.let { dispatch(it, TakeEvent.Error) }
         tracker?.end()
     }
 
@@ -468,24 +497,6 @@ class TakeController(private val service: DictationService, private val overlay:
         }
     }
 
-    /** Red-orange for [FAILED_HOLD_MS], then resting, or busy when this take is still inserting. */
-    private fun flashFailed() {
-        failedUntilMs = SystemClock.uptimeMillis() + FAILED_HOLD_MS
-        handler.removeCallbacks(endFlash)
-        handler.postDelayed(endFlash, FAILED_HOLD_MS)
-        applyButtonMode()
-    }
-
-    private fun applyButtonMode() {
-        val mode = when {
-            SystemClock.uptimeMillis() < failedUntilMs -> ButtonMode.FAILED
-            run?.take?.state == TakeState.OPEN -> ButtonMode.RECORDING
-            run != null -> ButtonMode.BUSY
-            else -> ButtonMode.IDLE
-        }
-        overlay.setMode(mode)
-    }
-
     private fun pruneTakeAudio(recording: String) {
         val files = takesDir.listFiles()?.filter { it.isFile } ?: return
         val drop = TakeAudio.toDelete(files.map { TakeAudioFile(it.name, it.length(), it.lastModified()) }, inProgress = recording).toSet()
@@ -494,17 +505,7 @@ class TakeController(private val service: DictationService, private val overlay:
 
     companion object {
         private const val UNKNOWN_PACKAGE = "unknown"
-        private const val IDLE_POLL_MS = 25L
-        private const val TRIGGER_STOP = "stop"
-        private const val TRIGGER_CAP = "cap"
-        private const val TRIGGER_KEYBOARD = "keyboard"
-        private const val TRIGGER_PACKAGE = "package"
-        private const val TRIGGER_SILENCE = "silence"
-        private const val TRIGGER_MIC = "mic"
         private const val BUBBLE_MS = 100L
         private const val WARM_MS = 30_000L
-        private const val HIDDEN_GRACE_MS = 700L
-        private const val IME_LINE_DELAY_MS = 500L
-        private const val FAILED_HOLD_MS = 1_500L
     }
 }

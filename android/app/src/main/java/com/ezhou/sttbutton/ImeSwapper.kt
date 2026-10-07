@@ -13,12 +13,16 @@ import android.view.inputmethod.InputMethodManager
  * Switches the phone's keyboard to this app's for a take and back. Which order the return tries
  * is [ImeReturn]'s; this class owns the Android calls and the preferences that survive a process death.
  */
-class ImeSwapper(private val service: AccessibilityService) {
+class ImeSwapper(private val service: AccessibilityService, private val holdsTake: () -> Boolean = { false }) {
     private val tag = DictationService.TAG
     private val prefs = service.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
     private val imm = service.getSystemService(InputMethodManager::class.java)
     private val ourId = ComponentName(service, DictationIme::class.java).flattenToShortString()
     private var enabled = false
+
+    /** No keyboard could be returned to, so the panel offers the system's keyboard picker. */
+    @Volatile var stranded = false
+        private set
     private var returnedAtMs: Long? = null
     private var defaultBackAtMs: Long? = null
 
@@ -66,12 +70,12 @@ class ImeSwapper(private val service: AccessibilityService) {
             }
             if (worked) {
                 Log.i(tag, "ime return via ${step.method}")
-                ImeLink.stranded = false
+                stranded = false
                 return step.method.name.lowercase()
             }
         }
         Log.w(tag, "ime return: nothing worked, plan had ${plan.size} steps")
-        ImeLink.stranded = true
+        stranded = true
         ImeLink.current?.refreshPanel()
         return null
     }
@@ -89,9 +93,14 @@ class ImeSwapper(private val service: AccessibilityService) {
         return defaultBackAtMs to (saved?.let { it == now })
     }
 
+    /** A new take starts with the keyboard to return to again. */
+    fun clearStranded() {
+        stranded = false
+    }
+
     /** A process death mid-take leaves this app's keyboard as the default. */
     fun returnIfStranded() {
-        if (currentDefault == ourId && ImeLink.swap == null) returnKeyboard()
+        if (currentDefault == ourId && !holdsTake()) returnKeyboard()
     }
 
     private fun saved(): SavedIme? {

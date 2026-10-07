@@ -15,6 +15,7 @@ class TakePanel(
     private val style: () -> ButtonStyle,
     private val onStop: () -> Unit,
     private val onPick: () -> Unit,
+    private val state: () -> PanelState,
 ) : View(context) {
     private val density = resources.displayMetrics.density
     private val background = Paint().apply { color = BACKGROUND }
@@ -25,7 +26,7 @@ class TakePanel(
 
     private fun keyBounds(): Rect {
         val size = (KEY_DP * density).toInt()
-        val wanted = ImeLink.stopKey?.let { Rect(it.left, it.top, it.right, it.bottom) }
+        val wanted = state().stopKey?.let { Rect(it.left, it.top, it.right, it.bottom) }
             ?: Rect(width - size - size / 4, size / 4, width - size / 4, size / 4 + size)
         val w = wanted.width().coerceAtMost(width)
         val h = wanted.height().coerceAtMost(height)
@@ -42,7 +43,7 @@ class TakePanel(
 
     override fun onDraw(canvas: Canvas) {
         canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), background)
-        if (ImeLink.stranded) {
+        if (state().stranded) {
             val pick = pickBounds()
             key.color = style().color(ButtonMode.RECORDING)
             canvas.drawRoundRect(pick.left.toFloat(), pick.top.toFloat(), pick.right.toFloat(), pick.bottom.toFloat(), pick.height() / 2f, pick.height() / 2f, key)
@@ -50,7 +51,7 @@ class TakePanel(
             return
         }
         val bounds = keyBounds()
-        val mode = if (ImeLink.busy) ButtonMode.BUSY else ButtonMode.RECORDING
+        val mode = if (state().busy) ButtonMode.BUSY else ButtonMode.RECORDING
         key.color = style().color(mode, pressed)
         canvas.drawOval(bounds.left.toFloat(), bounds.top.toFloat(), bounds.right.toFloat(), bounds.bottom.toFloat(), key)
         val half = bounds.width().coerceAtMost(bounds.height()) * STOP_GLYPH_FRACTION
@@ -59,13 +60,13 @@ class TakePanel(
 
     override fun onMeasure(widthSpec: Int, heightSpec: Int) {
         val fallback = (DEFAULT_HEIGHT_DP * density).toInt()
-        val wanted = ImeLink.panelHeightPx.takeIf { it > 0 } ?: fallback
+        val wanted = state().heightPx.takeIf { it > 0 } ?: fallback
         setMeasuredDimension(MeasureSpec.getSize(widthSpec), wanted)
     }
 
     @SuppressLint("ClickableViewAccessibility")
     override fun onTouchEvent(event: MotionEvent): Boolean {
-        if (ImeLink.stranded) {
+        if (state().stranded) {
             if (event.actionMasked == MotionEvent.ACTION_UP && pickBounds().contains(event.x.toInt(), event.y.toInt())) onPick()
             return true
         }
@@ -73,7 +74,7 @@ class TakePanel(
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> if (inside) { pressed = true; invalidate() } else return false
             MotionEvent.ACTION_UP -> {
-                val fire = pressed && inside && !ImeLink.busy
+                val fire = pressed && inside && !state().busy
                 pressed = false
                 invalidate()
                 if (fire) onStop()

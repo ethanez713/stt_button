@@ -1,5 +1,28 @@
 package com.ezhou.sttbutton
 
+class LiveResult(
+    val raw: String,
+    /** Before the casual rule, which the caller applies where the text is inserted. */
+    val cleaned: String,
+    val chunks: Int,
+    val cleanMode: String,
+    val asrMs: Long,
+    val cleanMs: Long,
+    val asrMsAfterStop: Long,
+    val cleanMsAfterStop: Long,
+    val inTokens: Int,
+    val outTokens: Int,
+    val idleCleans: Int,
+    val idleHits: Int,
+    val cue: String?,
+    val audioMs: Long,
+    val contextDecodes: Int = 0,
+    val contextFallbacks: Int = 0,
+    val drifts: Int = 0,
+    val corrections: Int = 0,
+    val correctionsKept: Int = 0,
+)
+
 /** One model call, as the job log records it. */
 class JobRecord(
     val kind: String,
@@ -389,11 +412,7 @@ class TakeEngine(
         val target = plan.target
         val cleanedBefore = text.substring(region.start + lead, region.cleanEnd.coerceAtLeast(region.start + lead))
         val unit = Pipeline.isCorrectionUnit(target, cfg.selfCorrectionCues)
-        val separator = when {
-            output.isEmpty() || cleanedBefore.isEmpty() -> ""
-            (previousInline || unit) && !cleanedBefore.substringAfterLast('\n').startsWith("- ") -> " "
-            else -> "\n\n"
-        }
+        val separator = Pipeline.joinSeparator(cleanedBefore, output, previousInline, unit)
         previousInline = unit || plan.spaceAfter
         chunks += target
         outputs += output

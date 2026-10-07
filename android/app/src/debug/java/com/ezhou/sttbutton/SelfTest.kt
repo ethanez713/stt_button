@@ -20,7 +20,7 @@ import kotlin.concurrent.thread
  * adb shell am start-foreground-service -n com.ezhou.sttbutton/.SelfTest --es wav <name> [--ei speed N]
  * adb shell am start-foreground-service -n com.ezhou.sttbutton/.SelfTest --es asr <name>
  * adb shell am start-foreground-service -n com.ezhou.sttbutton/.SelfTest --es clean <name>
- * adb shell am start-foreground-service -n com.ezhou.sttbutton/.SelfTest --ez replay true
+ * adb shell am start-foreground-service -n com.ezhou.sttbutton/.SelfTest --ez replay true [--es policy chunk|revise]
  * adb shell am start-foreground-service -n com.ezhou.sttbutton/.SelfTest --es probe <read|replace|typing|append>
  *
  * wav plays files/selftest/<name>.wav through the take pipeline (models, slicer, worker, chunk
@@ -43,7 +43,7 @@ class SelfTest : Service() {
                 intent.getStringExtra("wav")?.let { take(this, it, intent.getIntExtra("speed", 1)) }
                 intent.getStringExtra("asr")?.let { recognize(this, it, intent.getIntExtra("threads", ParakeetRecognizer.THREADS)) }
                 intent.getStringExtra("clean")?.let { clean(this, it, intent.getStringExtra("with")) }
-                if (intent.hasExtra("replay")) replay(this)
+                if (intent.hasExtra("replay")) replay(this, intent.getStringExtra("policy") ?: "chunk")
                 intent.getStringExtra("probe")?.let { probe(this, it, intent) }
             } catch (e: Throwable) {
                 Log.e(TAG, "selftest failed", e)
@@ -73,37 +73,52 @@ class SelfTest : Service() {
 
     private class TakeRun(val result: LiveResult, val inserted: String, val stopToInsertMs: Long, val firstPreviewMs: Long, val shown: BubbleContent)
 
-    private fun runTake(models: Models, cfg: PipelineConfig, audio: ShortArray, speed: Int): TakeRun {
+    /**
+     * Plays [audio] into a take at [speed] times real time and returns what it would insert into a field
+     * that holds [seed]. Under the revise policy audio is fed only while no job is in flight, so the text
+     * does not depend on the speed.
+     */
+    private fun runTake(
+        models: Models, cfg: PipelineConfig, audio: ShortArray, speed: Int, policy: String = "chunk", seed: String = "",
+    ): TakeRun {
         val bubble = BubbleText()
-        val live = LiveTake(models.recognizer, models::cleaner, cfg, bubble, models::prepareCleaner)
+        val slicer = Slicer.fromConfig(cfg)
+        val chosen = if (policy == "revise") RevisePolicy(cfg) else ChunkPolicy(cfg)
+        val engine = TakeEngine(BufferDocument(seed), slicer, models.recognizer, models.cleaner(), chosen, cfg, prepareCleaner = models::prepareCleaner)
+        engine.onText = bubble::region
+        engine.onCovered = bubble::covered
+        val executor = java.util.concurrent.Executors.newSingleThreadExecutor()
+        val done = java.util.concurrent.CountDownLatch(1)
+        var result: LiveResult? = null
+        var failure: Throwable? = null
+        val driver = TakeDriver(engine, { executor.execute(it) }, { result = it; done.countDown() }, { failure = it; done.countDown() })
         val feedStarted = SystemClock.elapsedRealtime()
         var firstPreviewMs = -1L
         val preview = PreviewRecognizer(models::awaitPreview, { words ->
             if (firstPreviewMs < 0 && words.isNotEmpty()) firstPreviewMs = SystemClock.elapsedRealtime() - feedStarted
             bubble.preview(words)
         })
-        val stopping = java.util.concurrent.atomic.AtomicBoolean(false)
-        val worker = thread {
-            while (!stopping.get()) {
-                if (!live.step()) Thread.sleep(25)
-            }
-        }
+        driver.start()
         val piece = Slicer.SAMPLE_RATE / 10
         for (at in audio.indices step piece) {
+            if (policy == "revise") driver.settle()
             val buffer = audio.copyOfRange(at, minOf(audio.size, at + piece))
-            live.addSamples(buffer)
-            preview.offer(buffer, buffer.size, live.slicer.paused)
+            val slices = slicer.feed(buffer)
+            engine.onAudio()
+            if (slices.isNotEmpty()) driver.wake()
+            preview.offer(buffer, buffer.size, slicer.paused)
             Thread.sleep(100L / speed)
         }
-        stopping.set(true)
-        worker.join()
         val stopped = SystemClock.elapsedRealtime()
-        live.markStop()
-        val result = live.finish()
-        val inserted = Pipeline.casual(result.cleaned, cfg)
+        driver.stop()
+        done.await()
         val stopToInsert = SystemClock.elapsedRealtime() - stopped
         preview.stop()
-        return TakeRun(result, inserted, stopToInsert, firstPreviewMs, bubble.text())
+        executor.shutdown()
+        failure?.let { throw it }
+        val finished = checkNotNull(result)
+        val inserted = if (seed.isEmpty()) Pipeline.casual(finished.cleaned, cfg) else finished.cleaned
+        return TakeRun(finished, inserted, stopToInsert, firstPreviewMs, bubble.text())
     }
 
     private fun take(context: Context, name: String, speed: Int) {
@@ -130,7 +145,7 @@ class SelfTest : Service() {
      * Runs every `.pcm` and `.wav` in files/selftest/replay through the take pipeline at [REPLAY_SPEED],
      * one line each to files/selftest/replay.jsonl, under replay/pipeline.json when that file is there.
      */
-    private fun replay(context: Context) {
+    private fun replay(context: Context, policy: String) {
         val dir = File(context.filesDir, "selftest")
         val inputs = File(dir, "replay")
         val override = File(inputs, "pipeline.json").takeIf { it.isFile }?.readBytes()
@@ -143,9 +158,10 @@ class SelfTest : Service() {
         try {
             for (file in files) {
                 val audio = if (file.extension == "wav") readWav(file) else readPcm(file)
-                val run = runTake(models, cfg, audio, REPLAY_SPEED)
+                val seed = File(inputs, file.nameWithoutExtension + ".before.txt").takeIf { it.isFile }?.readText().orEmpty()
+                val run = runTake(models, cfg, audio, REPLAY_SPEED, policy, seed)
                 val result = run.result
-                val line = org.json.JSONObject().put("name", file.name).put("config_id", configId)
+                val line = org.json.JSONObject().put("name", file.name).put("config_id", configId).put("policy", policy)
                     .put("raw", result.raw).put("cleaned", run.inserted).put("clean_mode", result.cleanMode)
                     .put("chunks", result.chunks).put("audio_ms", audio.size / 16)
                     .put("asr_ms", result.asrMs).put("clean_ms", result.cleanMs).put("stop_to_insert_ms", run.stopToInsertMs)

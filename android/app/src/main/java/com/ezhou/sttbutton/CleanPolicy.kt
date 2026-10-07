@@ -59,7 +59,7 @@ interface CleanPolicy {
 }
 
 /**
- * Whole sentences in chunks, as `stt_button.live.LiveTake` does: at a slice the first closed chunk of the
+ * Whole sentences in chunks, as the host library's take does: at a slice the first closed chunk of the
  * tail; at a pause each chunk of the tail, speculatively, so what a take inserts depends neither on where
  * its pauses fell nor on how fast its audio arrived; at the finish the same chunks, applied. A take under
  * the skip rule is not cleaned, and its tail is only converted at the finish.

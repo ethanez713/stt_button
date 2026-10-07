@@ -6,7 +6,7 @@ import org.junit.Test
 
 class BubbleTextTest {
     @Test
-    fun given_the_host_event_sequences_when_replayed_then_the_text_after_each_event_matches() {
+    fun given_the_host_event_sequences_when_replayed_then_the_preview_words_after_each_event_match() {
         for (sequence in Fixtures.objects(Fixtures.vectors.getJSONArray("bubble"))) {
             val bubble = BubbleText()
             val events = sequence.getJSONArray("events")
@@ -15,12 +15,10 @@ class BubbleTextTest {
                 val event = events.getJSONArray(i)
                 when (event.getString(0)) {
                     "preview" -> bubble.preview(words(event.getJSONArray(1)))
-                    "slice" -> bubble.sliceLanded(event.getDouble(1), event.getString(2))
-                    "chunk" -> bubble.chunkCleaned(event.getString(1), event.getString(2))
+                    "slice" -> bubble.covered(event.getDouble(1))
                 }
                 val shown = bubble.text()
                 val want = expected.getJSONArray(i)
-                assertEquals("${sequence.getString("name")} after event $i settled", want.getString(0), shown.settled)
                 assertEquals("${sequence.getString("name")} after event $i preview", want.getString(1), shown.preview)
             }
         }
@@ -40,8 +38,8 @@ class BubbleTextTest {
         var calls = 0
         bubble.onChange = { calls++ }
         bubble.preview(emptyList())
-        bubble.sliceLanded(1.0, "Hi.")
-        bubble.chunkCleaned("Hi.", "Hi")
+        bubble.covered(1.0)
+        bubble.region("Hi.")
 
         assertEquals(3, calls)
     }

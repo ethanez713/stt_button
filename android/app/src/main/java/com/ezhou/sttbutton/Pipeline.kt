@@ -216,17 +216,24 @@ object Pipeline {
         return units.size to units.count { isCorrectionUnit(it, cues) }
     }
 
+    /**
+     * What sets a cleaned chunk off from the cleaned text before it, as `stt_button.cleaner.join_cleaned` does: nothing
+     * for the first, a space inside a thought ([inline], or a correction [unit]) unless a list ends just before the
+     * seam, and a paragraph break otherwise.
+     */
+    fun joinSeparator(cleanedBefore: String, output: String, inline: Boolean, unit: Boolean): String = when {
+        output.isEmpty() || cleanedBefore.isEmpty() -> ""
+        (inline || unit) && !cleanedBefore.substringAfterLast('\n').startsWith("- ") -> " "
+        else -> "\n\n"
+    }
+
     /** Mirrors `stt_button.cleaner.join_cleaned`. */
     fun joinCleaned(chunks: List<String>, outputs: List<String>, cues: List<String>): String {
         val text = StringBuilder()
         var inline = false
         for ((chunk, output) in chunks.zip(outputs)) {
             val unit = isCorrectionUnit(chunk, cues)
-            if (output.isNotEmpty()) {
-                val afterList = text.toString().substringAfterLast('\n').startsWith("- ")
-                if (text.isNotEmpty()) text.append(if ((inline || unit) && !afterList) " " else "\n\n")
-                text.append(output)
-            }
+            text.append(joinSeparator(text.toString(), output, inline, unit)).append(output)
             inline = unit
         }
         return text.toString()

@@ -10,7 +10,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * Goal: one engine replaces `LiveTake` without changing what any take inserts.
+ * Goal: one engine replaces the earlier take class without changing what any take inserts.
  * Pass: for every take script in `pipeline_vectors.json`, the engine over a `BufferDocument` produces the
  * vector's `raw`, `cleaned`, `clean_mode` and `chunks` exactly.
  * Fail: any difference in any script; the engine is then wrong, not the vector, because the vector is the
