@@ -7,24 +7,24 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class LiveTakeTest {
-    private class ScriptedRecognizer(vararg texts: String) : SliceRecognizer {
+    private class ScriptedRecognizer(vararg texts: String) : Recognizer {
         private val queue = ArrayDeque(texts.toList())
-        override fun recognize(samples: FloatArray) = queue.removeFirst()
-        override fun recognizeAfter(samples: FloatArray, junctionS: Double) = "." to queue.removeFirst()
+        override fun recognize(request: RecognizeRequest) = Recognized(queue.removeFirst(), if (request.junctionS == null) null else ".")
     }
 
-    private class UppercaseCleaner(private val onClean: (String) -> Unit = {}) : ChunkCleaner {
+    private class UppercaseCleaner(private val onClean: (String) -> Unit = {}) : Cleaner {
         val calls = mutableListOf<String>()
         val completed = mutableListOf<String>()
         var cancelled = false
         override fun countTokens(text: String) = Pipeline.wordCount(text)
-        override fun clean(chunk: String): ChunkResult? {
+        override fun clean(request: CleanRequest): CleanResult? {
+            val chunk = request.target
             calls += chunk
             cancelled = false
             onClean(chunk)
             if (cancelled) return null
             completed += chunk
-            return ChunkResult(chunk.uppercase(), 1)
+            return CleanResult(chunk.uppercase(), 1)
         }
         override fun cancel() {
             cancelled = true
@@ -65,9 +65,9 @@ class LiveTakeTest {
 
     @Test
     fun given_a_clean_that_swaps_a_model_name_when_finished_then_the_chunk_is_inserted_as_heard() {
-        val swapping = object : ChunkCleaner {
+        val swapping = object : Cleaner {
             override fun countTokens(text: String) = Pipeline.wordCount(text)
-            override fun clean(chunk: String) = ChunkResult(chunk.replace("S20", "S25"), 1)
+            override fun clean(request: CleanRequest) = CleanResult(request.target.replace("S20", "S25"), 1)
             override fun cancel() = Unit
         }
         val take = LiveTake(ScriptedRecognizer("Put it on the S20 Ultra please now"), { swapping }, cfg)
@@ -221,10 +221,10 @@ class LiveTakeTest {
 
     @Test
     fun given_a_context_decode_with_no_words_when_decoded_then_the_slice_is_recognized_plainly_and_counted() {
-        val recognizer = object : SliceRecognizer {
+        val recognizer = object : Recognizer {
             private var plain = 0
-            override fun recognize(samples: FloatArray) = if (plain++ == 0) "Update the plan" else "plain fallback"
-            override fun recognizeAfter(samples: FloatArray, junctionS: Double) = "" to ""
+            override fun recognize(request: RecognizeRequest) =
+                if (request.junctionS != null) Recognized("", "") else Recognized(if (plain++ == 0) "Update the plan" else "plain fallback")
         }
         val take = LiveTake(recognizer, { UppercaseCleaner() }, cfg)
         feed(take, 2.5, 2.0)

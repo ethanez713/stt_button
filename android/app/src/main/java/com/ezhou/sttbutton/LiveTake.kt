@@ -1,22 +1,5 @@
 package com.ezhou.sttbutton
 
-interface SliceRecognizer {
-    fun recognize(samples: FloatArray): String
-
-    /** Decodes `Pipeline.contextAudio`'s output: the context's closing punctuation and the slice's words. */
-    fun recognizeAfter(samples: FloatArray, junctionS: Double): Pair<String, String>
-}
-
-class ChunkResult(val text: String, val outTokens: Int)
-
-interface ChunkCleaner {
-    fun countTokens(text: String): Int
-
-    /** Null when [cancel] was called while generating. */
-    fun clean(chunk: String): ChunkResult?
-    fun cancel()
-}
-
 /** What the preview bubble needs to hear about; step 8 implements it. */
 interface TakeSink {
     fun sliceLanded(endS: Double, text: String)
@@ -51,8 +34,8 @@ class LiveResult(
  * [step], [markStop] and [finish] run on the one worker thread that recognizes slices and cleans chunks.
  */
 class LiveTake(
-    private val recognizer: SliceRecognizer,
-    private val cleaner: () -> ChunkCleaner,
+    private val recognizer: Recognizer,
+    private val cleaner: () -> Cleaner,
     private val cfg: PipelineConfig,
     private val sink: TakeSink? = null,
     private val prepareCleaner: (trigger: String) -> Unit = {},
@@ -152,19 +135,21 @@ class LiveTake(
     private fun sliceText(slice: IntArray): String {
         val before = slicer.speechBefore(slice[0])
         val after = slicer.speechAfter(slice[0])
-        if (texts.isEmpty() || before == null || after == null || after >= slice[1]) return recognizer.recognize(samples(slice[0], slice[1]))
+        if (texts.isEmpty() || before == null || after == null || after >= slice[1]) return recognizer.recognize(RecognizeRequest(samples(slice[0], slice[1]))).text
         val (audio, junctionS) = Pipeline.contextAudio(::samples, before, after, slice[1], cfg.contextS, cfg.junctionSqueezeS)
         contextDecodes++
-        val (mark, text) = recognizer.recognizeAfter(audio, junctionS)
+        val recognized = recognizer.recognize(RecognizeRequest(audio, junctionS))
+        val text = recognized.text
+        val mark = recognized.mark.orEmpty()
         if (text.isEmpty()) {
             contextFallbacks++
-            return recognizer.recognize(samples(slice[0], slice[1]))
+            return recognizer.recognize(RecognizeRequest(samples(slice[0], slice[1]))).text
         }
         if (texts.last().isNotEmpty()) texts[texts.lastIndex] = Pipeline.withoutTrailingMark(texts.last()) + Pipeline.settledMark(Pipeline.trailingMark(texts.last()), mark)
         return text
     }
 
-    private fun chunksOf(cleaner: ChunkCleaner, final: Boolean) =
+    private fun chunksOf(cleaner: Cleaner, final: Boolean) =
         Pipeline.liveChunks(raw, cleaner::countTokens, cfg.chunkMinTokens, cfg.chunkMaxTokens, final, cfg.selfCorrectionCues)
 
     private fun cleanClosed(final: Boolean): List<String> {
@@ -174,7 +159,7 @@ class LiveTake(
         for (chunk in chunks) {
             if (chunk in cleanedChunks) continue
             val started = System.nanoTime()
-            val cleaned = cleaner.clean(chunk) ?: continue
+            val cleaned = cleaner.clean(CleanRequest(chunk)) ?: continue
             cleanMs += elapsedMs(started)
             keep(cleaner, chunk, cleaned)
         }
@@ -193,7 +178,7 @@ class LiveTake(
                 if (slicer.lastSpeechEnd != spoken) break
                 idleCleans++
                 val started = System.nanoTime()
-                val cleaned = cleaner.clean(chunk)
+                val cleaned = cleaner.clean(CleanRequest(chunk))
                 cleanMs += elapsedMs(started)
                 if (cleaned == null) break
                 keep(cleaner, chunk, cleaned)
@@ -206,7 +191,7 @@ class LiveTake(
     }
 
     /** A clean that swapped a name or number for another is replaced by the chunk as heard. */
-    private fun keep(cleaner: ChunkCleaner, chunk: String, cleaned: ChunkResult) {
+    private fun keep(cleaner: Cleaner, chunk: String, cleaned: CleanResult) {
         val text = if (Pipeline.factDrift(chunk, cleaned.text).isEmpty()) cleaned.text else {
             drifts++
             Spoken.convert(chunk)

@@ -11,9 +11,9 @@ import java.io.File
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.atomic.AtomicBoolean
 
-interface ClosableRecognizer : SliceRecognizer, AutoCloseable
+interface ClosableRecognizer : Recognizer, AutoCloseable
 
-interface ClosableCleaner : ChunkCleaner, AutoCloseable
+interface ClosableCleaner : Cleaner, AutoCloseable
 
 class ParakeetRecognizer(filesDir: File, threads: Int = THREADS) : ClosableRecognizer {
     private val recognizer: OfflineRecognizer
@@ -36,24 +36,17 @@ class ParakeetRecognizer(filesDir: File, threads: Int = THREADS) : ClosableRecog
         ))
     }
 
-    override fun recognize(samples: FloatArray): String {
-        val stream = recognizer.createStream()
-        try {
-            stream.acceptWaveform(samples, 16000)
-            recognizer.decode(stream)
-            return recognizer.getResult(stream).text.trim()
-        } finally {
-            stream.release()
-        }
-    }
+    fun recognize(samples: FloatArray): String = recognize(RecognizeRequest(samples)).text
 
-    override fun recognizeAfter(samples: FloatArray, junctionS: Double): Pair<String, String> {
+    override fun recognize(request: RecognizeRequest): Recognized {
         val stream = recognizer.createStream()
         try {
-            stream.acceptWaveform(samples, 16000)
+            stream.acceptWaveform(request.samples, 16000)
             recognizer.decode(stream)
             val result = recognizer.getResult(stream)
-            return Pipeline.splitAtJunction(result.tokens.toList(), result.timestamps.map { it.toDouble() }, junctionS)
+            val junctionS = request.junctionS ?: return Recognized(result.text.trim())
+            val (mark, text) = Pipeline.splitAtJunction(result.tokens.toList(), result.timestamps.map { it.toDouble() }, junctionS)
+            return Recognized(text, mark)
         } finally {
             stream.release()
         }
@@ -71,7 +64,8 @@ class LlamaChunkCleaner(private val llama: LlamaCleaner, private val cfg: Pipeli
 
     override fun countTokens(text: String) = llama.countTokens(text)
 
-    override fun clean(chunk: String): ChunkResult? {
+    override fun clean(request: CleanRequest): CleanResult? {
+        val chunk = request.target
         cancelRequested = false
         val started = System.nanoTime()
         val spoken = Spoken.convert(chunk)
@@ -80,12 +74,12 @@ class LlamaChunkCleaner(private val llama: LlamaCleaner, private val cfg: Pipeli
             val stats = llama.stats()
             Log.i(DictationService.TAG, "chunk clean ms=${(System.nanoTime() - started) / 1_000_000} " +
                 "out=${stats.outTokens} drafted=${stats.drafted} accepted=${stats.accepted} threads=${stats.threads}")
-            return ChunkResult(text.trim(), stats.outTokens)
+            return CleanResult(text.trim(), stats.outTokens)
         }
         if (cancelRequested) return null
         // The prompt did not fit or decoding failed: the recognized words are kept rather than lost.
         Log.e(DictationService.TAG, "clean failed for a ${countTokens(chunk)}-token chunk; keeping it as recognized")
-        return ChunkResult(spoken, 0)
+        return CleanResult(spoken, 0)
     }
 
     override fun cancel() {
@@ -121,31 +115,26 @@ class Models(
     @Volatile private var closed = false
     private var cleanerLoader: Thread? = null
 
-    val recognizer = object : SliceRecognizer {
-        override fun recognize(samples: FloatArray): String {
+    val recognizer = object : Recognizer {
+        override fun recognize(request: RecognizeRequest): Recognized {
             recognizerReady.await()
             recognizerFailure?.let { throw IllegalStateException("recognizer failed to load", it) }
             check(!closed) { "models released" }
-            return recognizerModel!!.recognize(samples)
-        }
-
-        override fun recognizeAfter(samples: FloatArray, junctionS: Double): Pair<String, String> {
-            recognizerReady.await()
-            recognizerFailure?.let { throw IllegalStateException("recognizer failed to load", it) }
-            check(!closed) { "models released" }
-            return recognizerModel!!.recognizeAfter(samples, junctionS)
+            return recognizerModel!!.recognize(request)
         }
     }
 
-    private val cleanerProxy = object : ChunkCleaner {
+    private val cleanerProxy = object : Cleaner {
         override fun countTokens(text: String) = awaitCleaner().countTokens(text)
-        override fun clean(chunk: String) = awaitCleaner().clean(chunk)
+        override val tokenCounter: ((String) -> Int)?
+            get() = cleanerModel?.takeUnless { closed }?.let { model -> { text: String -> model.countTokens(text) } }
+        override fun clean(request: CleanRequest) = awaitCleaner().clean(request)
         override fun cancel() {
             cleanerModel?.cancel()
         }
     }
 
-    fun cleaner(): ChunkCleaner = cleanerProxy
+    fun cleaner(): Cleaner = cleanerProxy
 
     /** Blocks until the recognizer has loaded or failed to. */
     fun awaitRecognizerLoaded() = recognizerReady.await()

@@ -1,14 +1,14 @@
 package com.ezhou.sttbutton
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ModelsTest {
     private class FakeRecognizer : ClosableRecognizer {
         var closed = false
-        override fun recognize(samples: FloatArray) = "heard"
-        override fun recognizeAfter(samples: FloatArray, junctionS: Double) = "" to "heard"
+        override fun recognize(request: RecognizeRequest) = Recognized("heard", if (request.junctionS == null) null else "")
         override fun close() {
             closed = true
         }
@@ -17,7 +17,7 @@ class ModelsTest {
     private class FakeCleaner : ClosableCleaner {
         var closed = false
         override fun countTokens(text: String) = Pipeline.wordCount(text)
-        override fun clean(chunk: String) = ChunkResult(chunk, 1)
+        override fun clean(request: CleanRequest) = CleanResult(request.target, 1)
         override fun cancel() {}
         override fun close() {
             closed = true
@@ -53,7 +53,7 @@ class ModelsTest {
     @Test
     fun given_a_take_that_only_recognizes_when_closed_then_the_cleaner_was_never_loaded() {
         val models = models()
-        assertEquals("heard", models.recognizer.recognize(FloatArray(10)))
+        assertEquals("heard", models.recognizer.recognize(RecognizeRequest(FloatArray(10))).text)
         models.close()
 
         assertEquals(0, cleanerLoads)
@@ -75,9 +75,20 @@ class ModelsTest {
     }
 
     @Test
+    fun given_a_cleaner_not_yet_loaded_when_the_token_counter_is_read_then_it_is_null_and_the_read_does_not_load() {
+        val models = models()
+        assertNull(models.cleaner().tokenCounter)
+        assertNull(models.cleaner().tokenCounter)
+        assertEquals(0, cleanerLoads)
+        models.cleaner().countTokens("a b")
+        assertEquals(2, models.cleaner().tokenCounter!!("a b"))
+        models.close()
+    }
+
+    @Test
     fun given_no_prepare_when_the_cleaner_is_used_then_it_loads_on_demand_as_a_stop_load() {
         val models = models()
-        assertEquals("a b", models.cleaner().clean("a b")!!.text)
+        assertEquals("a b", models.cleaner().clean(CleanRequest("a b"))!!.text)
         models.close()
 
         assertEquals(1, cleanerLoads)
