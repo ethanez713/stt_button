@@ -26,6 +26,14 @@ class SessionInputMethod(service: AccessibilityService) : InputMethod(service) {
         )
     }
 
+    override fun onUpdateSelection(
+        oldSelStart: Int, oldSelEnd: Int, newSelStart: Int, newSelEnd: Int, candidatesStart: Int, candidatesEnd: Int,
+    ) {
+        super.onUpdateSelection(oldSelStart, oldSelEnd, newSelStart, newSelEnd, candidatesStart, candidatesEnd)
+        val seen = current
+        current = seen.copy(selections = seen.selections + 1)
+    }
+
     override fun onFinishInput() {
         super.onFinishInput()
         // Input has ended, so there is no editor until the next start. The counts stay.
@@ -34,12 +42,13 @@ class SessionInputMethod(service: AccessibilityService) : InputMethod(service) {
     }
 }
 
-/** One published view of [SessionInputMethod]: the editor, or none between sessions, and how many times input has started and finished. */
+/** One published view of [SessionInputMethod]: the editor, or none between sessions, and how many times input has started and finished and the selection has changed. */
 data class InputSession(
     val packageName: String?,
     val inputType: Int,
     val starts: Int,
     val finishes: Int,
+    val selections: Int = 0,
 ) {
     /**
      * Whether this session and the field placement read are the same editor: the same package,

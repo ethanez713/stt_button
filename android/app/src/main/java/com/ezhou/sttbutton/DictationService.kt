@@ -51,6 +51,7 @@ class DictationService : AccessibilityService() {
     }
 
     override fun onServiceConnected() {
+        live = this
         overlay = Overlay(
             this,
             onTap = { controller.onTap() },
@@ -168,6 +169,7 @@ class DictationService : AccessibilityService() {
     }
 
     override fun onDestroy() {
+        if (live === this) live = null
         ImeLink.onStranded = null
         contentResolver.unregisterContentObserver(imeObserver)
         handler.removeCallbacks(reread)
@@ -301,6 +303,12 @@ class DictationService : AccessibilityService() {
 
     companion object {
         const val TAG = "SttButton"
+
+        /** The connected service, for the debug self-test that runs in this process. */
+        @Volatile
+        var live: DictationService? = null
+            private set
+
         private const val TRACE = "SttTrace"
         private const val FALLBACK_DP = 48
         private const val TRY_FIELD_ID = "com.ezhou.sttbutton:id/try_field"
