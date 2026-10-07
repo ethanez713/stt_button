@@ -24,7 +24,7 @@ class SpanTest {
         assertEquals(Edit(1, 0, 1), FieldMirror("aaa").sync("aaaa", selectionStart = 2))
         assertEquals(Edit(3, 0, 1), FieldMirror("aaa").sync("aaaa", selectionStart = 4))
         assertEquals(Edit(1, 1, 0), FieldMirror("aaaa").sync("aaa", selectionStart = 1))
-        assertEquals(Edit(0, 0, 3), FieldMirror("abab").sync("ababab", selectionStart = 3))
+        assertEquals(Edit(1, 0, 2), FieldMirror("abab").sync("ababab", selectionStart = 3))
     }
 
     @Test
