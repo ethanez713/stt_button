@@ -478,3 +478,56 @@ class TestTakeTails:
             "fewer than 20 stop-triggered takes (0)\n"
         )
 
+
+
+def _take(take_id, cleaned, text_after, span=None, pkg="app", inserts=1, edit=True):
+    lines = [{"event": "insert", "id": take_id, "pkg": pkg, "cleaned": cleaned, "clean_mode": "skip"} for _ in range(inserts)]
+    if edit:
+        start, end = span if span else (None, None)
+        lines.append({"event": "edit", "id": take_id, "text_after": text_after, "span_start": start, "span_end": end})
+    return lines
+
+
+class TestCorrections:
+    def classes(self, *takes):
+        from experiments import corrections
+        counted, skipped = corrections.analyse([line for take in takes for line in take])
+        return {r["id"]: r["class"] for r in counted}, skipped
+
+    def test_each_class(self):
+        classes, skipped = self.classes(
+            _take("a", "Hello there.", " Hello there.", (0, 13)),
+            _take("b", "Hello there.", " hello there", (0, 12)),
+            _take("c", "Send the phalanx report today.", " Send the failing report today.", (0, 31)),
+            _take("d", "Send the report to Max.", " ok", (0, 3)),
+        )
+        assert classes == {"a": "untouched", "b": "marks", "c": "words", "d": "gone"}
+        assert not skipped
+
+    def test_letters_typed_against_the_span_make_a_replacement(self):
+        classes, _ = self.classes(_take("a", "We research", "We researched it", (0, 11)))
+        assert classes == {"a": "words"}
+
+    def test_text_typed_after_the_span_leaves_the_take_untouched(self):
+        classes, _ = self.classes(_take("a", "Hello there.", " Hello there. And more", (0, 13)))
+        assert classes == {"a": "untouched"}
+
+    def test_a_collapsed_span_is_gone(self):
+        classes, _ = self.classes(_take("a", "Hello there.", "Other", (5, 5)))
+        assert classes == {"a": "gone"}
+
+    def test_not_counted_reasons(self):
+        classes, skipped = self.classes(
+            _take("a", "x y", "x y", (0, 3), inserts=2),
+            _take("b", "x y", "", edit=False),
+            _take("c", "x y", "x y"),
+        )
+        assert classes == {}
+        assert dict(skipped) == {"several inserts": 1, "no edit line": 1, "null span": 1}
+
+    def test_report_prints_the_zero_edit_rate_and_replaced_words(self):
+        from experiments import corrections
+        lines = _take("a", "Hello there.", " Hello there.", (0, 13)) + _take("c", "Send the phalanx report today.", " Send the failing report today.", (0, 31))
+        text = corrections.report(lines)
+        assert "zero-edit rate: 50% (1 of 2)" in text
+        assert "c: phalanx → failing" in text
