@@ -640,3 +640,18 @@ class TestCorrectionReplay:
         for model in ("m1", "m1", "m2"):
             cr.score(lines, tmp_path / "takes", cr.Candidate.of("c", model, fn), cache=tmp_path / "cache")
         assert len(calls) == 6
+
+
+def test_field_reads_count_kinds_per_package_and_name_unusual_offsets():
+    from experiments import phone_usage
+    lines = [
+        {"event": "start", "id": "a", "pkg": "ai.x.grok", "field_read": "offset_unknown", "field_offset": -1},
+        {"event": "start", "id": "b", "pkg": "ai.x.grok", "field_read": "offset_unknown", "field_offset": -1},
+        {"event": "start", "id": "c", "pkg": "com.android.chrome", "field_read": "full", "field_offset": 0},
+        {"event": "start", "id": "d", "pkg": "com.android.chrome", "field_read": "partial", "field_offset": 7},
+        {"event": "start", "id": "e", "pkg": "old"},
+    ]
+    text = "\n".join(phone_usage.field_reads(lines))
+    assert "ai.x.grok: offset_unknown 2" in text
+    assert "com.android.chrome: full 1, partial 1, other offsets {7: 1}" in text
+    assert "old" not in text

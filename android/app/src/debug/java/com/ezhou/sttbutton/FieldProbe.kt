@@ -45,7 +45,7 @@ class FieldProbe(private val service: DictationService, private val out: File) {
         val before = read()
         val selectionsBefore = selections()
         val started = System.nanoTime()
-        if (before.fieldRead !in WRITABLE || to > before.text.length) {
+        if (before.fieldRead !in FieldRead.WHOLE || to > before.text.length) {
             return write(mode, before, read(), null, null, 0L, 0)
         }
         conn.setSelection(from, to)
@@ -58,7 +58,7 @@ class FieldProbe(private val service: DictationService, private val out: File) {
     }
 
     private fun write(mode: String, before: Seen, after: Seen, expectedText: String?, expectedCaret: Int?, ms: Long, selections: Int) {
-        val ok = if (mode == "read") before.fieldRead in WRITABLE else expectedText != null && after.text == expectedText && after.caret == expectedCaret
+        val ok = if (mode == "read") before.fieldRead in FieldRead.WHOLE else expectedText != null && after.text == expectedText && after.caret == expectedCaret
         val line = JSONObject().put("mode", mode).put("pkg", service.focusedField()?.packageName?.toString() ?: JSONObject.NULL)
             .put("field_read", before.fieldRead).put("len_before", before.text.length).put("len_after", after.text.length)
             .put("caret_before", before.caret).put("caret_after", after.caret).put("caret_expected", expectedCaret ?: JSONObject.NULL)
@@ -69,20 +69,14 @@ class FieldProbe(private val service: DictationService, private val out: File) {
 
     private fun read(): Seen {
         val surrounding = try {
-            connection()?.getSurroundingText(READ_SPAN, READ_SPAN, 0)
+            connection()?.getSurroundingText(FieldRead.WINDOW, FieldRead.WINDOW, 0)
         } catch (e: Exception) {
             null
         } ?: return Seen("", -1, "none")
         val text = surrounding.text?.toString().orEmpty()
         val after = text.length - surrounding.selectionEnd
-        val short = surrounding.selectionStart < READ_SPAN && after < READ_SPAN
-        val kind = when {
-            !short -> "partial"
-            surrounding.offset == 0 -> "full"
-            surrounding.offset == -1 -> "offset_unknown"
-            else -> "partial"
-        }
-        return Seen(text, maxOf(surrounding.offset, 0) + surrounding.selectionStart, kind, surrounding.offset, "${surrounding.selectionStart}..${surrounding.selectionEnd}")
+        val kind = FieldRead.classify(surrounding.offset, surrounding.selectionStart, surrounding.selectionEnd, text.length)
+        return Seen(text, FieldRead.position(surrounding.offset, surrounding.selectionStart), kind, surrounding.offset, "${surrounding.selectionStart}..${surrounding.selectionEnd}")
     }
 
     private fun selections() = (service.inputMethod as? SessionInputMethod)?.snapshot()?.selections ?: 0
@@ -100,8 +94,6 @@ class FieldProbe(private val service: DictationService, private val out: File) {
     }
 
     private companion object {
-        val WRITABLE = setOf("full", "offset_unknown")
-        const val READ_SPAN = 100_000
         const val WRITES = 10
         const val GAP_MS = 2_000L
         const val SETTLE_MS = 30L

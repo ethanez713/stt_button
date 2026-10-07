@@ -191,7 +191,9 @@ class TakeController(
         val warm = parked
         parked = null
         handler.removeCallbacks(releaseParked)
+        val (fieldRead, fieldOffset) = readField()
         log.write("start", take.id, "pkg" to take.pkg, "models_warm" to (warm != null), "config_id" to configId,
+            "field_read" to fieldRead, "field_offset" to fieldOffset,
             "proc_cpu_ms" to Process.getElapsedCpuTime(),
             "proc_age_ms" to SystemClock.elapsedRealtime() - Process.getStartElapsedRealtime(),
             "proc_events" to eventsSeen)
@@ -248,6 +250,17 @@ class TakeController(
         Log.i(tag, "take start pkg=${take.pkg}")
         driver.start()
         dispatch(current, TakeEvent.RecorderStarted)
+    }
+
+    /** How the focused field reads through the accessibility service's input connection, and the offset it reported. */
+    private fun readField(): Pair<String, Int?> {
+        val surrounding = try {
+            service.inputMethod?.currentInputConnection?.getSurroundingText(FieldRead.WINDOW, FieldRead.WINDOW, 0)
+        } catch (e: Exception) {
+            null
+        } ?: return FieldRead.NONE to null
+        val text = surrounding.text?.toString().orEmpty()
+        return FieldRead.classify(surrounding.offset, surrounding.selectionStart, surrounding.selectionEnd, text.length) to surrounding.offset
     }
 
     private fun askSwap(current: TakeSession) {

@@ -155,6 +155,24 @@ def percentile(values: list[float], q: float) -> float | None:
     return ordered[max(math.ceil(q * len(ordered)) - 1, 0)]
 
 
+def field_reads(lines: list[dict]) -> list[str]:
+    """How each package's field read through the input connection at the tap: whole (`full`), whole with an
+    unreported offset (`offset_unknown`, read as 0), `partial` or `none`, and the offsets seen."""
+    starts = [r for r in lines if r.get("event") == "start" and r.get("field_read")]
+    if not starts:
+        return []
+    out = ["\nfield reads at the tap, per package:"]
+    by_pkg = defaultdict(list)
+    for r in starts:
+        by_pkg[r.get("pkg")].append(r)
+    for pkg, rows in sorted(by_pkg.items(), key=lambda kv: str(kv[0])):
+        kinds = Counter(r["field_read"] for r in rows)
+        offsets = Counter(r.get("field_offset") for r in rows if r.get("field_offset") not in (None, 0, -1))
+        extra = f", other offsets {dict(offsets)}" if offsets else ""
+        out.append(f"  {pkg}: " + ", ".join(f"{k} {n}" for k, n in kinds.most_common()) + extra)
+    return out
+
+
 def swap_table(lines: list[dict]) -> list[str]:
     """How the keyboard swap went: outcomes, timings, and takes that asked for a swap and left no `ime` line."""
     takes = [r for r in lines if r.get("event") in ("insert", "discard", "clipboard") and r.get("ime_swap")]
@@ -221,6 +239,7 @@ def summarize(lines: list[dict], capacity_mah: float = 5000) -> str:
     out.append(f"inserts whose text was edited afterwards: {edited} of {total} with an edit line")
     out.extend(take_diagnostics(lines))
     out.extend(swap_table(lines))
+    out.extend(field_reads(lines))
 
     exits = Counter(line.get("reason") for line in lines if line.get("event") == "exit")
     out.append("process exits: " + (", ".join(f"{k} {n}" for k, n in exits.most_common()) or "none"))
