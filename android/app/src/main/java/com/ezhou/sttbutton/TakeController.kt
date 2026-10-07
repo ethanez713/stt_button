@@ -282,18 +282,20 @@ class TakeController(private val service: DictationService, private val overlay:
         }
         val caret = inserter.readCaret(field)
         val caretBefore = if (caret.known) caret.end else field.textSelectionEnd
-        val outcome = inserter.insert(field, Pipeline.takeOpener(fieldText, caretBefore) + body)
+        val written = Pipeline.takeOpener(fieldText, caretBefore) + body
+        val outcome = inserter.insert(field, written)
         if (outcome.copied && outcome.readback == "unchanged") {
             Toast.makeText(service, R.string.copied_to_clipboard, Toast.LENGTH_LONG).show()
         }
         take.markInserted()
         current.sampler.stop()
+        val caretAfter = inserter.readCaret(field)
         log.write("insert", take.id,
             "pkg" to take.pkg, "raw" to result.raw, "cleaned" to body, "text_before" to outcome.textBefore,
             "insert_path" to outcome.path, "landed" to outcome.landed,
             "readback" to outcome.readback, "landed_count" to outcome.landedCount,
             "attempts" to outcome.attempts, "copied" to outcome.copied,
-            "sel_before" to caretBefore, "sel_after" to inserter.readCaret(field).end,
+            "sel_before" to caretBefore, "sel_after" to caretAfter.end,
             "asr_ms" to result.asrMs, "clean_ms" to result.cleanMs, "asr_backend" to "cpu", "clean_backend" to "cpu",
             "audio_ms" to result.audioMs, "zero_ms" to current.level.zeroMs, "peak_dbfs" to current.level.peakDbfs,
             "in_tokens" to result.inTokens, "out_tokens" to result.outTokens,
@@ -304,7 +306,7 @@ class TakeController(private val service: DictationService, private val overlay:
             "asr_ms_after_stop" to result.asrMsAfterStop, "clean_ms_after_stop" to result.cleanMsAfterStop,
             "stop_to_insert_ms" to SystemClock.elapsedRealtime() - triggerAtMs,
             *current.cost.lap().toTypedArray())
-        track(take, field)
+        track(take, field, if (outcome.readback == "landed") written else null, caretAfter.end.takeIf { caretAfter.known })
         release(current)
     }
 
@@ -331,10 +333,10 @@ class TakeController(private val service: DictationService, private val overlay:
         release(current)
     }
 
-    private fun track(take: Take, field: AccessibilityNodeInfo) {
+    private fun track(take: Take, field: AccessibilityNodeInfo, landed: String?, caretAfter: Int?) {
         val existing = tracker
         if (existing != null && existing.takeId == take.id) existing.refresh(inserter.textOf(field))
-        else tracker = FieldTracker(take.id, field, inserter.textOf(field))
+        else tracker = FieldTracker(take.id, field, inserter.textOf(field), landed, caretAfter)
     }
 
     private fun release(current: Run) {
@@ -414,22 +416,31 @@ class TakeController(private val service: DictationService, private val overlay:
      * Follows the field a take was inserted into, to log what the user sent. The latest non-empty
      * text is kept because a field often clears on send, and it is written when focus leaves.
      */
-    private inner class FieldTracker(val takeId: String, private val field: AccessibilityNodeInfo, initial: String) {
+    private inner class FieldTracker(
+        val takeId: String, private val field: AccessibilityNodeInfo, initial: String,
+        private val inserted: String?, caretAfter: Int?,
+    ) {
         private var latest = initial
+        private val mirror = FieldMirror(initial)
+        private var span = inserted?.let { SpanLocator.find(initial, it, caretAfter) }
         private val pkg = field.packageName?.toString()
 
         init {
             service.watchTextChanges(true)
         }
 
-        fun refresh(text: String) {
-            if (text.isNotEmpty()) latest = text
+        fun refresh(text: String) = accept(text)
+
+        private fun accept(text: String) {
+            if (text.isEmpty()) return
+            latest = text
+            mirror.sync(text)?.let { edit -> span = span?.apply(edit) }
         }
 
         fun onEvent(event: AccessibilityEvent) {
             when (event.eventType) {
                 AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED -> if (event.source == field) {
-                    event.source?.let(inserter::textOf)?.takeIf { it.isNotEmpty() }?.let { latest = it }
+                    event.source?.let(inserter::textOf)?.let(::accept)
                 }
                 AccessibilityEvent.TYPE_VIEW_FOCUSED -> if (event.source != field) end()
                 AccessibilityEvent.TYPE_WINDOWS_CHANGED ->
@@ -441,7 +452,15 @@ class TakeController(private val service: DictationService, private val overlay:
             if (tracker !== this) return
             tracker = null
             service.watchTextChanges(false)
-            log.write("edit", takeId, "text_after" to latest)
+            log.write("edit", takeId, "text_after" to latest, "span_start" to span?.start, "span_end" to span?.end)
+            markCorrected()
+        }
+
+        private fun markCorrected() {
+            val found = span ?: return
+            val now = latest.substring(found.start.coerceAtMost(latest.length), found.end.coerceAtMost(latest.length))
+            if (now == inserted) return
+            if (File(takesDir, "$takeId.pcm").exists()) File(takesDir, "$takeId.corrected").createNewFile()
         }
     }
 
