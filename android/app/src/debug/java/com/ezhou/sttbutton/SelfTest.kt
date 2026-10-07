@@ -22,6 +22,7 @@ import kotlin.concurrent.thread
  * adb shell am start-foreground-service -n com.ezhou.sttbutton/.SelfTest --es clean <name>
  * adb shell am start-foreground-service -n com.ezhou.sttbutton/.SelfTest --ez replay true [--es policy chunk|revise]
  * adb shell am start-foreground-service -n com.ezhou.sttbutton/.SelfTest --es probe <read|replace|typing|append>
+ * adb shell am start-foreground-service -n com.ezhou.sttbutton/.SelfTest --es play <name>
  *
  * wav plays files/selftest/<name>.wav through the take pipeline (models, slicer, worker, chunk
  * cleans) at N times real time, inserting nothing, and writes the text a take would insert to
@@ -45,6 +46,7 @@ class SelfTest : Service() {
                 intent.getStringExtra("clean")?.let { clean(this, it, intent.getStringExtra("with")) }
                 if (intent.hasExtra("replay")) replay(this, intent.getStringExtra("policy") ?: "chunk")
                 intent.getStringExtra("probe")?.let { probe(this, it, intent) }
+                intent.getStringExtra("play")?.let { play(this, it) }
             } catch (e: Throwable) {
                 Log.e(TAG, "selftest failed", e)
             } finally {
@@ -199,6 +201,21 @@ class SelfTest : Service() {
         for ((thread, frames) in Thread.getAllStackTraces()) {
             Log.w(TAG, "selftest stuck: ${thread.name} ${thread.state}\n" + frames.take(14).joinToString("\n") { "    at $it" })
         }
+    }
+
+    /** Plays files/selftest/<name>.wav through the speaker, so a take on the phone can hear speech. */
+    private fun play(context: Context, name: String) {
+        val audio = readWav(File(context.filesDir, "selftest/$name.wav"))
+        val track = android.media.AudioTrack.Builder()
+            .setAudioAttributes(android.media.AudioAttributes.Builder().setUsage(android.media.AudioAttributes.USAGE_MEDIA).build())
+            .setAudioFormat(android.media.AudioFormat.Builder().setSampleRate(Slicer.SAMPLE_RATE).setChannelMask(android.media.AudioFormat.CHANNEL_OUT_MONO)
+                .setEncoding(android.media.AudioFormat.ENCODING_PCM_16BIT).build())
+            .setBufferSizeInBytes(audio.size * 2).setTransferMode(android.media.AudioTrack.MODE_STATIC).build()
+        track.write(audio, 0, audio.size)
+        track.play()
+        Thread.sleep(audio.size * 1000L / Slicer.SAMPLE_RATE + 500)
+        track.release()
+        Log.i(TAG, "selftest play done $name")
     }
 
     private fun readPcm(file: File): ShortArray {

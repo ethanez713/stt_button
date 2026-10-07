@@ -16,7 +16,7 @@ import java.util.concurrent.TimeUnit
 class FieldProbe(private val service: DictationService, private val out: File) {
     private val main = Handler(Looper.getMainLooper())
 
-    private class Seen(val text: String, val caret: Int, val fieldRead: String)
+    private class Seen(val text: String, val caret: Int, val fieldRead: String, val offset: Int = 0, val selection: String = "")
 
     fun run(mode: String, from: Int, to: Int, replacement: String) {
         when (mode) {
@@ -45,7 +45,7 @@ class FieldProbe(private val service: DictationService, private val out: File) {
         val before = read()
         val selectionsBefore = selections()
         val started = System.nanoTime()
-        if (before.fieldRead != "full" || to > before.text.length) {
+        if (before.fieldRead !in WRITABLE || to > before.text.length) {
             return write(mode, before, read(), null, null, 0L, 0)
         }
         conn.setSelection(from, to)
@@ -58,12 +58,12 @@ class FieldProbe(private val service: DictationService, private val out: File) {
     }
 
     private fun write(mode: String, before: Seen, after: Seen, expectedText: String?, expectedCaret: Int?, ms: Long, selections: Int) {
-        val ok = if (mode == "read") before.fieldRead == "full" else expectedText != null && after.text == expectedText && after.caret == expectedCaret
+        val ok = if (mode == "read") before.fieldRead in WRITABLE else expectedText != null && after.text == expectedText && after.caret == expectedCaret
         val line = JSONObject().put("mode", mode).put("pkg", service.focusedField()?.packageName?.toString() ?: JSONObject.NULL)
             .put("field_read", before.fieldRead).put("len_before", before.text.length).put("len_after", after.text.length)
             .put("caret_before", before.caret).put("caret_after", after.caret).put("caret_expected", expectedCaret ?: JSONObject.NULL)
             .put("ok", ok).put("first_diff", expectedText?.let { ProbeCheck.firstDiff(after.text, it) } ?: JSONObject.NULL)
-            .put("ms", ms).put("selections", selections)
+            .put("ms", ms).put("selections", selections).put("offset", before.offset).put("selection", before.selection)
         out.appendText(line.toString() + "\n")
     }
 
@@ -75,8 +75,14 @@ class FieldProbe(private val service: DictationService, private val out: File) {
         } ?: return Seen("", -1, "none")
         val text = surrounding.text?.toString().orEmpty()
         val after = text.length - surrounding.selectionEnd
-        val full = surrounding.offset == 0 && surrounding.selectionStart < READ_SPAN && after < READ_SPAN
-        return Seen(text, surrounding.offset + surrounding.selectionStart, if (full) "full" else "partial")
+        val short = surrounding.selectionStart < READ_SPAN && after < READ_SPAN
+        val kind = when {
+            !short -> "partial"
+            surrounding.offset == 0 -> "full"
+            surrounding.offset == -1 -> "offset_unknown"
+            else -> "partial"
+        }
+        return Seen(text, maxOf(surrounding.offset, 0) + surrounding.selectionStart, kind, surrounding.offset, "${surrounding.selectionStart}..${surrounding.selectionEnd}")
     }
 
     private fun selections() = (service.inputMethod as? SessionInputMethod)?.snapshot()?.selections ?: 0
@@ -94,6 +100,7 @@ class FieldProbe(private val service: DictationService, private val out: File) {
     }
 
     private companion object {
+        val WRITABLE = setOf("full", "offset_unknown")
         const val READ_SPAN = 100_000
         const val WRITES = 10
         const val GAP_MS = 2_000L
