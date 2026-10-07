@@ -10,6 +10,8 @@ class BubbleContent(val settled: String, val preview: String)
  * has covered. The worker and the preview thread both feed it; [onChange] runs on the feeding thread.
  */
 class BubbleText : TakeSink {
+    private var region: String? = null
+
     @Volatile var onChange: (() -> Unit)? = null
     private var hypothesis = emptyList<PreviewWord>()
     private val slices = mutableListOf<String>()
@@ -17,6 +19,11 @@ class BubbleText : TakeSink {
     private val chunks = mutableListOf<Pair<String, String>>()
 
     fun preview(words: List<PreviewWord>) = update { hypothesis = words }
+
+    /** The text of the take's region, which replaces the slices and chunks this holds. */
+    fun region(text: String) = update { region = text }
+
+    fun covered(endS: Double) = update { coveredS = maxOf(coveredS, endS) }
 
     override fun sliceLanded(endS: Double, text: String) = update {
         slices += text
@@ -27,6 +34,7 @@ class BubbleText : TakeSink {
 
     @Synchronized
     fun text(): BubbleContent {
+        region?.let { return BubbleContent(it, previewAfterDecodes()) }
         val raw = Pipeline.joinSlices(slices)
         var position = 0
         val blocks = mutableListOf<String>()
@@ -38,9 +46,10 @@ class BubbleText : TakeSink {
         }
         val remainder = raw.substring(position).trim()
         if (remainder.isNotEmpty()) blocks += remainder
-        val preview = hypothesis.filter { it.startS >= coveredS }.joinToString(" ") { it.text }
-        return BubbleContent(blocks.joinToString("\n\n"), preview)
+        return BubbleContent(blocks.joinToString("\n\n"), previewAfterDecodes())
     }
+
+    private fun previewAfterDecodes() = hypothesis.filter { it.startS >= coveredS }.joinToString(" ") { it.text }
 
     private fun update(change: () -> Unit) {
         synchronized(this) { change() }

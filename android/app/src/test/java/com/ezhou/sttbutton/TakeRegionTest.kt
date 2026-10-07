@@ -63,7 +63,7 @@ class TakeRegionTest {
     fun given_edits_around_a_flight_when_applied_then_it_is_dirty_only_when_one_touches_it() {
         fun after(edit: Edit) = region().also { it.flightOver(20, 28); it.apply(edit) }.flight!!
         assertFalse(after(Edit(0, 0, 2)).dirty)
-        assertFalse(after(Edit(20, 0, 2)).dirty)
+        assertTrue(after(Edit(20, 0, 2)).dirty)
         assertFalse(after(Edit(28, 0, 2)).dirty)
         assertFalse(after(Edit(15, 5, 0)).dirty)
         assertFalse(after(Edit(28, 2, 0)).dirty)

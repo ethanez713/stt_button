@@ -19,8 +19,9 @@ class TakeRegion(start: Int = 0, cleanEnd: Int = start, end: Int = cleanEnd) {
     var flight: Flight? = null
         private set
 
-    fun appended(length: Int) {
-        end += length
+    /** The take changed the end of its text by [by] characters. */
+    fun appended(by: Int) {
+        end += by
     }
 
     fun flightOver(from: Int, to: Int) {
@@ -47,12 +48,12 @@ class TakeRegion(start: Int = 0, cleanEnd: Int = start, end: Int = cleanEnd) {
         end = if (insertedAtEnd) end + edit.inserted else movedAsEnd(end, edit)
         cleanEnd = cleanEnd.coerceIn(start, end)
         end = maxOf(end, cleanEnd)
-        flight = flight?.let { Flight(movedAsStart(it.from, edit), movedAsEnd(it.to, edit), it.dirty || dirtied) }
+        flight = flight?.let { Flight(movedAsEnd(it.from, edit), movedAsEnd(it.to, edit), it.dirty || dirtied) }
     }
 
     private fun touches(flight: Flight, edit: Edit) =
         if (edit.deleted > 0) edit.at < flight.to && edit.at + edit.deleted > flight.from
-        else edit.at > flight.from && edit.at < flight.to
+        else edit.at >= flight.from && edit.at < flight.to
 
     private fun movedAsStart(offset: Int, edit: Edit) = when {
         offset >= edit.at + edit.deleted -> offset + edit.inserted - edit.deleted

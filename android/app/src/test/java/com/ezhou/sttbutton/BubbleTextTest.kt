@@ -46,6 +46,20 @@ class BubbleTextTest {
         assertEquals(3, calls)
     }
 
+    @Test
+    fun given_an_engine_region_when_shown_then_the_bubble_holds_its_text_and_the_preview_words_after_the_decodes() {
+        val bubble = BubbleText()
+        bubble.preview(listOf(PreviewWord("meet", 0.4), PreviewWord("at", 1.5), PreviewWord("noon", 2.1), PreviewWord("okay", 3.2)))
+        bubble.region("Meet at noon.")
+        bubble.covered(2.5)
+
+        assertEquals("Meet at noon.", bubble.text().settled)
+        assertEquals("okay", bubble.text().preview)
+
+        bubble.region("MEET AT NOON.\n\nOkay.")
+        assertEquals("MEET AT NOON.\n\nOkay.", bubble.text().settled)
+    }
+
     private fun words(array: JSONArray) = List(array.length()) { i ->
         array.getJSONArray(i).let { PreviewWord(it.getString(0), it.getDouble(1)) }
     }

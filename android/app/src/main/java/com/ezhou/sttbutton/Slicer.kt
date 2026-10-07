@@ -31,6 +31,8 @@ class Slicer(
     private var lastSpeech = -1
     private val speech = ArrayList<Boolean>()
 
+    private val closed = ArrayList<IntArray>()
+
     val sampleCount: Int get() = synchronized(this) { size }
 
     /** Speech has been heard and the last pause_s of audio is silent. */
@@ -49,8 +51,12 @@ class Slicer(
             cutAt(energies * WIN, done)
         }
         while (size - start > maxLen) done += hardCut()
+        closed += done
         done
     }
+
+    /** Every slice [feed] has completed from the [from]th on, in the order it cut them. */
+    fun closedSlices(from: Int): List<IntArray> = synchronized(this) { closed.drop(from) }
 
     fun finish(): List<IntArray> = synchronized(this) { if (size > start) listOf(intArrayOf(start, size)) else emptyList() }
 

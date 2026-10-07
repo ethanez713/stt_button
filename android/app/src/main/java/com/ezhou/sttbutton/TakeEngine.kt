@@ -1,0 +1,377 @@
+package com.ezhou.sttbutton
+
+/** One model call, as the job log records it. */
+class JobRecord(
+    val kind: String,
+    val moment: String,
+    val ms: Long,
+    val input: String?,
+    val output: String?,
+    val outcome: String,
+    val inTokens: Int? = null,
+    val outTokens: Int? = null,
+    val fromMs: Long? = null,
+    val toMs: Long? = null,
+    val context: Boolean? = null,
+)
+
+sealed interface JobResult
+class Decoded(val text: String, val mark: String?, val usedContext: Boolean, val fellBack: Boolean, val ms: Long) : JobResult
+class Cleaned(val text: String?, val drifted: Boolean, val inTokens: Int, val outTokens: Int, val ms: Long) : JobResult
+object Loaded : JobResult
+
+/** Work the engine wants done. [run] is the only part that waits on a model, and is safe on another thread. */
+class Job internal constructor(
+    internal val kind: Kind,
+    internal val moment: Moment,
+    internal val slice: IntArray? = null,
+    internal val plan: CleanPlan? = null,
+    private val body: () -> JobResult,
+) {
+    internal enum class Kind { DECODE, CLEAN, LOAD }
+
+    fun run(): JobResult = body()
+}
+
+private class Kept(val text: String, val inTokens: Int, val outTokens: Int)
+
+private class NeedsCleaner : RuntimeException(null, null, false, false)
+
+/**
+ * One take's pipeline writing into a [Document]. Every method but [onAudio] is called from one thread.
+ * [next] returns the next job, [Job.run] does it anywhere, and [complete] applies its result; what to
+ * clean and when is the [policy]'s. The engine reads the [slicer] and does not own it, so it can be built
+ * after audio has begun: the recorder feeds the slicer and calls [onAudio].
+ */
+class TakeEngine(
+    private val document: Document,
+    private val slicer: Slicer,
+    private val recognizer: Recognizer,
+    private val cleaner: Cleaner,
+    private val policy: CleanPolicy,
+    private val cfg: PipelineConfig,
+    private val jobs: (JobRecord) -> Unit = {},
+    private val prepareCleaner: (trigger: String) -> Unit = {},
+) {
+    /** The region's text, after every change the take made. */
+    var onText: ((String) -> Unit)? = null
+
+    /** The end of the audio, in seconds, that decoded slices cover. */
+    var onCovered: ((Double) -> Unit)? = null
+
+    /** Something other than a job result may have changed what [next] returns. */
+    var onWoken: (() -> Unit)? = null
+
+    val policyName: String get() = policy.name
+
+    private val region = TakeRegion(document.read()?.text?.length ?: 0)
+    private val texts = mutableListOf<String>()
+    private val kept = HashMap<String, Kept>()
+    private val chunks = mutableListOf<String>()
+    private val outputs = mutableListOf<String>()
+    private var decoded = 0
+    private var finalSlice: IntArray? = null
+    private var finalTaken = false
+    private var sliceLanded = false
+    private var previousWasUnit = false
+    private var running: Job? = null
+    private var asrMs = 0L
+    private var cleanMs = 0L
+    private var stopAsrMs = 0L
+    private var stopCleanMs = 0L
+    private var inTokens = 0
+    private var outTokens = 0
+    private var idleCleans = 0
+    private var idleHits = 0
+    private var drifts = 0
+    private var contextDecodes = 0
+    private var contextFallbacks = 0
+
+    @Volatile private var abandonSpoken: Int? = null
+    private var timedLoadRequested = false
+
+    var stopping = false
+        private set
+
+    init {
+        document.onEdit = { edit ->
+            region.apply(edit)
+            onWoken?.invoke()
+        }
+    }
+
+    val raw: String get() = Pipeline.joinSlices(texts)
+
+    /** Seconds since the last speech, or since the take opened when none has been heard. */
+    fun silenceS(): Double = (slicer.sampleCount - maxOf(slicer.lastSpeechEnd, 0)).toDouble() / Slicer.SAMPLE_RATE
+
+    /** Recorder thread, after each feed of the slicer. */
+    fun onAudio() {
+        if (!timedLoadRequested && slicer.sampleCount >= cfg.cleanerLoadAfterS * Slicer.SAMPLE_RATE) {
+            timedLoadRequested = true
+            prepareCleaner("time")
+        }
+        val spoken = abandonSpoken
+        if (spoken != null && slicer.lastSpeechEnd != spoken) cleaner.cancel()
+    }
+
+    fun markStop() {
+        stopAsrMs = asrMs
+        stopCleanMs = cleanMs
+    }
+
+    /** No more audio will arrive: what is left is recognized and cleaned for good. */
+    fun stop() {
+        if (stopping) return
+        stopping = true
+        finalSlice = slicer.finish().firstOrNull()
+    }
+
+    fun next(): Job? {
+        check(running == null) { "a job is still running" }
+        nextSlice()?.let { return start(decodeJob(it)) }
+        return planJob()?.let(::start)
+    }
+
+    fun complete(job: Job, result: JobResult) {
+        check(running === job) { "not the running job" }
+        running = null
+        when (job.kind) {
+            Job.Kind.DECODE -> completeDecode(job, result as Decoded)
+            Job.Kind.CLEAN -> completeClean(job, result as Cleaned)
+            Job.Kind.LOAD -> Unit
+        }
+    }
+
+    /** [stop] and then [next], [Job.run] and [complete] inline until nothing is left. */
+    fun finish(): LiveResult {
+        stop()
+        while (true) {
+            val job = next() ?: break
+            complete(job, job.run())
+        }
+        return result()
+    }
+
+    fun result(): LiveResult {
+        val raw = raw
+        val skipped = Pipeline.skipsCleaner(raw, cfg)
+        val (corrections, correctionsKept) = if (skipped) 0 to 0 else Pipeline.unresolvedCorrections(chunks, outputs, cfg.selfCorrectionCues)
+        return LiveResult(
+            raw, regionText(), if (skipped) 0 else chunks.size, if (skipped) "raw" else "chunks", asrMs, cleanMs,
+            asrMs - stopAsrMs, cleanMs - stopCleanMs, inTokens, outTokens, idleCleans, idleHits,
+            Pipeline.matchedCue(raw, cfg.selfCorrectionCues), slicer.sampleCount / (Slicer.SAMPLE_RATE / 1000).toLong(),
+            contextDecodes, contextFallbacks, drifts, corrections, correctionsKept,
+        )
+    }
+
+    private fun start(job: Job): Job {
+        running = job
+        return job
+    }
+
+    private fun regionText(): String = document.read()?.text?.let { it.substring(region.start, region.end.coerceAtMost(it.length)) }
+        ?: throw IllegalStateException("the document is gone")
+
+    private fun nextSlice(): IntArray? {
+        slicer.closedSlices(decoded).firstOrNull()?.let {
+            decoded++
+            return it
+        }
+        if (stopping && !finalTaken) {
+            finalTaken = true
+            return finalSlice
+        }
+        return null
+    }
+
+    private fun momentNow(): Moment? = when {
+        stopping -> Moment.FINISH
+        sliceLanded -> Moment.SLICE
+        slicer.paused && slicer.start >= slicer.lastSpeechEnd -> Moment.PAUSE
+        else -> null
+    }
+
+    private fun planJob(): Job? {
+        var moment = momentNow() ?: return null
+        while (true) {
+            val text = document.read()?.text ?: throw IllegalStateException("the document is gone")
+            val tailStart = region.cleanEnd
+            val tail = text.substring(tailStart, region.end.coerceAtMost(text.length))
+            val plan = try {
+                policy.next(PolicyView(tail, tailStart, chunks.isNotEmpty() || region.cleanEnd > region.start, kept.keys.toSet(), counter()), moment)
+            } catch (e: NeedsCleaner) {
+                return loadJob(moment)
+            }
+            if (plan == null) {
+                if (moment != Moment.SLICE) return null
+                sliceLanded = false
+                moment = momentNow() ?: return null
+                continue
+            }
+            when {
+                plan.local -> applyLocal(plan)
+                !plan.speculative && plan.target in kept -> applyKept(plan)
+                else -> return cleanJob(plan, moment)
+            }
+        }
+    }
+
+    private fun counter(): (String) -> Int = cleaner.tokenCounter ?: { throw NeedsCleaner() }
+
+    private fun loadJob(moment: Moment) = start(Job(Job.Kind.LOAD, moment) {
+        cleaner.countTokens("")
+        Loaded
+    })
+
+    private fun samples(from: Int, to: Int): FloatArray = slicer.copy(from, to).let { pcm -> FloatArray(pcm.size) { pcm[it] / 32768f } }
+
+    private fun decodeJob(slice: IntArray): Job {
+        val before = slicer.speechBefore(slice[0])
+        val after = slicer.speechAfter(slice[0])
+        val withContext = texts.isNotEmpty() && before != null && after != null && after < slice[1]
+        val moment = if (stopping) Moment.FINISH else Moment.SLICE
+        return Job(Job.Kind.DECODE, moment, slice = slice) {
+            val started = System.nanoTime()
+            fun plain() = recognizer.recognize(RecognizeRequest(samples(slice[0], slice[1]))).text
+            var text: String
+            var mark: String? = null
+            var fellBack = false
+            if (!withContext) {
+                text = plain()
+            } else {
+                val (audio, junctionS) = Pipeline.contextAudio(::samples, before!!, after!!, slice[1], cfg.contextS, cfg.junctionSqueezeS)
+                val heard = recognizer.recognize(RecognizeRequest(audio, junctionS))
+                if (heard.text.isEmpty()) {
+                    fellBack = true
+                    text = plain()
+                } else {
+                    text = heard.text
+                    mark = heard.mark.orEmpty()
+                }
+            }
+            Decoded(text, mark, withContext, fellBack, elapsedMs(started))
+        }
+    }
+
+    private fun completeDecode(job: Job, decoded: Decoded) {
+        val slice = job.slice!!
+        asrMs += decoded.ms
+        if (decoded.usedContext) contextDecodes++
+        if (decoded.fellBack) contextFallbacks++
+        val text = document.read()?.text ?: throw IllegalStateException("the document is gone")
+        var from = region.end
+        var written = if (decoded.text.isEmpty()) "" else (if (texts.any { it.isNotEmpty() }) " " else "") + decoded.text
+        val previous = texts.lastOrNull().orEmpty()
+        if (decoded.mark != null && previous.isNotEmpty()) {
+            val old = Pipeline.trailingMark(previous)
+            val settled = Pipeline.settledMark(old, decoded.mark)
+            texts[texts.lastIndex] = Pipeline.withoutTrailingMark(previous) + settled
+            val markStart = region.end - old.length
+            if (old != settled && markStart >= region.cleanEnd && text.startsWith(old, markStart)) {
+                from = markStart
+                written = settled + written
+            }
+        }
+        texts += decoded.text
+        if (written.isNotEmpty() || from != region.end) {
+            document.replace(from, region.end, written)
+            region.appended(written.length - (region.end - from))
+        }
+        jobs(JobRecord("asr", job.moment.name.lowercase(), decoded.ms, null, decoded.text, if (decoded.fellBack) "fallback" else "applied",
+            fromMs = slice[0].toLong() / (Slicer.SAMPLE_RATE / 1000), toMs = slice[1].toLong() / (Slicer.SAMPLE_RATE / 1000), context = decoded.usedContext))
+        sliceLanded = true
+        if (!Pipeline.skipsCleaner(raw, cfg)) prepareCleaner("text")
+        onCovered?.invoke(slice[1].toDouble() / Slicer.SAMPLE_RATE)
+        onText?.invoke(regionText())
+    }
+
+    private fun cleanJob(plan: CleanPlan, moment: Moment): Job {
+        region.flightOver(plan.from, plan.to)
+        val spoken = slicer.lastSpeechEnd
+        abandonSpoken = if (plan.abandonable) spoken else null
+        return Job(Job.Kind.CLEAN, moment, plan = plan) {
+            val started = System.nanoTime()
+            val result = if (plan.abandonable && slicer.lastSpeechEnd != spoken) null else cleaner.clean(CleanRequest(plan.target))
+            val ms = elapsedMs(started)
+            if (result == null) {
+                Cleaned(null, false, 0, 0, ms)
+            } else {
+                val drifted = Pipeline.factDrift(plan.target, result.text).isNotEmpty()
+                val text = if (drifted) Spoken.convert(plan.target) else result.text
+                Cleaned(Spoken.keepSpokenEnding(plan.target, text), drifted, cleaner.countTokens(plan.target), result.outTokens, ms)
+            }
+        }
+    }
+
+    private fun completeClean(job: Job, cleaned: Cleaned) {
+        val plan = job.plan!!
+        abandonSpoken = null
+        cleanMs += cleaned.ms
+        if (plan.speculative) idleCleans++
+        val flight = region.flight
+        val record = { outcome: String, output: String? ->
+            jobs(JobRecord("clean", job.moment.name.lowercase(), cleaned.ms, plan.target, output, outcome,
+                cleaned.inTokens.takeIf { cleaned.text != null }, cleaned.outTokens.takeIf { cleaned.text != null }))
+        }
+        if (cleaned.text != null) {
+            inTokens += cleaned.inTokens
+            outTokens += cleaned.outTokens
+            if (cleaned.drifted) drifts++
+        }
+        when {
+            cleaned.text == null && (plan.abandonable || plan.speculative) -> {
+                region.dropFlight()
+                record("abandoned", null)
+            }
+            plan.speculative && cleaned.text != null -> {
+                kept[plan.target] = Kept(cleaned.text, cleaned.inTokens, cleaned.outTokens)
+                region.dropFlight()
+                record("kept", cleaned.text)
+            }
+            flight == null || flight.dirty -> {
+                region.dropFlight()
+                record("dropped", cleaned.text)
+            }
+            else -> {
+                val text = cleaned.text ?: Spoken.convert(plan.target)
+                apply(flight.from, flight.to, text, plan.target)
+                record(if (cleaned.text == null || cleaned.drifted) "fallback" else "applied", text)
+            }
+        }
+    }
+
+    private fun applyKept(plan: CleanPlan) {
+        region.flightOver(plan.from, plan.to)
+        idleHits++
+        apply(plan.from, plan.to, kept.getValue(plan.target).text, plan.target)
+    }
+
+    private fun applyLocal(plan: CleanPlan) {
+        region.flightOver(plan.from, plan.to)
+        val text = Spoken.convert(plan.target)
+        document.replace(plan.from, plan.to, text)
+        region.flightReplaced(text.length)
+        onText?.invoke(regionText())
+    }
+
+    /** Writes [output] over the flight, set off from the cleaned text before it as `Pipeline.joinCleaned` sets chunks off. */
+    private fun apply(from: Int, to: Int, output: String, target: String) {
+        val text = document.read()?.text ?: throw IllegalStateException("the document is gone")
+        val cleanedBefore = text.substring(region.start, region.cleanEnd)
+        val unit = Pipeline.isCorrectionUnit(target, cfg.selfCorrectionCues)
+        val separator = when {
+            output.isEmpty() || cleanedBefore.isEmpty() -> ""
+            (previousWasUnit || unit) && !cleanedBefore.substringAfterLast('\n').startsWith("- ") -> " "
+            else -> "\n\n"
+        }
+        previousWasUnit = unit
+        chunks += target
+        outputs += output
+        document.replace(from, to, separator + output)
+        region.flightReplaced((separator + output).length)
+        onText?.invoke(regionText())
+    }
+
+    private fun elapsedMs(since: Long) = (System.nanoTime() - since) / 1_000_000
+}
