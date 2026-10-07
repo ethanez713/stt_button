@@ -20,6 +20,7 @@ import kotlin.concurrent.thread
  * adb shell am start-foreground-service -n com.ezhou.sttbutton/.SelfTest --es wav <name> [--ei speed N]
  * adb shell am start-foreground-service -n com.ezhou.sttbutton/.SelfTest --es asr <name>
  * adb shell am start-foreground-service -n com.ezhou.sttbutton/.SelfTest --es clean <name>
+ * adb shell am start-foreground-service -n com.ezhou.sttbutton/.SelfTest --ez replay true
  *
  * wav plays files/selftest/<name>.wav through the take pipeline (models, slicer, worker, chunk
  * cleans) at N times real time, inserting nothing, and writes the text a take would insert to
@@ -41,6 +42,7 @@ class SelfTest : Service() {
                 intent.getStringExtra("wav")?.let { take(this, it, intent.getIntExtra("speed", 1)) }
                 intent.getStringExtra("asr")?.let { recognize(this, it, intent.getIntExtra("threads", ParakeetRecognizer.THREADS)) }
                 intent.getStringExtra("clean")?.let { clean(this, it, intent.getStringExtra("with")) }
+                if (intent.hasExtra("replay")) replay(this)
             } catch (e: Throwable) {
                 Log.e(TAG, "selftest failed", e)
             } finally {
@@ -67,11 +69,9 @@ class SelfTest : Service() {
         }
     }
 
-    private fun take(context: Context, name: String, speed: Int) {
-        val dir = File(context.filesDir, "selftest")
-        val cfg = PipelineConfig(org.json.JSONObject(context.assets.open("pipeline.json").bufferedReader().readText()))
-        val audio = readWav(File(dir, "$name.wav"))
-        val models = Models.forFiles(context.filesDir, cfg)
+    private class TakeRun(val result: LiveResult, val inserted: String, val stopToInsertMs: Long, val firstPreviewMs: Long, val shown: BubbleContent)
+
+    private fun runTake(models: Models, cfg: PipelineConfig, audio: ShortArray, speed: Int): TakeRun {
         val bubble = BubbleText()
         val live = LiveTake(models.recognizer, models::cleaner, cfg, bubble, models::prepareCleaner)
         val feedStarted = SystemClock.elapsedRealtime()
@@ -101,18 +101,63 @@ class SelfTest : Service() {
         val inserted = Pipeline.casual(result.cleaned, cfg)
         val stopToInsert = SystemClock.elapsedRealtime() - stopped
         preview.stop()
-        val shown = bubble.text()
+        return TakeRun(result, inserted, stopToInsert, firstPreviewMs, bubble.text())
+    }
+
+    private fun take(context: Context, name: String, speed: Int) {
+        val dir = File(context.filesDir, "selftest")
+        val cfg = PipelineConfig(org.json.JSONObject(context.assets.open("pipeline.json").bufferedReader().readText()))
+        val audio = readWav(File(dir, "$name.wav"))
+        val models = Models.forFiles(context.filesDir, cfg)
+        val run = runTake(models, cfg, audio, speed)
+        val result = run.result
         models.close()
-        Log.i(TAG, "selftest bubble $name first_preview_ms=$firstPreviewMs settled_words=${Pipeline.wordCount(shown.settled)} " +
-            "preview_words=${Pipeline.wordCount(shown.preview)}")
-        File(dir, "$name.take.txt").writeText(inserted + "\n")
+        Log.i(TAG, "selftest bubble $name first_preview_ms=${run.firstPreviewMs} settled_words=${Pipeline.wordCount(run.shown.settled)} " +
+            "preview_words=${Pipeline.wordCount(run.shown.preview)}")
+        File(dir, "$name.take.txt").writeText(run.inserted + "\n")
         Log.i(TAG, "selftest take $name mode=${result.cleanMode} chunks=${result.chunks} audio_ms=${result.audioMs} " +
-            "cue=${result.cue} context=${result.contextDecodes}/${result.contextFallbacks} text=$inserted")
+            "cue=${result.cue} context=${result.contextDecodes}/${result.contextFallbacks} text=${run.inserted}")
         File(dir, "$name.raw.txt").writeText(result.raw + "\n")
         Log.i(TAG, "selftest wav $name audio_ms=${audio.size / 16} speed=$speed mode=${result.cleanMode} " +
-            "chunks=${result.chunks} stop_to_insert_ms=$stopToInsert asr_ms=${result.asrMs} clean_ms=${result.cleanMs} " +
+            "chunks=${result.chunks} stop_to_insert_ms=${run.stopToInsertMs} asr_ms=${result.asrMs} clean_ms=${result.cleanMs} " +
             "asr_after_stop_ms=${result.asrMsAfterStop} clean_after_stop_ms=${result.cleanMsAfterStop} " +
             "idle_cleans=${result.idleCleans} idle_hits=${result.idleHits} raw_words=${result.raw.split(' ').size}")
+    }
+
+    /**
+     * Runs every `.pcm` and `.wav` in files/selftest/replay through the take pipeline at [REPLAY_SPEED],
+     * one line each to files/selftest/replay.jsonl, under replay/pipeline.json when that file is there.
+     */
+    private fun replay(context: Context) {
+        val dir = File(context.filesDir, "selftest")
+        val inputs = File(dir, "replay")
+        val override = File(inputs, "pipeline.json").takeIf { it.isFile }?.readBytes()
+        val configBytes = override ?: context.assets.open("pipeline.json").use { it.readBytes() }
+        val cfg = PipelineConfig(org.json.JSONObject(String(configBytes)))
+        val configId = ConfigId.of(configBytes, ModelFiles.required.map { it to File(context.filesDir, it).length() })
+        val out = File(dir, "replay.jsonl")
+        val files = inputs.listFiles { f -> f.isFile && f.extension in listOf("pcm", "wav") }.orEmpty().sortedBy { it.name }
+        val models = Models.forFiles(context.filesDir, cfg)
+        try {
+            for (file in files) {
+                val audio = if (file.extension == "wav") readWav(file) else readPcm(file)
+                val run = runTake(models, cfg, audio, REPLAY_SPEED)
+                val result = run.result
+                val line = org.json.JSONObject().put("name", file.name).put("config_id", configId)
+                    .put("raw", result.raw).put("cleaned", run.inserted).put("clean_mode", result.cleanMode)
+                    .put("chunks", result.chunks).put("audio_ms", audio.size / 16)
+                    .put("asr_ms", result.asrMs).put("clean_ms", result.cleanMs).put("stop_to_insert_ms", run.stopToInsertMs)
+                out.appendText(line.toString() + "\n")
+            }
+        } finally {
+            models.close()
+        }
+        Log.i(TAG, "selftest replay done ${files.size}")
+    }
+
+    private fun readPcm(file: File): ShortArray {
+        val bytes = ByteBuffer.wrap(file.readBytes()).order(ByteOrder.LITTLE_ENDIAN)
+        return ShortArray(bytes.limit() / 2) { bytes.getShort(2 * it) }
     }
 
     private fun clean(context: Context, name: String, with: String?) {
@@ -151,5 +196,6 @@ class SelfTest : Service() {
 
     companion object {
         private const val TAG = DictationService.TAG
+        private const val REPLAY_SPEED = 8
     }
 }
