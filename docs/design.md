@@ -118,6 +118,8 @@ When a slice lands, the preview words whose timestamps fall inside it are droppe
 
 ### Keyboard swap
 
+The swap is switched off in the build: the input method is not enabled and every take runs without it. A keyboard stranded by an earlier process death is still returned.
+
 A take switches the phone's keyboard to this app's own input method for as long as it records, so the take owns the bottom of the screen and the user's typing during it can be handled by this app. The input method is declared with one `en_US`, ASCII-capable subtype and no settings screen, and never uses a full-screen extract view. The accessibility service enables it once when it connects, which Android allows only for an input method in the service's own package. When that fails, every take runs without a swap.
 
 When a take starts and the recorder is running, the current default keyboard and its subtype id are written to the `ime` preferences, so they survive a process death, and the service asks Android to switch. The swap is pending until the new keyboard's view starts and live from then. It fails when the switch is refused or the view has not started within 1 s. A failed swap leaves the take on its usual rules, and when the default keyboard had changed it is returned at once.

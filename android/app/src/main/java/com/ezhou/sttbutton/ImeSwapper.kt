@@ -25,6 +25,7 @@ class ImeSwapper(private val service: AccessibilityService) {
     val currentDefault: String? get() = Settings.Secure.getString(service.contentResolver, Settings.Secure.DEFAULT_INPUT_METHOD)
 
     fun enableOnConnect() {
+        if (!SWAP_TAKES) return
         val result = service.softKeyboardController.setInputMethodEnabled(ourId, true)
         enabled = result == SoftKeyboardController.ENABLE_IME_SUCCESS
         Log.i(tag, "ime enable $ourId result=${enableName(result)}")
@@ -33,7 +34,7 @@ class ImeSwapper(private val service: AccessibilityService) {
     /** Remembers the user's keyboard and asks for this app's. [SwapState.off] when it is not enabled or already the default. */
     fun begin(nowMs: Long): SwapState {
         val default = currentDefault
-        if (!enabled || default == null || default == ourId) return SwapState.off()
+        if (!SWAP_TAKES || !enabled || default == null || default == ourId) return SwapState.off()
         val subtype = Settings.Secure.getString(service.contentResolver, Settings.Secure.SELECTED_INPUT_METHOD_SUBTYPE)?.toIntOrNull()
         prefs.edit().putString(KEY_ID, default).putInt(KEY_SUBTYPE, subtype ?: NO_SUBTYPE).apply()
         val switched = service.softKeyboardController.switchToInputMethod(ourId)
@@ -108,6 +109,7 @@ class ImeSwapper(private val service: AccessibilityService) {
     }
 
     companion object {
+        const val SWAP_TAKES = false
         private const val PREFS = "ime"
         private const val KEY_ID = "saved_id"
         private const val KEY_SUBTYPE = "saved_subtype"
