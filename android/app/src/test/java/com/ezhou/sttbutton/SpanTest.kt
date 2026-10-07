@@ -19,6 +19,19 @@ class SpanTest {
         assertEquals(Edit(3, 0, 1), mirror.sync("abcd"))
     }
 
+    @Test
+    fun syncWithTheCaretPicksTheEditThatEndsThere() {
+        assertEquals(Edit(1, 0, 1), FieldMirror("aaa").sync("aaaa", selectionStart = 2))
+        assertEquals(Edit(3, 0, 1), FieldMirror("aaa").sync("aaaa", selectionStart = 4))
+        assertEquals(Edit(1, 1, 0), FieldMirror("aaaa").sync("aaa", selectionStart = 1))
+        assertEquals(Edit(0, 0, 3), FieldMirror("abab").sync("ababab", selectionStart = 3))
+    }
+
+    @Test
+    fun syncWithACaretNothingExplainsFallsBackToTheLongestPrefix() {
+        assertEquals(Edit(3, 0, 1), FieldMirror("aaa").sync("aaaa", selectionStart = 0))
+    }
+
     private val span = Span(5, 10)
 
     @Test fun editBeforeShifts() = assertEquals(Span(7, 12), span.apply(Edit(0, 0, 2)))
