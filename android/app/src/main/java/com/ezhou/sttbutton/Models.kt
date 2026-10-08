@@ -69,7 +69,8 @@ class LlamaChunkCleaner(private val llama: LlamaCleaner, private val cfg: Pipeli
         cancelRequested = false
         val started = System.nanoTime()
         val spoken = Spoken.convert(chunk)
-        val text = llama.clean(Pipeline.promptFor(cfg, spoken), Pipeline.maxNewTokens(cfg, countTokens(spoken)))
+        val (head, transcript, tail) = Pipeline.promptParts(cfg, spoken)
+        val text = llama.clean(head, transcript, tail, Pipeline.maxNewTokens(cfg, countTokens(spoken)))
         if (text != null) {
             val stats = llama.stats()
             Log.i(DictationService.TAG, "chunk clean ms=${(System.nanoTime() - started) / 1_000_000} " +

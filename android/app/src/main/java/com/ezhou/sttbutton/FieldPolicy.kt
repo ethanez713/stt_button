@@ -26,6 +26,10 @@ object FieldPolicy {
         }
     }
 
+    /** Whether a field takes line breaks as text: the node says it is multi-line, or its input type does. */
+    fun multiLine(nodeMultiLine: Boolean, inputType: Int): Boolean =
+        nodeMultiLine || (inputType and (InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_IME_MULTI_LINE)) != 0
+
     /**
      * Whether the editor the keyboard is attached to stands in for a focused field the service
      * could not read. It has to belong to the focused window: on the way out of an app the

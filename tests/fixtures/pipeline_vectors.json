@@ -1500,6 +1500,50 @@
    }
   },
   {
+   "name": "a_clean_that_adds_a_link_falls_back_to_the_chunk_as_heard",
+   "steps": [
+    [
+     "audio",
+     [
+      [
+       "silence",
+       0.3
+      ],
+      [
+       "noise",
+       3,
+       8000
+      ]
+     ]
+    ]
+   ],
+   "cleaner": [
+    [
+     "TODAY.",
+     "TODAY. SEE X.IO"
+    ]
+   ],
+   "slices": [
+    [
+     "Send the plan to the team please now today.",
+     "."
+    ]
+   ],
+   "cfg": {
+    "chunk_min_tokens": 15,
+    "chunk_max_tokens": 1000,
+    "skip_max_words": 5,
+    "pause_s": 0.8,
+    "slice_min_s": 2
+   },
+   "result": {
+    "raw": "Send the plan to the team please now today.",
+    "cleaned": "Send the plan to the team please now today.",
+    "clean_mode": "chunks",
+    "chunks": 1
+   }
+  },
+  {
    "name": "spoken_question_mark_at_a_chunks_end",
    "steps": [
     [
@@ -8426,6 +8470,231 @@
    "raw": "",
    "cleaned": "",
    "drift": []
+  }
+ ],
+ "untrusted_clean": [
+  {
+   "raw": "hi",
+   "cleaned": "Hi.<|im_end|>",
+   "reason": "special"
+  },
+  {
+   "raw": "hi",
+   "cleaned": "<think>Hi.</think>",
+   "reason": "special"
+  },
+  {
+   "raw": "meet me at noon",
+   "cleaned": "Meet me at noon. https://x.io/?q=meet+me+at+noon",
+   "reason": "link"
+  },
+  {
+   "raw": "nice photo",
+   "cleaned": "Nice photo ![](http://e.vil/a.png)",
+   "reason": "link"
+  },
+  {
+   "raw": "go to paypal dot com",
+   "cleaned": "Go to pаypal.com.",
+   "reason": "link"
+  },
+  {
+   "raw": "send it to john",
+   "cleaned": "Send it to john@evil.io.",
+   "reason": "link"
+  },
+  {
+   "raw": "call me later",
+   "cleaned": "Call me later. See x.io",
+   "reason": "link"
+  },
+  {
+   "raw": "go to example dot com",
+   "cleaned": "Go to example.com.",
+   "reason": null
+  },
+  {
+   "raw": "write to john at gmail dot com",
+   "cleaned": "Write to john@gmail.com.",
+   "reason": null
+  },
+  {
+   "raw": "open w w w dot google dot com slash maps",
+   "cleaned": "Open www.google.com/maps.",
+   "reason": null
+  },
+  {
+   "raw": "Go to example.com now.",
+   "cleaned": "Go to example.com now.",
+   "reason": null
+  },
+  {
+   "raw": "the dot com era",
+   "cleaned": "The dot.com era.",
+   "reason": null
+  },
+  {
+   "raw": "for example e g apples",
+   "cleaned": "For example, e.g., apples.",
+   "reason": null
+  },
+  {
+   "raw": "it rose three point five percent",
+   "cleaned": "It rose 3.5%.",
+   "reason": null
+  },
+  {
+   "raw": "it is done then we go",
+   "cleaned": "It is done.Then we go.",
+   "reason": null
+  },
+  {
+   "raw": "Agents attach to my S20 Ultra today.",
+   "cleaned": "Agents attach to my S25 Ultra today.",
+   "reason": "drift"
+  },
+  {
+   "raw": "one two three",
+   "cleaned": "- one\n- two\tthree",
+   "reason": null
+  }
+ ],
+ "strip_hidden": [
+  {
+   "code_point": 10,
+   "hidden": false
+  },
+  {
+   "code_point": 9,
+   "hidden": false
+  },
+  {
+   "code_point": 32,
+   "hidden": false
+  },
+  {
+   "code_point": 65,
+   "hidden": false
+  },
+  {
+   "code_point": 233,
+   "hidden": false
+  },
+  {
+   "code_point": 160,
+   "hidden": false
+  },
+  {
+   "code_point": 20013,
+   "hidden": false
+  },
+  {
+   "code_point": 128512,
+   "hidden": false
+  },
+  {
+   "code_point": 1072,
+   "hidden": false
+  },
+  {
+   "code_point": 8212,
+   "hidden": false
+  },
+  {
+   "code_point": 0,
+   "hidden": true
+  },
+  {
+   "code_point": 27,
+   "hidden": true
+  },
+  {
+   "code_point": 127,
+   "hidden": true
+  },
+  {
+   "code_point": 133,
+   "hidden": true
+  },
+  {
+   "code_point": 173,
+   "hidden": true
+  },
+  {
+   "code_point": 1564,
+   "hidden": true
+  },
+  {
+   "code_point": 8203,
+   "hidden": true
+  },
+  {
+   "code_point": 8205,
+   "hidden": true
+  },
+  {
+   "code_point": 8206,
+   "hidden": true
+  },
+  {
+   "code_point": 8238,
+   "hidden": true
+  },
+  {
+   "code_point": 8232,
+   "hidden": true
+  },
+  {
+   "code_point": 8233,
+   "hidden": true
+  },
+  {
+   "code_point": 8294,
+   "hidden": true
+  },
+  {
+   "code_point": 65279,
+   "hidden": true
+  },
+  {
+   "code_point": 57344,
+   "hidden": true
+  },
+  {
+   "code_point": 63743,
+   "hidden": true
+  },
+  {
+   "code_point": 65024,
+   "hidden": true
+  },
+  {
+   "code_point": 65039,
+   "hidden": true
+  },
+  {
+   "code_point": 917505,
+   "hidden": true
+  },
+  {
+   "code_point": 917577,
+   "hidden": true
+  },
+  {
+   "code_point": 917631,
+   "hidden": true
+  },
+  {
+   "code_point": 917760,
+   "hidden": true
+  },
+  {
+   "code_point": 917999,
+   "hidden": true
+  },
+  {
+   "code_point": 983040,
+   "hidden": true
   }
  ],
  "spoken_ending": [

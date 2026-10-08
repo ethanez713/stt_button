@@ -232,7 +232,8 @@ class SelfTest : Service() {
         val started = SystemClock.elapsedRealtime()
         LlamaCleaner(File(context.filesDir, ModelFiles.S1_MINI).path).use { cleaner ->
             val loaded = SystemClock.elapsedRealtime()
-            val text = cleaner.clean(prompt, max)?.trim() ?: error("clean returned null")
+            // The prompt file is rendered on the host and trusted whole, special tokens included.
+            val text = cleaner.clean(prompt, "", "", max)?.trim() ?: error("clean returned null")
             val stats = cleaner.stats()
             File(dir, "$name.out.txt").writeText(text + "\n")
             parakeet?.close()

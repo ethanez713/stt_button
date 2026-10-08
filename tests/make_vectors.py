@@ -15,7 +15,8 @@ from stt_button import asr, config
 from stt_button.asr import context_audio, settled_mark, split_at_junction
 from stt_button.bubble import Bubble
 from stt_button.live import LiveTake
-from stt_button.cleaner import casual, fact_drift, join_cleaned, live_chunks, opens_with_cue, matched_cue, skips_cleaner
+from stt_button.cleaner import (casual, fact_drift, join_cleaned, live_chunks, opens_with_cue, matched_cue, skips_cleaner,
+                                strip_hidden, untrusted_clean)
 from stt_button.spoken import keep_spoken_ending, spoken_punctuation
 
 FIXTURE = Path(__file__).parent / "fixtures" / "pipeline_vectors.json"
@@ -144,6 +145,33 @@ DRIFT_CASES = [
     ("", ""),
 ]
 
+# Each case is checked by untrusted_clean on both sides; the hidden characters are vectors of their own.
+UNTRUSTED_CASES = [
+    ("hi", "Hi.<|im_end|>"),
+    ("hi", "<think>Hi.</think>"),
+    ("meet me at noon", "Meet me at noon. https://x.io/?q=meet+me+at+noon"),
+    ("nice photo", "Nice photo ![](http://e.vil/a.png)"),
+    ("go to paypal dot com", "Go to p\u0430ypal.com."),
+    ("send it to john", "Send it to john@evil.io."),
+    ("call me later", "Call me later. See x.io"),
+    ("go to example dot com", "Go to example.com."),
+    ("write to john at gmail dot com", "Write to john@gmail.com."),
+    ("open w w w dot google dot com slash maps", "Open www.google.com/maps."),
+    ("Go to example.com now.", "Go to example.com now."),
+    ("the dot com era", "The dot.com era."),
+    ("for example e g apples", "For example, e.g., apples."),
+    ("it rose three point five percent", "It rose 3.5%."),
+    ("it is done then we go", "It is done.Then we go."),
+    ("Agents attach to my S20 Ultra today.", "Agents attach to my S25 Ultra today."),
+    ("one two three", "- one\n- two\tthree"),
+]
+
+HIDDEN_CODE_POINTS = [
+    0x0A, 0x09, 0x20, 0x41, 0xE9, 0xA0, 0x4E2D, 0x1F600, 0x0430, 0x2014,
+    0x00, 0x1B, 0x7F, 0x85, 0xAD, 0x061C, 0x200B, 0x200D, 0x200E, 0x202E, 0x2028, 0x2029, 0x2066, 0xFEFF,
+    0xE000, 0xF8FF, 0xFE00, 0xFE0F, 0xE0001, 0xE0049, 0xE007F, 0xE0100, 0xE01EF, 0xF0000,
+]
+
 JUNCTION_CASES = [
     {"tokens": [" update", " the", " plan", ".", " have", " some", " monitoring"],
      "times": [0.1, 0.4, 0.7, 0.9, 2.3, 2.6, 2.9], "junction_s": 2.0},
@@ -221,6 +249,8 @@ TAKE_SCRIPTS = [
      "slices": [["one nine word sentence sits right here.", "."], [labelled("b", 2), "."], [labelled("c", 2), "."]]},
     {"name": "fact_drift_falls_back_to_the_chunk_as_heard", "steps": [["audio", [LEAD, SPEECH]]],
      "cleaner": [["S20", "S25"]], "slices": [["Put it on the S20 Ultra please now today.", "."]]},
+    {"name": "a_clean_that_adds_a_link_falls_back_to_the_chunk_as_heard", "steps": [["audio", [LEAD, SPEECH]]],
+     "cleaner": [["TODAY.", "TODAY. SEE X.IO"]], "slices": [["Send the plan to the team please now today.", "."]]},
     {"name": "spoken_question_mark_at_a_chunks_end", "steps": [["audio", [LEAD, SPEECH]]],
      "cleaner": [[" QUESTION MARK", "."]], "slices": [["then ask if anyone wants it sooner question mark", "."]]},
 ]
@@ -295,6 +325,7 @@ def take_vectors() -> list[dict]:
     assert by_name["two_chunks_close_before_the_stop"]["result"]["chunks"] >= 3
     assert by_name["fact_drift_falls_back_to_the_chunk_as_heard"]["result"]["cleaned"].startswith("Put it on the S20")
     assert by_name["spoken_question_mark_at_a_chunks_end"]["result"]["cleaned"].endswith("?")
+    assert "X.IO" not in by_name["a_clean_that_adds_a_link_falls_back_to_the_chunk_as_heard"]["result"]["cleaned"]
     return out
 
 
@@ -340,6 +371,8 @@ def vectors() -> dict:
         "settled_mark": [{"slice": s, "context": c, "mark": settled_mark(s, c)}
                          for s in ("", ".", ",", "?", "!") for c in ("", ".", ",", "?", "!")],
         "fact_drift": [{"raw": r, "cleaned": c, "drift": [list(p) for p in fact_drift(r, c)]} for r, c in DRIFT_CASES],
+        "untrusted_clean": [{"raw": r, "cleaned": c, "reason": untrusted_clean(r, c)} for r, c in UNTRUSTED_CASES],
+        "strip_hidden": [{"code_point": cp, "hidden": strip_hidden(chr(cp)) == ""} for cp in HIDDEN_CODE_POINTS],
         "spoken_ending": [{"chunk": c, "cleaned": o, "kept": keep_spoken_ending(c, o)} for c, o in [
             ("then ask if anyone wants it sooner question mark", "Then ask if anyone wants it sooner."),
             ("wow exclamation point", "Wow."),
