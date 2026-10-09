@@ -6,7 +6,8 @@ object Spoken {
     private val PAREN_WORDS = listOf("paren", "parenthesis", "parentheses")
     private val TOKEN = Regex("^([^\\p{L}\\p{N}_']*)(.*?)([^\\p{L}\\p{N}_']*)$", RegexOption.DOT_MATCHES_ALL)
     private val WHITESPACE = Regex("\\s+")
-    private val TOKEN_SPAN = Regex("(?U)\\S+")
+    // Android's ICU regex rejects the Unicode-class inline flag; \p{Z} gives the JVM the Unicode spaces Python's \S excludes.
+    private val TOKEN_SPAN = Regex("[^\\s\\p{Z}]+")
     private const val RESTATEMENT_MAX_WORDS = 4
     private val FIRST_PERSON = setOf("i", "i'm", "i'll", "i've", "i'd")
     private val SENTENCE_ENDS = setOf('.', '?', '!')

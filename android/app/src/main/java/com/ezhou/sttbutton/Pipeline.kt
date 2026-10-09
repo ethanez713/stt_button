@@ -40,7 +40,8 @@ object Pipeline {
     private val TRAILING_FILLERS = setOf("um", "umm", "uh", "hmm")
     private val SIGN_OFFS = setOf("okay", "ok", "yeah", "yep", "alright")
     private val NOT_WORD_EDGE = Regex("^[^\\p{L}\\p{N}_']+|[^\\p{L}\\p{N}_']+$")
-    private val NON_SPACE = Regex("(?U)\\S+")
+    // Android's ICU regex rejects the Unicode-class inline flag; \p{Z} gives the JVM the Unicode spaces Python's \S excludes.
+    private val NON_SPACE = Regex("[^\\s\\p{Z}]+")
     private val TRAILING_MARK = Regex("[.,?!;:]$")
     private const val CONTEXT_LEAD_S = 0.1
     val SENTENCE_ENDS = listOf(".", "?", "!")
