@@ -6,12 +6,12 @@ from stt_button.cleaner import prompt_parts, render_prompt, strip_hidden, unhear
 
 @pytest.mark.parametrize("hidden", [
     "\U000E0049\U000E0067\U000E006E",  # tag characters spelling "Ign"
-    "​",  # zero-width space
-    "‮",  # right-to-left override
-    "️",  # variation selector
+    "\u200b",  # zero-width space
+    "\u202e",  # right-to-left override
+    "\ufe0f",  # variation selector
     "\U000E0100",  # supplementary variation selector
-    " ",  # line separator
-    "",  # private use
+    "\u2028",  # line separator
+    "\ue000",  # private use
     "\x1b",  # escape
 ])
 def test_given_a_hidden_character_in_the_clean_when_checked_then_it_is_rejected_and_stripped(hidden):
@@ -83,7 +83,7 @@ def test_given_a_recognizer_that_emits_hidden_characters_when_finished_then_none
     from stt_button.live import LiveTake
     from tests.test_dictate import ScriptedRecognizer, live_cfg, speech_like
 
-    take = LiveTake(ScriptedRecognizer("Okay​ sounds\U000E0049 good"), lambda: None, live_cfg())
+    take = LiveTake(ScriptedRecognizer("Okay\u200b sounds\U000E0049 good"), lambda: None, live_cfg())
     take.feed(speech_like(3))
     result = take.finish()
 
