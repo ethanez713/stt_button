@@ -31,7 +31,8 @@ _JOINER_KINDS = set(_JOINERS.values())
 # "a dash of salt" and "the hyphen" name the mark, and "dash cam" is a thing.
 _DETERMINERS = {"a", "an", "the", "my", "your", "our", "this", "that"}
 _DASHED_NOUNS = {"cam", "cams", "board"}
-_SLASH_ECHO = re.compile(r"(?i)(?<=\w)/\s*(?=slash\b)")
+# The recognizer writes "on hyphen device" as "on-hyphen device" and "landscaping slash botany" as "landscaping/slash botany".
+_MARK_ECHO = re.compile(r"(?i)(?<=\w)(?:/\s*(?=slash\b)|-(?=hyphen\b))")
 # "quote unquote or …" names the command rather than quoting the next word.
 _CONJUNCTIONS = {"or", "and", "but", "nor"}
 _CAPITALIZE_AFTER = {"?", "!", "\n\n"}
@@ -248,7 +249,7 @@ def keep_spoken_ending(chunk: str, cleaned: str) -> str:
 
 
 def spoken_punctuation(text: str) -> str:
-    text = resolve_restatements(_SLASH_ECHO.sub(" ", text))
+    text = resolve_restatements(_MARK_ECHO.sub(" ", text))
     elements = _parse(text)
     if not any(kind in _COMMAND_KINDS for kind, *_ in elements):
         return text

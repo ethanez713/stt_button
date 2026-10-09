@@ -8922,6 +8922,14 @@
    "spoken": "an on-device test"
   },
   {
+   "text": "an on-hyphen device test",
+   "spoken": "an on-device test"
+  },
+  {
+   "text": "a well-known hyphen",
+   "spoken": "a well-known hyphen"
+  },
+  {
    "text": "wait dash no",
    "spoken": "wait -- no"
   },

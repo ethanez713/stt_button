@@ -54,6 +54,8 @@ def test_given_a_phrase_restated_after_not_when_converted_then_the_later_phrase_
     ("fold them into the slash autopilot skill", "fold them into the /autopilot skill"),
     ("Run it, slash compact now", "Run it, /compact now"),
     ("an on hyphen device test", "an on-device test"),
+    ("an on-hyphen device test", "an on-device test"),
+    ("a well-known hyphen", "a well-known hyphen"),
     ("wait dash no", "wait -- no"),
     ("wait, dash no", "wait -- no"),
     ("open parentheses all green closed parentheses, and then", "(all green), and then"),

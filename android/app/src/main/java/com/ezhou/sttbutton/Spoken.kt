@@ -38,7 +38,7 @@ object Spoken {
     // "a dash of salt" and "the hyphen" name the mark, and "dash cam" is a thing.
     private val DETERMINERS = setOf("a", "an", "the", "my", "your", "our", "this", "that")
     private val DASHED_NOUNS = setOf("cam", "cams", "board")
-    private val SLASH_ECHO = Regex("(?i)(?<=\\w)/\\s*(?=slash\\b)")
+    private val MARK_ECHO = Regex("(?i)(?<=\\w)(?:/\\s*(?=slash\\b)|-(?=hyphen\\b))")
     // "quote unquote or …" names the command rather than quoting the next word.
     private val CONJUNCTIONS = setOf("or", "and", "but", "nor")
     private val CAPITALIZE_AFTER = setOf("?", "!", "\n\n")
@@ -106,7 +106,7 @@ object Spoken {
     }
 
     fun convert(input: String): String {
-        val text = resolveRestatements(SLASH_ECHO.replace(input, " "))
+        val text = resolveRestatements(MARK_ECHO.replace(input, " "))
         val elements = parse(text)
         if (elements.none { it.kind in COMMAND_KINDS }) return text
         val items = pairUp(elements)

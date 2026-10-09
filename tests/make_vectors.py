@@ -148,6 +148,8 @@ SPOKEN_TEXTS = [
     "fold them into the slash autopilot skill",
     "Run it, slash compact now",
     "an on hyphen device test",
+    "an on-hyphen device test",
+    "a well-known hyphen",
     "wait dash no",
     "wait, dash no",
     "open parentheses all green closed parentheses, and then",
