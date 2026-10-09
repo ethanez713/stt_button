@@ -14,6 +14,7 @@ object Spoken {
     private val TWO_WORD: Map<Pair<String, String>, Pair<String, String?>> = buildMap {
         put("open" to "quote", "oq" to null)
         put("close" to "quote", "cq" to null)
+        put("closed" to "quote", "cq" to null)
         put("end" to "quote", "cq" to null)
         put("quote" to "unquote", "quq" to null)
         put("question" to "mark", "mark" to "?")
@@ -24,6 +25,7 @@ object Spoken {
         for (p in PAREN_WORDS) {
             put("open" to p, "op" to null)
             put("close" to p, "cp" to null)
+            put("closed" to p, "cp" to null)
         }
     }
     private val ONE_WORD: Map<String, String> = buildMap {
@@ -31,10 +33,16 @@ object Spoken {
         put("unquote", "cq")
         for (p in PAREN_WORDS) put(p, "bp")
     }
+    private val JOINERS = mapOf("slash" to "sl", "hyphen" to "hy", "dash" to "da")
+    private val JOINER_KINDS = JOINERS.values.toSet()
+    // "a dash of salt" and "the hyphen" name the mark, and "dash cam" is a thing.
+    private val DETERMINERS = setOf("a", "an", "the", "my", "your", "our", "this", "that")
+    private val DASHED_NOUNS = setOf("cam", "cams", "board")
+    private val SLASH_ECHO = Regex("(?i)(?<=\\w)/\\s*(?=slash\\b)")
     // "quote unquote or …" names the command rather than quoting the next word.
     private val CONJUNCTIONS = setOf("or", "and", "but", "nor")
     private val CAPITALIZE_AFTER = setOf("?", "!", "\n\n")
-    private val COMMAND_KINDS = setOf("oq", "cq", "bq", "quq", "op", "cp", "bp", "mark", "nl")
+    private val COMMAND_KINDS = setOf("oq", "cq", "bq", "quq", "op", "cp", "bp", "mark", "nl") + JOINER_KINDS
 
     /** A word is ("w", word, lead+core, trail); a command is (kind, payload, words as spoken, trail). */
     private class Element(val kind: String, val payload: String?, val spoken: String, val trail: String)
@@ -98,7 +106,7 @@ object Spoken {
     }
 
     fun convert(input: String): String {
-        val text = resolveRestatements(input)
+        val text = resolveRestatements(SLASH_ECHO.replace(input, " "))
         val elements = parse(text)
         if (elements.none { it.kind in COMMAND_KINDS }) return text
         val items = pairUp(elements)
@@ -123,12 +131,31 @@ object Spoken {
             } else if (cores[i] in ONE_WORD) {
                 elements += Element(ONE_WORD.getValue(cores[i]), null, word, trail)
                 i += 1
+            } else if (cores[i] in JOINERS && lead.isEmpty() && trail.isEmpty()) {
+                elements += Element(JOINERS.getValue(cores[i]), null, word, trail)
+                i += 1
             } else {
                 elements += Element("w", word, lead + core, trail)
                 i += 1
             }
         }
         return elements
+    }
+
+    /** A slash, hyphen or dash as a "join", an "open" "/" for a slash that starts a command word, a "dash", or the word as spoken. */
+    private fun joined(elements: List<Element>, i: Int): Item {
+        val e = elements[i]
+        val before = elements.getOrNull(i - 1)
+        val after = elements.getOrNull(i + 1)
+        if (after == null || after.kind != "w" || (before != null && before.kind in JOINER_KINDS)) return Item("word", e.spoken)
+        if (e.kind == "sl") {
+            return if (before == null || before.kind != "w" || before.trail.isNotEmpty() || core(before.payload!!) in DETERMINERS) Item("open", "/")
+            else Item("join", "/")
+        }
+        if (before == null || before.kind != "w" || core(before.payload!!) in DETERMINERS) return Item("word", e.spoken)
+        if (e.kind == "hy") return if (before.trail.isEmpty()) Item("join", "-") else Item("word", e.spoken)
+        return if ((before.trail.isEmpty() || before.trail == ",") && core(after.payload!!) !in DASHED_NOUNS) Item("dash", " -- ")
+        else Item("word", e.spoken)
     }
 
     private fun pairUp(elements: List<Element>): List<Item> {
@@ -183,6 +210,7 @@ object Spoken {
                     }
                 }
                 "mark" -> out += Item("mark", e.payload!!)
+                in JOINER_KINDS -> out += joined(elements, i)
                 else -> out += Item("newline", e.payload!!)
             }
             i++
@@ -225,6 +253,15 @@ object Spoken {
                     out += item.a
                     glue = false
                     capitalize = item.a in CAPITALIZE_AFTER
+                }
+                "join" -> {
+                    out += item.a
+                    glue = true
+                }
+                "dash" -> {
+                    stripEnd(",")
+                    out += item.a
+                    glue = true
                 }
                 else -> {
                     stripEnd(",;:")

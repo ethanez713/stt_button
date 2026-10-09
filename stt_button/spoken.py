@@ -13,6 +13,7 @@ _TOKEN = re.compile(r"^([^\w']*)(.*?)([^\w']*)$", re.S)
 _TWO_WORD = {
     ("open", "quote"): ("oq", None),
     ("close", "quote"): ("cq", None),
+    ("closed", "quote"): ("cq", None),
     ("end", "quote"): ("cq", None),
     ("quote", "unquote"): ("quq", None),
     ("question", "mark"): ("mark", "?"),
@@ -22,12 +23,19 @@ _TWO_WORD = {
     ("new", "paragraph"): ("nl", "\n\n"),
     **{("open", p): ("op", None) for p in _PAREN_WORDS},
     **{("close", p): ("cp", None) for p in _PAREN_WORDS},
+    **{("closed", p): ("cp", None) for p in _PAREN_WORDS},
 }
 _ONE_WORD = {"quote": "bq", "unquote": "cq", **{p: "bp" for p in _PAREN_WORDS}}
+_JOINERS = {"slash": "sl", "hyphen": "hy", "dash": "da"}
+_JOINER_KINDS = set(_JOINERS.values())
+# "a dash of salt" and "the hyphen" name the mark, and "dash cam" is a thing.
+_DETERMINERS = {"a", "an", "the", "my", "your", "our", "this", "that"}
+_DASHED_NOUNS = {"cam", "cams", "board"}
+_SLASH_ECHO = re.compile(r"(?i)(?<=\w)/\s*(?=slash\b)")
 # "quote unquote or …" names the command rather than quoting the next word.
 _CONJUNCTIONS = {"or", "and", "but", "nor"}
 _CAPITALIZE_AFTER = {"?", "!", "\n\n"}
-_COMMAND_KINDS = {"oq", "cq", "bq", "quq", "op", "cp", "bp", "mark", "nl"}
+_COMMAND_KINDS = {"oq", "cq", "bq", "quq", "op", "cp", "bp", "mark", "nl"} | _JOINER_KINDS
 
 
 RESTATEMENT_MAX_WORDS = 4
@@ -100,10 +108,34 @@ def _parse(text: str) -> list[tuple]:
         elif cores[i] in _ONE_WORD:
             elements.append((_ONE_WORD[cores[i]], None, word, trail))
             i += 1
+        elif cores[i] in _JOINERS and not lead and not trail:
+            elements.append((_JOINERS[cores[i]], None, word, trail))
+            i += 1
         else:
             elements.append(("w", word, lead + core, trail))
             i += 1
     return elements
+
+
+def _joined(elements: list[tuple], i: int) -> tuple:
+    """A slash, hyphen or dash as ("join", symbol), ("open", "/") for a slash that starts a command
+    word, ("dash", symbol), or the word as spoken when its neighbours do not call for the mark."""
+    kind, _, spoken, _ = elements[i]
+    before = elements[i - 1] if i > 0 else None
+    after = elements[i + 1] if i + 1 < len(elements) else None
+    if after is None or after[0] != "w" or (before is not None and before[0] in _JOINER_KINDS):
+        return ("word", spoken)
+    if kind == "sl":
+        if before is None or before[0] != "w" or before[3] or _core(before[1]) in _DETERMINERS:
+            return ("open", "/")
+        return ("join", "/")
+    if before is None or before[0] != "w" or _core(before[1]) in _DETERMINERS:
+        return ("word", spoken)
+    if kind == "hy":
+        return ("join", "-") if not before[3] else ("word", spoken)
+    if before[3] in ("", ",") and _core(after[1]) not in _DASHED_NOUNS:
+        return ("dash", " -- ")
+    return ("word", spoken)
 
 
 def _pair_up(elements: list[tuple]) -> list[tuple]:
@@ -154,6 +186,8 @@ def _pair_up(elements: list[tuple]) -> list[tuple]:
                 out.append(("word", spoken))
         elif kind == "mark":
             out.append(("mark", payload))
+        elif kind in _JOINER_KINDS:
+            out.append(_joined(elements, i))
         else:
             out.append(("newline", payload))
         i += 1
@@ -190,6 +224,13 @@ def _render(items: list[tuple]) -> str:
             strip_end(",.;:")
             out.append(rest[0])
             glue, capitalize = False, rest[0] in _CAPITALIZE_AFTER
+        elif kind == "join":
+            out.append(rest[0])
+            glue = True
+        elif kind == "dash":
+            strip_end(",")
+            out.append(rest[0])
+            glue = True
         else:
             strip_end(",;:")
             out.append(rest[0])
@@ -207,7 +248,7 @@ def keep_spoken_ending(chunk: str, cleaned: str) -> str:
 
 
 def spoken_punctuation(text: str) -> str:
-    text = resolve_restatements(text)
+    text = resolve_restatements(_SLASH_ECHO.sub(" ", text))
     elements = _parse(text)
     if not any(kind in _COMMAND_KINDS for kind, *_ in elements):
         return text

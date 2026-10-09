@@ -47,6 +47,30 @@ def test_given_a_phrase_restated_after_not_when_converted_then_the_later_phrase_
     assert spoken_punctuation(spoken) == written
 
 
+@pytest.mark.parametrize("spoken, written", [
+    ("a very high markup slash premium and that", "a very high markup/premium and that"),
+    ("in landscaping/slash botany?", "in landscaping/botany?"),
+    ("the mythos slash fable class", "the mythos/fable class"),
+    ("fold them into the slash autopilot skill", "fold them into the /autopilot skill"),
+    ("Run it, slash compact now", "Run it, /compact now"),
+    ("an on hyphen device test", "an on-device test"),
+    ("wait dash no", "wait -- no"),
+    ("wait, dash no", "wait -- no"),
+    ("open parentheses all green closed parentheses, and then", "(all green), and then"),
+    ("say closed quote hello", "say closed quote hello"),
+    ("punctuation marks like slash, hyphen, and so on", "punctuation marks like slash, hyphen, and so on"),
+    ("marks like slash hyphen and so on", "marks like slash hyphen and so on"),
+    ("grab a dash of salt", "grab a dash of salt"),
+    ("mount the dash cam", "mount the dash cam"),
+    ("put a hyphen in it", "put a hyphen in it"),
+    ("a hyphen", "a hyphen"),
+    ("it ends with slash", "it ends with slash"),
+    ("slash", "slash"),
+])
+def test_given_spoken_joining_marks_when_converted_then_they_join_only_where_a_mark_is_meant(spoken, written):
+    assert spoken_punctuation(spoken) == written
+
+
 def test_given_a_closer_beyond_thirty_words_when_converted_then_the_quote_stays_words():
     text = "she said quote " + "word " * 31 + "unquote"
     assert spoken_punctuation(text) == text
