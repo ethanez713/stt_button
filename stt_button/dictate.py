@@ -3,6 +3,7 @@
     python -m stt_button.dictate start <pcm path>   # spawn a worker that follows a growing take
     python -m stt_button.dictate stop               # ask the running worker to finish; print the text
     python -m stt_button.dictate cancel             # ask the running worker to discard the take
+    python -m stt_button.dictate watch <takes dir>  # resident: start a worker for each <id>.start the helper writes
 
 Stop, cancel and the result are files beside that take's pcm (<id>.stop, <id>.cancel,
 <id>.result.json). A second start for a pcm whose worker is already running reports started.
@@ -37,6 +38,8 @@ RESULT_REPLACE_ATTEMPTS = 50
 RESULT_REPLACE_PAUSE_S = 0.02
 # The helper enforces the take cap; this only stops a worker whose helper has gone away.
 ORPHAN_GRACE_S = 30
+HEARTBEAT = ".watcher"
+HEARTBEAT_S = 2
 
 
 def take_files(pcm: Path) -> tuple[Path, Path, Path]:
@@ -291,6 +294,59 @@ def start(pcm: str) -> dict:
     return {"status": "started"}
 
 
+def claim_starts(directory: Path) -> list[Path]:
+    """The pcm of every <id>.start this call removed. Whoever removes the request owns the start."""
+    claimed = []
+    for entry in os.scandir(directory):
+        if not entry.name.endswith(".start"):
+            continue
+        try:
+            os.unlink(entry.path)
+        except (FileNotFoundError, PermissionError):
+            continue
+        claimed.append(Path(entry.path).with_suffix(".pcm"))
+    return claimed
+
+
+def serve_start(pcm: Path) -> None:
+    try:
+        result = start(str(pcm))
+    except Exception as err:
+        result = {"status": "error", "error": f"{type(err).__name__}: {err}"}
+    if result["status"] != "started":
+        write_result(result, take_files(pcm)[2])
+
+
+def reap_workers() -> None:
+    """Workers are this process's children; collect them as they finish."""
+    try:
+        while os.waitpid(-1, os.WNOHANG)[0]:
+            pass
+    except ChildProcessError:
+        pass
+
+
+def watch_step(directory: Path, last_beat: float, now: float) -> float:
+    """One pass of the resident loop; returns when the heartbeat file was last touched."""
+    if now - last_beat >= HEARTBEAT_S:
+        (directory / HEARTBEAT).touch()
+        last_beat = now
+    for pcm in claim_starts(directory):
+        serve_start(pcm)
+    reap_workers()
+    return last_beat
+
+
+def watch(directory: Path) -> None:
+    last_beat = float("-inf")
+    while True:
+        try:
+            last_beat = watch_step(directory, last_beat, time.monotonic())
+        except Exception as err:
+            print(f"watch: {type(err).__name__}: {err}", file=sys.stderr, flush=True)
+        time.sleep(POLL_S)
+
+
 def stop() -> dict:
     pcm = running_pcm()
     if pcm is None:
@@ -322,6 +378,9 @@ def main(argv: list[str]) -> int:
     DICTATION.mkdir(parents=True, exist_ok=True)
     if argv[:1] == ["_work"] and len(argv) == 2:
         work(Path(argv[1]))
+        return 0
+    if argv[:1] == ["watch"] and len(argv) == 2:
+        watch(Path(argv[1]))
         return 0
     if argv[:1] == ["start"] and len(argv) == 2:
         result = start(argv[1])

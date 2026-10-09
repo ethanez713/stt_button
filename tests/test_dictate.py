@@ -425,3 +425,61 @@ def test_given_a_worker_that_vanishes_when_stop_waits_then_it_reports_no_take(tm
 
     assert result["status"] == "error" and result["error"].startswith("no take was open")
     assert not pcm.with_suffix(".stop").exists()
+
+
+def test_given_start_requests_when_claimed_then_each_pcm_is_returned_once_and_the_request_is_gone(tmp_path):
+    (tmp_path / "a.start").touch()
+    (tmp_path / "b.start").touch()
+    (tmp_path / "a.pcm").write_bytes(b"\0\0")
+    (tmp_path / "c.bubble.json").write_text("{}")
+
+    claimed = sorted(dictate.claim_starts(tmp_path))
+
+    assert claimed == [tmp_path / "a.pcm", tmp_path / "b.pcm"]
+    assert dictate.claim_starts(tmp_path) == []
+    assert (tmp_path / "a.pcm").exists()
+
+
+def test_given_a_start_that_fails_when_served_then_the_error_is_the_takes_result(tmp_path, monkeypatch):
+    monkeypatch.setattr(dictate, "start", lambda pcm: {"status": "error", "error": "a take is already open"})
+
+    dictate.serve_start(tmp_path / "t.pcm")
+
+    assert dictate.take_result(tmp_path / "t.result.json") == {"status": "error", "error": "a take is already open"}
+
+
+def test_given_start_raising_when_served_then_the_exception_becomes_the_takes_result(tmp_path, monkeypatch):
+    def boom(pcm):
+        raise OSError("no space")
+
+    monkeypatch.setattr(dictate, "start", boom)
+
+    dictate.serve_start(tmp_path / "t.pcm")
+
+    assert dictate.take_result(tmp_path / "t.result.json") == {"status": "error", "error": "OSError: no space"}
+
+
+def test_given_a_start_that_succeeds_when_served_then_no_result_is_written(tmp_path, monkeypatch):
+    monkeypatch.setattr(dictate, "start", lambda pcm: {"status": "started"})
+
+    dictate.serve_start(tmp_path / "t.pcm")
+
+    assert not (tmp_path / "t.result.json").exists()
+
+
+def test_given_the_loop_when_stepping_then_the_heartbeat_is_touched_every_interval_and_start_requests_are_served(tmp_path, monkeypatch):
+    served = []
+    monkeypatch.setattr(dictate, "serve_start", served.append)
+    heartbeat = tmp_path / dictate.HEARTBEAT
+
+    beat = dictate.watch_step(tmp_path, float("-inf"), 100.0)
+    assert heartbeat.exists() and beat == 100.0
+    os.utime(heartbeat, (1, 1))
+
+    (tmp_path / "t.start").touch()
+    beat = dictate.watch_step(tmp_path, beat, 100.0 + dictate.HEARTBEAT_S - 0.1)
+    assert heartbeat.stat().st_mtime == 1 and beat == 100.0
+    assert served == [tmp_path / "t.pcm"]
+
+    beat = dictate.watch_step(tmp_path, beat, 100.0 + dictate.HEARTBEAT_S)
+    assert heartbeat.stat().st_mtime > 1 and beat == 100.0 + dictate.HEARTBEAT_S

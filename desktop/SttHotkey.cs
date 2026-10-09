@@ -68,6 +68,8 @@ class HotkeyWindow : Form {
     const int RESULT_POLL_MS = 50;
     const int RESULT_TIMEOUT_MS = 600 * 1000;
     const int START_TRIES = 4;
+    const int WATCHER_ALIVE_MS = 6000;
+    const int START_CLAIM_MS = 3000;
     // Long enough for Claude Code to have collapsed the first paste into its placeholder.
     const int PASTE_AGAIN_MS = 400;
     // Claude Code titles its terminal "<glyph> <topic>", and claude-autoresume swaps the glyph for any session's state
@@ -88,6 +90,11 @@ class HotkeyWindow : Form {
     readonly System.Windows.Forms.Timer micIdleTimer = new System.Windows.Forms.Timer { Interval = MIC_WARM_MS };
     readonly System.Windows.Forms.Timer bubbleTimer = new System.Windows.Forms.Timer { Interval = 150 };
     readonly System.Windows.Forms.Timer resultTimer = new System.Windows.Forms.Timer { Interval = RESULT_POLL_MS };
+    readonly System.Windows.Forms.Timer watcherTimer = new System.Windows.Forms.Timer { Interval = 1000 };
+    // The resident WSL watcher touches this every 2 s. Its change is the signal, not its age against this clock,
+    // which the VM's clock drifts from after sleep.
+    readonly string watcherPath = Path.Combine(Application.StartupPath, "takes", ".watcher");
+    DateTime watcherMtime, watcherSeenAt = DateTime.MinValue;
     // Bumped when a launch's take is no longer the one being started, so its remaining tries are dropped.
     volatile int launchGeneration;
     string takePath;
@@ -110,7 +117,19 @@ class HotkeyWindow : Form {
         micIdleTimer.Tick += (s, e) => { micIdleTimer.Stop(); mic.Close(); Log("mic closed after idle"); };
         bubbleTimer.Tick += (s, e) => PollBubble();
         resultTimer.Tick += (s, e) => PollResult();
+        watcherMtime = File.GetLastWriteTimeUtc(watcherPath);
+        watcherTimer.Tick += (s, e) => PollWatcher();
+        watcherTimer.Start();
     }
+
+    void PollWatcher() {
+        DateTime mtime = File.GetLastWriteTimeUtc(watcherPath);
+        if (mtime == watcherMtime) return;
+        watcherMtime = mtime;
+        watcherSeenAt = DateTime.Now;
+    }
+
+    bool WatcherAlive() { return (DateTime.Now - watcherSeenAt).TotalMilliseconds < WATCHER_ALIVE_MS; }
 
     protected override void SetVisibleCore(bool value) { base.SetVisibleCore(false); }
 
@@ -131,11 +150,12 @@ class HotkeyWindow : Form {
         micIdleTimer.Stop();
         string id = DateTime.Now.ToString("yyyyMMdd'T'HHmmss") + "-" + Guid.NewGuid().ToString("N").Substring(0, 6);
         string path = Path.Combine(takesDir, id + ".pcm");
+        bool viaWatcher = WatcherAlive();
         try {
             bool warm = mic.IsOpen;
             mic.Open();
             mic.BeginTake(path);
-            Log("take started warm=" + warm);
+            Log("take started warm=" + warm + " via=" + (viaWatcher ? "watcher" : "wsl"));
         } catch (Exception e) {
             Log("mic failed: " + e);
             indicator.Flash("⚠ microphone: " + e.Message);
@@ -147,12 +167,47 @@ class HotkeyWindow : Form {
         bubbleTimer.Start();
         indicator.ShowText("● Recording");
         capTimer.Start();
+        resultPath = Path.ChangeExtension(path, ".result.json");
+        resultTimer.Start();
+        if (!viaWatcher) {
+            LaunchViaWsl(path);
+            return;
+        }
+        WriteFlag(Path.ChangeExtension(path, ".start"));
+        var claim = new System.Windows.Forms.Timer { Interval = START_CLAIM_MS };
+        claim.Tick += (s, e) => {
+            claim.Stop();
+            claim.Dispose();
+            ClaimStart(path);
+        };
+        claim.Start();
+    }
+
+    // The request is still on disk when the watcher never took it; moving it aside makes this the only starter.
+    void ClaimStart(string path) {
+        if (takePath != path && waitPath != path) return;
+        string request = Path.ChangeExtension(path, ".start");
+        try {
+            File.Move(request, request + ".claimed");
+        } catch (IOException) {
+            return;
+        }
+        try { File.Delete(request + ".claimed"); } catch (IOException) { }
+        Log("start via=fallback");
+        LaunchViaWsl(path);
+    }
+
+    void LaunchViaWsl(string path) {
         int generation = ++launchGeneration;
         RunWsl("start '" + WslPath(path) + "'", result => {
             if (takePath != path && waitPath != path) return;
             if (Field(result, "status") == "started") return;
             FailStart(path, Field(result, "error") ?? "WSL did not start");
         }, START_TRIES, generation);
+    }
+
+    void DropStart(string path) {
+        try { File.Delete(Path.ChangeExtension(path, ".start")); } catch (IOException) { }
     }
 
     void Stop() {
@@ -177,6 +232,7 @@ class HotkeyWindow : Form {
             string path = waitPath;
             WriteFlag(Path.ChangeExtension(path, ".cancel"));
             DropLaunch();
+            DropStart(path);
             try { File.Delete(path); } catch (IOException e) { Log("delete failed: " + e.Message); }
             waitPath = null;
             resultPath = null;
@@ -198,9 +254,12 @@ class HotkeyWindow : Form {
         mic.EndTake();
         if (path != null) {
             WriteFlag(Path.ChangeExtension(path, ".cancel"));
+            DropStart(path);
             try { File.Delete(path); } catch (IOException e) { Log("delete failed: " + e.Message); }
         }
         takePath = null;
+        resultTimer.Stop();
+        resultPath = null;
         micIdleTimer.Start();
         indicator.Flash(message);
     }
@@ -212,10 +271,13 @@ class HotkeyWindow : Form {
             return;
         }
         if (takePath != path) return;
+        DropLaunch();
         EndBubble();
         capTimer.Stop();
         mic.EndTake();
         takePath = null;
+        resultTimer.Stop();
+        resultPath = null;
         micIdleTimer.Start();
         Log("start failed: " + error);
         Log("kept recording " + path);
@@ -255,12 +317,14 @@ class HotkeyWindow : Form {
         }
     }
 
+    // Before the stop, a result can only be the worker refusing or failing to start the take.
     void PollResult() {
         if (resultPath == null) return;
-        if ((DateTime.Now - stoppedAt).TotalMilliseconds >= RESULT_TIMEOUT_MS) {
+        if (waitPath != null && (DateTime.Now - stoppedAt).TotalMilliseconds >= RESULT_TIMEOUT_MS) {
             Finish(ErrorResult("timed out waiting for the transcript"));
             return;
         }
+        if (!File.Exists(resultPath)) return;
         string json = ReadShared(resultPath);
         if (json == null) return;
         Dictionary<string, object> result;
@@ -271,7 +335,8 @@ class HotkeyWindow : Form {
         }
         if (result == null) return;
         try { File.Delete(resultPath); } catch (IOException) { }
-        Finish(result);
+        if (waitPath != null) Finish(result);
+        else FailStart(takePath, Field(result, "error") ?? "the worker could not start");
     }
 
     // CreateNew leaves an existing flag's mtime alone: that mtime is when the stop was asked.

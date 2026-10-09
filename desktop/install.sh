@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Build the Windows hotkey helper with the .NET Framework compiler that ships with Windows,
-# install it under %LOCALAPPDATA%\stt_button, start it at login, and launch it now.
+# install it under %LOCALAPPDATA%\stt_button, start it at login, and launch it now. Also installs the
+# user service that starts dictation workers for it inside WSL.
 set -euo pipefail
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
@@ -19,6 +20,29 @@ cp "$REPO/desktop/SttHotkey.cs" "$DEST/"
 # csc needs Windows paths, so it runs from the destination directory.
 (cd "$DEST" && "$CSC" /nologo /target:winexe /out:SttHotkey.exe \
     /r:System.Windows.Forms.dll /r:System.Drawing.dll /r:System.Web.Extensions.dll SttHotkey.cs)
+
+UNIT_DIR="$HOME/.config/systemd/user"
+mkdir -p "$UNIT_DIR" "$REPO/data/dictation" "$DEST/takes"
+cat > "$UNIT_DIR/stt-dictate-watch.service" <<UNIT
+[Unit]
+Description=Starts a dictation worker for each take the Windows helper opens
+
+[Service]
+WorkingDirectory=$REPO
+Environment=STT_MODEL_DIR=$MODELS
+ExecStart=$REPO/.venv/bin/python -m stt_button.dictate watch $DEST/takes
+Restart=always
+RestartSec=2
+# Workers are this service's children; restarting the watcher must not end a take in progress.
+KillMode=process
+StandardError=append:$REPO/data/dictation/watch.err
+
+[Install]
+WantedBy=default.target
+UNIT
+systemctl --user daemon-reload
+systemctl --user enable stt-dictate-watch.service
+systemctl --user restart stt-dictate-watch.service
 
 "$POWERSHELL" -NoProfile -Command "
 \$link = (New-Object -ComObject WScript.Shell).CreateShortcut(\"\$env:APPDATA\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\STT Hotkey.lnk\")
