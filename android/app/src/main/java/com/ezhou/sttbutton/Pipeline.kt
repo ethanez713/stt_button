@@ -166,6 +166,32 @@ object Pipeline {
         return if (previous.isWhitespace() || previous in OPENING_MARKS) "" else " "
     }
 
+    private const val CLOSING_MARKS = "\")]}\u201D\u2019'"
+
+    /**
+     * True when the text before the caret is the middle of a sentence: its last word is not a bare symbol such
+     * as a bullet, and what ends it is neither a sentence end, an opening mark nor a line break.
+     */
+    fun continuesSentence(before: String, caret: Int): Boolean {
+        val head = before.substring(0, if (caret in 0..before.length) caret else before.length)
+        val text = head.trimEnd()
+        if ('\n' in head.substring(text.length)) return false
+        val word = text.takeLastWhile { !it.isWhitespace() }
+        if (word.none { it.isLetterOrDigit() }) return false
+        val ending = text.trimEnd { it in CLOSING_MARKS }.lastOrNull() ?: return false
+        return ending !in ".?!" && ending !in OPENING_MARKS
+    }
+
+    /** [body] as written after [before] at [caret]: a take that carries on a sentence opens in lower case, except for "I" words and names with a capital inside. */
+    fun continuing(body: String, before: String, caret: Int): String {
+        if (!continuesSentence(before, caret)) return body
+        val token = body.takeWhile { !it.isWhitespace() }
+        val lead = token.takeWhile { !it.isLetterOrDigit() }
+        val word = token.drop(lead.length).trimEnd { !it.isLetterOrDigit() && it != '\'' && it != '\u2019' }.replace('\u2019', '\'')
+        if (word.isEmpty() || word.lowercase() in FIRST_PERSON || word.drop(1) != word.drop(1).lowercase()) return body
+        return body.substring(0, lead.length) + body[lead.length].lowercaseChar() + body.substring(lead.length + 1)
+    }
+
     /** Mirrors `stt_button.asr.settled_mark`. */
     fun settledMark(sliceMark: String, contextMark: String): String =
         if (sliceMark in SENTENCE_ENDS_ASKED && contextMark in SENTENCE_ENDS) sliceMark else contextMark

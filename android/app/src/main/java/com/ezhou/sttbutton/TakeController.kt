@@ -310,9 +310,9 @@ class TakeController(
         val placement = checkNotNull(run.placement)
         val field = checkNotNull(placement.field)
         val fieldText = checkNotNull(placement.fieldText)
-        val body = placement.body
         val caret = inserter.readCaret(field)
         val caretBefore = if (caret.known) caret.end else field.textSelectionEnd
+        val body = Pipeline.continuing(placement.body, fieldText, caretBefore)
         val written = Pipeline.takeOpener(fieldText, caretBefore) + body
         val outcome = inserter.insert(field, written)
         if (outcome.copied && outcome.readback == "unchanged") {
