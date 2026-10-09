@@ -6,6 +6,10 @@ object Spoken {
     private val PAREN_WORDS = listOf("paren", "parenthesis", "parentheses")
     private val TOKEN = Regex("^([^\\p{L}\\p{N}_']*)(.*?)([^\\p{L}\\p{N}_']*)$", RegexOption.DOT_MATCHES_ALL)
     private val WHITESPACE = Regex("\\s+")
+    private val TOKEN_SPAN = Regex("(?U)\\S+")
+    private const val RESTATEMENT_MAX_WORDS = 4
+    private val FIRST_PERSON = setOf("i", "i'm", "i'll", "i've", "i'd")
+    private val SENTENCE_ENDS = setOf('.', '?', '!')
 
     private val TWO_WORD: Map<Pair<String, String>, Pair<String, String?>> = buildMap {
         put("open" to "quote", "oq" to null)
@@ -45,7 +49,56 @@ object Spoken {
         else cleaned
     }
 
-    fun convert(text: String): String {
+    /** Mirrors `stt_button.spoken.resolve_restatements`. */
+    fun resolveRestatements(text: String): String {
+        var current = text
+        while (true) current = withoutOneRestatement(current) ?: return current
+    }
+
+    private fun core(word: String): String = checkNotNull(TOKEN.matchEntire(word)).groupValues[2].lowercase()
+
+    private fun restatedCase(word: String, upper: Boolean): String {
+        val (_, lead, core, trail) = checkNotNull(TOKEN.matchEntire(word)).groupValues
+        val rest = core.drop(1)
+        if (core.isEmpty() || (!upper && (core.lowercase() in FIRST_PERSON || rest != rest.lowercase()))) return word
+        val first = if (upper) core.take(1).uppercase() else core.take(1).lowercase()
+        return lead + first + rest + trail
+    }
+
+    private fun withoutOneRestatement(text: String): String? {
+        val spans = TOKEN_SPAN.findAll(text).map { it.range }.toList()
+        val words = spans.map { text.substring(it.first, it.last + 1) }
+        val cores = words.map { core(it) }
+
+        fun repeats(before: Int, after: Int, size: Int): Boolean {
+            val first = cores.subList(before, before + size)
+            val second = cores.subList(minOf(after, cores.size), minOf(after + size, cores.size))
+            return second.size == size && first == second && "" !in first && "not" !in first
+        }
+
+        for ((at, core) in cores.withIndex()) {
+            if (core != "not") continue
+            for (size in RESTATEMENT_MAX_WORDS downTo 1) {
+                var start = at - size
+                val replacement = at + size + 1
+                if (start < 0 || replacement >= words.size || !repeats(start, at + 1, size)) continue
+                for (earlier in minOf(3, start) downTo 1) {
+                    if (repeats(start - earlier, replacement, earlier)) {
+                        start -= earlier
+                        break
+                    }
+                }
+                var word = words[replacement]
+                if (start == 0 || words[start - 1].last() in SENTENCE_ENDS) word = restatedCase(word, upper = true)
+                else if (words[replacement - 1].last() in SENTENCE_ENDS) word = restatedCase(word, upper = false)
+                return text.substring(0, spans[start].first) + word + text.substring(spans[replacement].last + 1)
+            }
+        }
+        return null
+    }
+
+    fun convert(input: String): String {
+        val text = resolveRestatements(input)
         val elements = parse(text)
         if (elements.none { it.kind in COMMAND_KINDS }) return text
         val items = pairUp(elements)

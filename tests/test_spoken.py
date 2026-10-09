@@ -29,6 +29,24 @@ def test_given_spoken_commands_when_converted_then_symbols_replace_them_and_plai
     assert spoken_punctuation(spoken) == written
 
 
+@pytest.mark.parametrize("spoken, written", [
+    ("like little stars, not stars, white stars on top", "like little white stars on top"),
+    ("get the Titan Eco not eco economy plates", "get the Titan economy plates"),
+    ("the trip. We lay not lay, we land Monday", "the trip. We land Monday"),
+    ("sure that it's not a fraudulent Not fraudulent. Fraud attempt.", "sure that it's not a fraud attempt."),
+    ("try to recreate, not recreate, reproduce this bug", "try to reproduce this bug"),
+    ("run on-device texts, not texts, tests to measure", "run on-device tests to measure"),
+    ("simple, straightforward, low, not low, high certainty fixes", "simple, straightforward, high certainty fixes"),
+    ("book it Monday, not Monday, Tuesday at five", "book it Tuesday at five"),
+    ("like it or not, not everyone agrees", "like it or not, not everyone agrees"),
+    ("that is simply not", "that is simply not"),
+    ("it is not not working", "it is not not working"),
+    ("it is x, not x", "it is x, not x"),
+])
+def test_given_a_phrase_restated_after_not_when_converted_then_the_later_phrase_replaces_it(spoken, written):
+    assert spoken_punctuation(spoken) == written
+
+
 def test_given_a_closer_beyond_thirty_words_when_converted_then_the_quote_stays_words():
     text = "she said quote " + "word " * 31 + "unquote"
     assert spoken_punctuation(text) == text

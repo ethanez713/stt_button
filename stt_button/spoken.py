@@ -30,6 +30,60 @@ _CAPITALIZE_AFTER = {"?", "!", "\n\n"}
 _COMMAND_KINDS = {"oq", "cq", "bq", "quq", "op", "cp", "bp", "mark", "nl"}
 
 
+RESTATEMENT_MAX_WORDS = 4
+_FIRST_PERSON = {"i", "i'm", "i'll", "i've", "i'd"}
+_TOKEN_SPAN = re.compile(r"\S+")
+
+
+def _core(word: str) -> str:
+    return _TOKEN.match(word).group(2).lower()
+
+
+def _restated_case(word: str, upper: bool) -> str:
+    """The first letter of `word` made upper or lower case, unless it is a first-person word or has a capital inside."""
+    lead, core, trail = _TOKEN.match(word).groups()
+    if not core or (not upper and (core.lower() in _FIRST_PERSON or core[1:] != core[1:].lower())):
+        return word
+    return lead + (core[0].upper() if upper else core[0].lower()) + core[1:] + trail
+
+
+def _without_one_restatement(text: str) -> str | None:
+    """The text with the first "X not X" dropped down to what follows it, or None when there is none."""
+    spans = [match.span() for match in _TOKEN_SPAN.finditer(text)]
+    words = [text[start:end] for start, end in spans]
+    cores = [_core(word) for word in words]
+
+    def repeats(before: int, after: int, size: int) -> bool:
+        first, second = cores[before:before + size], cores[after:after + size]
+        return len(second) == size and first == second and "" not in first and "not" not in first
+
+    for at, core in enumerate(cores):
+        if core != "not":
+            continue
+        for size in range(RESTATEMENT_MAX_WORDS, 0, -1):
+            start, replacement = at - size, at + size + 1
+            if start < 0 or replacement >= len(words) or not repeats(start, at + 1, size):
+                continue
+            for earlier in range(min(3, start), 0, -1):
+                if repeats(start - earlier, replacement, earlier):
+                    start -= earlier
+                    break
+            word = words[replacement]
+            if start == 0 or words[start - 1][-1] in ".?!":
+                word = _restated_case(word, upper=True)
+            elif words[replacement - 1][-1] in ".?!":
+                word = _restated_case(word, upper=False)
+            return text[:spans[start][0]] + word + text[spans[replacement][1]:]
+    return None
+
+
+def resolve_restatements(text: str) -> str:
+    """"x, not x, y" is a correction spoken aloud, and the cleaner resolves it only some of the time."""
+    while (edited := _without_one_restatement(text)) is not None:
+        text = edited
+    return text
+
+
 def _parse(text: str) -> list[tuple]:
     """Elements: ("w", text, lead+core, trail), or (kind, payload, words, trail) for a command,
     where words is the command as spoken, kept for a command that finds no partner."""
@@ -153,6 +207,7 @@ def keep_spoken_ending(chunk: str, cleaned: str) -> str:
 
 
 def spoken_punctuation(text: str) -> str:
+    text = resolve_restatements(text)
     elements = _parse(text)
     if not any(kind in _COMMAND_KINDS for kind, *_ in elements):
         return text

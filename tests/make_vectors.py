@@ -127,6 +127,14 @@ SPOKEN_TEXTS = [
     "She said open quote " + "word " * 35 + "end quote",
     "the end. Quote of the day question mark",
     "Question mark",
+    "like little stars, not stars, white stars on top",
+    "get the Titan Eco not eco economy plates",
+    "the trip. We lay not lay, we land Monday",
+    "sure that it's not a fraudulent Not fraudulent. Fraud attempt.",
+    "simple, straightforward, low, not low, high certainty fixes",
+    "book it Monday, not Monday, Tuesday at five",
+    "like it or not, not everyone agrees",
+    "that is simply not",
     "",
 ]
 
