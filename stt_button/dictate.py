@@ -1,8 +1,11 @@
 """WSL half of hotkey dictation. The Windows helper records the take; this cleans it up.
 
     python -m stt_button.dictate start <pcm path>   # spawn a worker that follows a growing take
-    python -m stt_button.dictate stop               # the helper has finished writing; print the text
-    python -m stt_button.dictate cancel             # discard the open take
+    python -m stt_button.dictate stop               # ask the running worker to finish; print the text
+    python -m stt_button.dictate cancel             # ask the running worker to discard the take
+
+Stop, cancel and the result are files beside that take's pcm (<id>.stop, <id>.cancel,
+<id>.result.json). A second start for a pcm whose worker is already running reports started.
 
 Each command prints one JSON object: {"status": "started"}, {"status": "text", "text": ...},
 {"status": "cancelled"}, {"status": "idle"}, or {"status": "error", "error": ...}.
@@ -12,6 +15,7 @@ load only in the worker, which starts while the user is still talking.
 """
 
 import json
+import os
 import subprocess
 import sys
 import time
@@ -23,25 +27,38 @@ from stt_button import config
 
 DICTATION = config.REPO / "data" / "dictation"
 PIDFILE = DICTATION / "worker.pid"
-RESULT = DICTATION / "result.json"
-STOP_FLAG = DICTATION / "stop"
-CANCEL_FLAG = DICTATION / "cancel"
 LOG = DICTATION / "log.jsonl"
 SAMPLE_RATE = 16000
 KEEP_AUDIO_S = 600
 POLL_S = 0.05
 RESULT_TIMEOUT_S = 600
+# Windows refuses the rename while the helper has the result open; a short gap is enough.
+RESULT_REPLACE_ATTEMPTS = 50
+RESULT_REPLACE_PAUSE_S = 0.02
 # The helper enforces the take cap; this only stops a worker whose helper has gone away.
 ORPHAN_GRACE_S = 30
 
 
-def write_result(result: dict, path: Path = RESULT) -> None:
+def take_files(pcm: Path) -> tuple[Path, Path, Path]:
+    """(stop flag, cancel flag, result) beside the pcm."""
+    return pcm.with_suffix(".stop"), pcm.with_suffix(".cancel"), pcm.with_suffix(".result.json")
+
+
+def write_result(result: dict, path: Path) -> None:
     partial = path.with_suffix(".tmp")
     partial.write_text(json.dumps(result, ensure_ascii=False))
-    partial.replace(path)
+    # Windows refuses the rename while the helper has the file open for a read.
+    for attempt in range(RESULT_REPLACE_ATTEMPTS):
+        try:
+            partial.replace(path)
+            return
+        except PermissionError:
+            if attempt == RESULT_REPLACE_ATTEMPTS - 1:
+                raise
+            time.sleep(RESULT_REPLACE_PAUSE_S)
 
 
-def take_result(path: Path = RESULT) -> dict | None:
+def take_result(path: Path) -> dict | None:
     """Read and consume the finished take's result, if there is one."""
     try:
         result = json.loads(path.read_text())
@@ -105,7 +122,7 @@ class PcmTail:
         return np.frombuffer(data, dtype="<i2").astype(np.float32) / 32768
 
 
-def release_take(pid: int, pidfile: Path = PIDFILE, flags: tuple[Path, ...] = (STOP_FLAG, CANCEL_FLAG)) -> None:
+def release_take(pid: int, pidfile: Path = PIDFILE, flags: tuple[Path, ...] = ()) -> None:
     """Mark the take closed, unless a newer take has already claimed the pidfile."""
     try:
         if int(pidfile.read_text()) != pid:
@@ -116,7 +133,7 @@ def release_take(pid: int, pidfile: Path = PIDFILE, flags: tuple[Path, ...] = (S
         path.unlink(missing_ok=True)
 
 
-def stop_requested_at(flag: Path = STOP_FLAG) -> float:
+def stop_requested_at(flag: Path) -> float:
     """When the stop was asked for, not when the worker noticed: an idle clean in progress delays the noticing."""
     try:
         return flag.stat().st_mtime
@@ -124,8 +141,29 @@ def stop_requested_at(flag: Path = STOP_FLAG) -> float:
         return time.time()
 
 
+def pcm_from_cmdline(cmdline: bytes) -> Path | None:
+    args = cmdline.split(b"\0")
+    try:
+        work = args.index(b"_work")
+    except ValueError:
+        return None
+    if work + 1 >= len(args) or not args[work + 1]:
+        return None
+    return Path(os.fsdecode(args[work + 1]))
+
+
+def running_pcm(pidfile: Path = PIDFILE) -> Path | None:
+    """The pcm of the worker named by the pidfile, if that process is a dictate worker."""
+    pid = running_worker(pidfile)
+    if pid is None:
+        return None
+    try:
+        return pcm_from_cmdline(Path(f"/proc/{pid}/cmdline").read_bytes())
+    except FileNotFoundError:
+        return None
+
+
 def work(pcm: Path) -> None:
-    import os
     import threading
 
     from stt_button.asr import Recognizer
@@ -136,7 +174,12 @@ def work(pcm: Path) -> None:
 
     cfg = config.load()
     take_id = pcm.stem
+    stop_flag, cancel_flag, result_path = take_files(pcm)
+    flags = (stop_flag, cancel_flag)
     loaded: dict = {}
+
+    def halted() -> bool:
+        return stop_flag.exists() or cancel_flag.exists()
 
     def load_cleaner():
         # The GPU through Ollama is ~4x the CPU here when the laptop is in its performance mode;
@@ -166,18 +209,19 @@ def work(pcm: Path) -> None:
             loaded["backend"] = model.backend
             model.release()
 
+    published = False
     try:
         bubble = SharedBubble(pcm.with_suffix(".bubble.json"))
-        Preview(bubble, PcmTail(pcm).read, lambda: STOP_FLAG.exists() or CANCEL_FLAG.exists()).start()
+        Preview(bubble, PcmTail(pcm).read, halted).start()
         live = LiveTake(Recognizer(), get_cleaner, cfg, bubble)
         tail = PcmTail(pcm)
         deadline = time.monotonic() + cfg["take_cap_s"] + ORPHAN_GRACE_S
-        while not (STOP_FLAG.exists() or CANCEL_FLAG.exists()) and time.monotonic() < deadline:
+        while not halted() and time.monotonic() < deadline:
             live.feed(tail.read())
-            if not live.idle_step(tail.read):
+            if not live.idle_step(tail.read, halted):
                 time.sleep(POLL_S)
-        stopped = stop_requested_at()
-        if CANCEL_FLAG.exists():
+        stopped = stop_requested_at(stop_flag)
+        if cancel_flag.exists():
             pcm.unlink(missing_ok=True)
             bubble.path.unlink(missing_ok=True)
             return
@@ -185,11 +229,13 @@ def work(pcm: Path) -> None:
         live.feed(tail.read())
         result = live.finish()
         bubble.flush()
-        release_cleaner()
-        write_result({"status": "text", "text": result.cleaned})
+        # Result, then the pidfile, then the cleaner. Unloading joins a load this take may not
+        # have used, and the paste must not wait on it; the unload can hit the next take's model.
+        write_result({"status": "text", "text": result.cleaned}, result_path)
+        published = True
         stop_to_result_ms = int((time.time() - stopped) * 1000)
-        # Released before the bookkeeping below, so the next take can start at once.
-        release_take(os.getpid())
+        release_take(os.getpid(), flags=flags)
+        release_cleaner()
         bubble.path.unlink(missing_ok=True)
 
         audio_s = pcm_to_wav(pcm, DICTATION / f"{take_id}.wav")
@@ -208,18 +254,33 @@ def work(pcm: Path) -> None:
                 "raw": result.raw, "cleaned": result.cleaned,
             }, ensure_ascii=False) + "\n")
     except Exception as err:
-        write_result({"status": "error", "error": f"{type(err).__name__}: {err}"})
+        if not published:
+            write_result({"status": "error", "error": f"{type(err).__name__}: {err}"}, result_path)
         raise
     finally:
+        # Pidfile before the unload, so the next take is not stuck behind this process's model.
+        release_take(os.getpid(), flags=flags)
         release_cleaner()
-        release_take(os.getpid())
+
+
+def start_decision(requested: Path, running: Path | None) -> dict | None:
+    """What start returns without spawning, or None when it should spawn a worker.
+
+    A retry can follow a launch whose reply never arrived, and that worker is already on this pcm.
+    """
+    if running is None:
+        return None
+    if Path(running) == Path(requested):
+        return {"status": "started"}
+    return {"status": "error", "error": "a take is already open"}
 
 
 def start(pcm: str) -> dict:
-    if running_worker() is not None:
-        return {"status": "error", "error": "a take is already open"}
-    for stale in (RESULT, STOP_FLAG, CANCEL_FLAG):
-        stale.unlink(missing_ok=True)
+    requested = Path(pcm)
+    decision = start_decision(requested, running_pcm())
+    if decision is not None:
+        return decision
+    # Leave a stop or cancel that is already beside the pcm: the worker has not seen it yet.
     with (DICTATION / "worker.err").open("a") as err:
         worker = subprocess.Popen(
             [sys.executable, "-m", "stt_button.dictate", "_work", pcm],
@@ -231,24 +292,29 @@ def start(pcm: str) -> dict:
 
 
 def stop() -> dict:
-    # A flag rather than a signal: a stop that lands before the worker is up still counts.
-    STOP_FLAG.touch()
+    pcm = running_pcm()
+    if pcm is None:
+        return {"status": "error", "error": "no take was open; see data/dictation/worker.err"}
+    stop_flag, _, result_path = take_files(pcm)
+    stop_flag.touch()
     deadline = time.monotonic() + RESULT_TIMEOUT_S
     while time.monotonic() < deadline:
-        finished = take_result()
+        finished = take_result(result_path)
         if finished is not None:
             return finished
-        if running_worker() is None and not RESULT.exists():
-            STOP_FLAG.unlink(missing_ok=True)
+        if running_pcm() is None and not result_path.exists():
+            stop_flag.unlink(missing_ok=True)
             return {"status": "error", "error": "no take was open; see data/dictation/worker.err"}
         time.sleep(POLL_S)
     return {"status": "error", "error": "timed out waiting for the transcript"}
 
 
 def cancel() -> dict:
-    if running_worker() is None:
+    pcm = running_pcm()
+    if pcm is None:
         return {"status": "idle"}
-    CANCEL_FLAG.touch()
+    _, cancel_flag, _ = take_files(pcm)
+    cancel_flag.touch()
     return {"status": "cancelled"}
 
 

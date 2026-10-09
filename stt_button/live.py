@@ -71,11 +71,13 @@ class LiveTake:
             self._recognize(start, end)
             self._clean_closed(final=False)
 
-    def idle_step(self, poll: Callable[[], np.ndarray]) -> bool:
+    def idle_step(self, poll: Callable[[], np.ndarray], halted: Callable[[], bool] | None = None) -> bool:
         """While the user is paused and every slice is recognized, clean the chunks the stop would
         need, so a stop during the pause has nothing left to wait for. poll returns the audio that
         arrived since the last read; the first non-silent window cancels the clean in progress and
-        discards its output. Returns whether any generation was started."""
+        discards its output. halted(), when set, is read on that same poll and ends the pass before
+        the next chunk; a clean that finished is kept, so the stop still finds it cached.
+        Returns whether any generation was started."""
         slicer = self.slicer
         spoken = slicer.last_speech_end
         if not slicer.paused or self._pending or slicer.start < spoken or skips_cleaner(self.raw, self.cfg):
@@ -86,25 +88,34 @@ class LiveTake:
                                          cues=self.cfg["self_correction_cues"])
                   if c not in self.cleaned_chunks]
         last_poll = 0.0
+        stop_seen = False
 
         def speech_resumed() -> bool:
-            nonlocal last_poll
+            nonlocal last_poll, stop_seen
             if time.monotonic() - last_poll >= IDLE_POLL_S:
                 last_poll = time.monotonic()
                 self._pending += slicer.feed(poll())
+                if halted is not None and halted():
+                    stop_seen = True
             return slicer.last_speech_end != spoken
 
+        started_any = False
         for chunk in chunks:
+            if stop_seen or (halted is not None and halted()):
+                break
+            started_any = True
             self.idle_cleans += 1
-            started = time.monotonic()
+            began = time.monotonic()
             cleaned = cleaner.clean_chunk(chunk, speech_resumed)
-            self.clean_ms += _ms(started)
+            self.clean_ms += _ms(began)
             if cleaned is None:
                 break
             self._keep(chunk, cleaned[0])
             self.idle_chunks.add(chunk)
             self._announce(chunk)
-        return bool(chunks)
+            if stop_seen:
+                break
+        return started_any
 
     def mark_stop(self) -> None:
         self._stop_asr_ms, self._stop_clean_ms = self.asr_ms, self.clean_ms

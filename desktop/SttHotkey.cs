@@ -65,6 +65,9 @@ class HotkeyWindow : Form {
     const uint VK_SPACE = 0x20;
     const int TOGGLE = 1, CANCEL = 2;
     const int TAKE_CAP_MS = 300 * 1000;
+    const int RESULT_POLL_MS = 50;
+    const int RESULT_TIMEOUT_MS = 600 * 1000;
+    const int START_TRIES = 4;
     // Long enough for Claude Code to have collapsed the first paste into its placeholder.
     const int PASTE_AGAIN_MS = 400;
     // Claude Code titles its terminal "<glyph> <topic>", and claude-autoresume swaps the glyph for any session's state
@@ -78,12 +81,18 @@ class HotkeyWindow : Form {
     readonly string logPath = Path.Combine(Application.StartupPath, "helper.log");
     readonly Indicator indicator = new Indicator();
     readonly Mic mic = new Mic();
-    // Commands to WSL run one at a time, in order, so a quick stop can never overtake its start.
+    // Start is the only call that crosses into WSL, and it runs off the UI thread. Stop and cancel are
+    // files written here, so a launch that is timing out cannot hold them.
     readonly BlockingCollection<Action> wslQueue = new BlockingCollection<Action>();
     readonly System.Windows.Forms.Timer capTimer = new System.Windows.Forms.Timer { Interval = TAKE_CAP_MS };
     readonly System.Windows.Forms.Timer micIdleTimer = new System.Windows.Forms.Timer { Interval = MIC_WARM_MS };
     readonly System.Windows.Forms.Timer bubbleTimer = new System.Windows.Forms.Timer { Interval = 150 };
+    readonly System.Windows.Forms.Timer resultTimer = new System.Windows.Forms.Timer { Interval = RESULT_POLL_MS };
+    // Bumped when a launch's take is no longer the one being started, so its remaining tries are dropped.
+    volatile int launchGeneration;
     string takePath;
+    string waitPath;
+    string resultPath;
     string bubblePath, bubbleShown;
     bool busy;
     IntPtr target;
@@ -100,6 +109,7 @@ class HotkeyWindow : Form {
         capTimer.Tick += (s, e) => { if (takePath != null) Stop(); };
         micIdleTimer.Tick += (s, e) => { micIdleTimer.Stop(); mic.Close(); Log("mic closed after idle"); };
         bubbleTimer.Tick += (s, e) => PollBubble();
+        resultTimer.Tick += (s, e) => PollResult();
     }
 
     protected override void SetVisibleCore(bool value) { base.SetVisibleCore(false); }
@@ -137,59 +147,156 @@ class HotkeyWindow : Form {
         bubbleTimer.Start();
         indicator.ShowText("● Recording");
         capTimer.Start();
+        int generation = ++launchGeneration;
         RunWsl("start '" + WslPath(path) + "'", result => {
-            if (Field(result, "status") != "started") Abort("⚠ " + (Field(result, "error") ?? "WSL did not start"));
-        });
+            if (takePath != path && waitPath != path) return;
+            if (Field(result, "status") == "started") return;
+            FailStart(path, Field(result, "error") ?? "WSL did not start");
+        }, START_TRIES, generation);
     }
 
     void Stop() {
+        if (takePath == null) return;
         capTimer.Stop();
+        string path = takePath;
         mic.EndTake();
         takePath = null;
+        WriteFlag(Path.ChangeExtension(path, ".stop"));
         busy = true;
+        waitPath = path;
+        resultPath = Path.ChangeExtension(path, ".result.json");
         stoppedAt = DateTime.Now;
         micIdleTimer.Start();
         bubbleShown = null;
         if (!PollBubble()) indicator.ShowText("… Transcribing");
-        RunWsl("stop", result => {
-            busy = false;
-            EndBubble();
-            string status = Field(result, "status");
-            string text = Field(result, "text");
-            Log(string.Format("result status={0} chars={1} stop_to_text_ms={2:0}", status, text == null ? 0 : text.Length,
-                (DateTime.Now - stoppedAt).TotalMilliseconds));
-            if (status == "text" && string.IsNullOrEmpty(text)) {
-                indicator.Flash("No speech heard");
-            } else if (status == "text") {
-                indicator.Hide();
-                try {
-                    Paste(text);
-                } catch (Exception e) {
-                    Log("paste failed: " + e);
-                    indicator.Flash("⚠ paste failed: " + e.Message);
-                }
-            } else {
-                Log("result error: " + Field(result, "error"));
-                indicator.Flash("⚠ " + (Field(result, "error") ?? status));
-            }
-        }, 2);
+        resultTimer.Start();
     }
 
     void Cancel() {
+        if (waitPath != null) {
+            string path = waitPath;
+            WriteFlag(Path.ChangeExtension(path, ".cancel"));
+            DropLaunch();
+            try { File.Delete(path); } catch (IOException e) { Log("delete failed: " + e.Message); }
+            waitPath = null;
+            resultPath = null;
+            resultTimer.Stop();
+            busy = false;
+            EndBubble();
+            indicator.Flash("Cancelled");
+            return;
+        }
         if (takePath == null) return;
         Abort("Cancelled");
     }
 
     void Abort(string message) {
+        DropLaunch();
         EndBubble();
         capTimer.Stop();
+        string path = takePath;
         mic.EndTake();
-        if (takePath != null) File.Delete(takePath);
+        if (path != null) {
+            WriteFlag(Path.ChangeExtension(path, ".cancel"));
+            try { File.Delete(path); } catch (IOException e) { Log("delete failed: " + e.Message); }
+        }
         takePath = null;
         micIdleTimer.Start();
         indicator.Flash(message);
-        RunWsl("cancel", result => { });
     }
+
+    // A failed launch ends the take at once. The pcm stays; the log names it.
+    void FailStart(string path, string error) {
+        if (waitPath == path) {
+            Finish(ErrorResult(error));
+            return;
+        }
+        if (takePath != path) return;
+        EndBubble();
+        capTimer.Stop();
+        mic.EndTake();
+        takePath = null;
+        micIdleTimer.Start();
+        Log("start failed: " + error);
+        Log("kept recording " + path);
+        indicator.Flash("⚠ " + error);
+    }
+
+    static Dictionary<string, object> ErrorResult(string error) {
+        return new Dictionary<string, object> { { "status", "error" }, { "error", error } };
+    }
+
+    void Finish(Dictionary<string, object> result) {
+        resultTimer.Stop();
+        busy = false;
+        string path = waitPath;
+        waitPath = null;
+        resultPath = null;
+        DropLaunch();
+        EndBubble();
+        string status = Field(result, "status");
+        string text = Field(result, "text");
+        Log(string.Format("result status={0} chars={1} stop_to_text_ms={2:0}", status, text == null ? 0 : text.Length,
+            (DateTime.Now - stoppedAt).TotalMilliseconds));
+        if (status == "text" && string.IsNullOrEmpty(text)) {
+            indicator.Flash("No speech heard");
+        } else if (status == "text") {
+            indicator.Hide();
+            try {
+                Paste(text);
+            } catch (Exception e) {
+                Log("paste failed: " + e);
+                indicator.Flash("⚠ paste failed: " + e.Message);
+            }
+        } else {
+            Log("result error: " + Field(result, "error"));
+            Log("kept recording " + path);
+            indicator.Flash("⚠ " + (Field(result, "error") ?? status));
+        }
+    }
+
+    void PollResult() {
+        if (resultPath == null) return;
+        if ((DateTime.Now - stoppedAt).TotalMilliseconds >= RESULT_TIMEOUT_MS) {
+            Finish(ErrorResult("timed out waiting for the transcript"));
+            return;
+        }
+        string json = ReadShared(resultPath);
+        if (json == null) return;
+        Dictionary<string, object> result;
+        try {
+            result = new JavaScriptSerializer().Deserialize<Dictionary<string, object>>(json);
+        } catch (Exception) {
+            return;
+        }
+        if (result == null) return;
+        try { File.Delete(resultPath); } catch (IOException) { }
+        Finish(result);
+    }
+
+    // CreateNew leaves an existing flag's mtime alone: that mtime is when the stop was asked.
+    void WriteFlag(string path) {
+        if (File.Exists(path)) return;
+        try {
+            using (new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete)) { }
+        } catch (IOException e) {
+            if (!File.Exists(path)) Log("flag failed: " + e.Message);
+        }
+    }
+
+    static string ReadShared(string path) {
+        try {
+            using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+            using (var reader = new StreamReader(stream, Encoding.UTF8)) {
+                string json = reader.ReadToEnd();
+                return json.Length == 0 ? null : json;
+            }
+        } catch (IOException) {
+            return null;
+        }
+    }
+
+    void DropLaunch() { launchGeneration++; }
 
     // The WSL worker rewrites this file with what has been heard so far; a read that collides with
     // a rewrite is skipped and retried on the next tick.
@@ -228,33 +335,40 @@ class HotkeyWindow : Form {
         return "/mnt/" + char.ToLowerInvariant(windowsPath[0]) + windowsPath.Substring(2).Replace('\\', '/');
     }
 
-    // A stop is safe to repeat, and wsl.exe can fail to reach a VM that is short of memory: its relay gives
-    // up after 30 s. Without the second try the worker never sees the stop and the take is lost.
-    void RunWsl(string command, Action<Dictionary<string, object>> done, int tries = 1) {
+    // Each launch opens a vmbus channel. That channel's order-7 allocation fails when the VM's memory is
+    // fragmented, and wsl.exe then times out at 30 s without the command ever running. Only start comes
+    // through here; whenever the worker comes up it reads the take from its first byte, including a stop
+    // already on disk. generation is the take this launch belongs to; once it changes, remaining tries stop.
+    void RunWsl(string command, Action<Dictionary<string, object>> done, int tries = 1, int generation = 0) {
         string script = "cd '" + repo + "' && STT_MODEL_DIR='" + models + "' .venv/bin/python -m stt_button.dictate " + command;
         wslQueue.Add(() => {
+            if (generation != 0 && generation != launchGeneration) return;
             Dictionary<string, object> result = null;
-            for (int attempt = 1; attempt <= tries; attempt++) try {
-                var info = new ProcessStartInfo("wsl.exe", "-e bash -c \"" + script + "\"") {
-                    UseShellExecute = false,
-                    CreateNoWindow = true,
-                    RedirectStandardOutput = true,
-                    StandardOutputEncoding = new UTF8Encoding(false),
-                };
-                using (var process = Process.Start(info)) {
-                    string output = process.StandardOutput.ReadToEnd();
-                    process.WaitForExit();
-                    string lastLine = output.Trim();
-                    int newline = lastLine.LastIndexOf('\n');
-                    if (newline >= 0) lastLine = lastLine.Substring(newline + 1);
-                    result = new JavaScriptSerializer().Deserialize<Dictionary<string, object>>(lastLine);
-                    if (result == null) throw new InvalidOperationException("WSL returned nothing");
+            for (int attempt = 1; attempt <= tries; attempt++) {
+                if (generation != 0 && generation != launchGeneration) return;
+                try {
+                    var info = new ProcessStartInfo("wsl.exe", "-e bash -c \"" + script + "\"") {
+                        UseShellExecute = false,
+                        CreateNoWindow = true,
+                        RedirectStandardOutput = true,
+                        StandardOutputEncoding = new UTF8Encoding(false),
+                    };
+                    using (var process = Process.Start(info)) {
+                        string output = process.StandardOutput.ReadToEnd();
+                        process.WaitForExit();
+                        string lastLine = output.Trim();
+                        int newline = lastLine.LastIndexOf('\n');
+                        if (newline >= 0) lastLine = lastLine.Substring(newline + 1);
+                        result = new JavaScriptSerializer().Deserialize<Dictionary<string, object>>(lastLine);
+                        if (result == null) throw new InvalidOperationException("WSL returned nothing");
+                    }
+                    break;
+                } catch (Exception e) {
+                    Log(string.Format("wsl {0} failed attempt={1}/{2}: {3}", command.Split(' ')[0], attempt, tries, e.Message));
+                    result = new Dictionary<string, object> { { "status", "error" }, { "error", e.Message } };
                 }
-                break;
-            } catch (Exception e) {
-                Log(string.Format("wsl {0} failed attempt={1}/{2}: {3}", command.Split(' ')[0], attempt, tries, e.Message));
-                result = new Dictionary<string, object> { { "status", "error" }, { "error", e.Message } };
             }
+            if (generation != 0 && generation != launchGeneration) return;
             BeginInvoke(new Action(() => done(result)));
         });
     }

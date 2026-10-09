@@ -1,3 +1,4 @@
+import json
 import os
 import time
 import wave
@@ -283,3 +284,144 @@ def test_given_a_stop_flag_when_asked_then_the_stop_time_is_when_the_flag_was_wr
 
     assert dictate.stop_requested_at(flag) == 1000.0
     assert dictate.stop_requested_at(tmp_path / "missing") > 1000.0
+
+
+def test_given_a_pcm_path_when_take_files_are_derived_then_they_sit_beside_it(tmp_path):
+    pcm = tmp_path / "20261009T120000-abcdef.pcm"
+
+    stop, cancel, result = dictate.take_files(pcm)
+
+    assert (stop, cancel, result) == (
+        tmp_path / "20261009T120000-abcdef.stop",
+        tmp_path / "20261009T120000-abcdef.cancel",
+        tmp_path / "20261009T120000-abcdef.result.json",
+    )
+
+
+def test_given_a_worker_cmdline_when_parsed_then_the_pcm_is_the_work_argument():
+    cmd = b"\0".join([
+        b"/usr/bin/python", b"-m", b"stt_button.dictate", b"_work",
+        os.fsencode("/mnt/c/takes/a take.pcm"), b"",
+    ])
+
+    assert dictate.pcm_from_cmdline(cmd) == dictate.Path("/mnt/c/takes/a take.pcm")
+    assert dictate.pcm_from_cmdline(b"python\0-m\0stt_button.dictate\0stop\0") is None
+
+
+def _isolate_take(monkeypatch, tmp_path, running):
+    monkeypatch.setattr(dictate, "DICTATION", tmp_path)
+    monkeypatch.setattr(dictate, "PIDFILE", tmp_path / "worker.pid")
+    monkeypatch.setattr(dictate, "running_pcm", lambda pidfile=None: running)
+
+
+def test_given_a_worker_already_on_the_pcm_when_start_is_asked_then_it_is_started_without_spawning(tmp_path, monkeypatch):
+    pcm = tmp_path / "a.pcm"
+    _isolate_take(monkeypatch, tmp_path, pcm)
+
+    def popen(*args, **kwargs):
+        raise AssertionError("spawned")
+
+    monkeypatch.setattr(dictate.subprocess, "Popen", popen)
+
+    assert dictate.start(str(pcm)) == {"status": "started"}
+    assert not (tmp_path / "worker.pid").exists()
+
+
+def test_given_a_worker_on_another_pcm_when_start_is_asked_then_it_is_busy(tmp_path, monkeypatch):
+    _isolate_take(monkeypatch, tmp_path, tmp_path / "other.pcm")
+
+    def popen(*args, **kwargs):
+        raise AssertionError("spawned")
+
+    monkeypatch.setattr(dictate.subprocess, "Popen", popen)
+
+    result = dictate.start(str(tmp_path / "a.pcm"))
+
+    assert result == {"status": "error", "error": "a take is already open"}
+
+
+def test_given_no_worker_when_start_is_asked_then_it_spawns_and_keeps_a_stop_file(tmp_path, monkeypatch):
+    pcm = tmp_path / "a.pcm"
+    stop = pcm.with_suffix(".stop")
+    stop.write_text("asked")
+    _isolate_take(monkeypatch, tmp_path, None)
+    spawned = {}
+
+    class Proc:
+        pid = 4242
+
+    def popen(args, **kwargs):
+        spawned["args"] = args
+        return Proc()
+
+    monkeypatch.setattr(dictate.subprocess, "Popen", popen)
+
+    assert dictate.start(str(pcm)) == {"status": "started"}
+    assert spawned["args"][-2:] == ["_work", str(pcm)]
+    assert (tmp_path / "worker.pid").read_text() == "4242"
+    assert stop.read_text() == "asked"
+
+
+def test_given_a_reader_holding_the_result_when_written_then_the_replace_is_retried(tmp_path, monkeypatch):
+    path = tmp_path / "take.result.json"
+    real_replace = dictate.Path.replace
+    failures = {"left": 2}
+
+    def replace(self, target):
+        if failures["left"] and self.suffix == ".tmp":
+            failures["left"] -= 1
+            raise PermissionError("sharing violation")
+        return real_replace(self, target)
+
+    monkeypatch.setattr(dictate.Path, "replace", replace)
+    monkeypatch.setattr(dictate.time, "sleep", lambda seconds: None)
+
+    dictate.write_result({"status": "text", "text": "kept"}, path)
+
+    assert failures["left"] == 0
+    assert json.loads(path.read_text()) == {"status": "text", "text": "kept"}
+    assert not path.with_suffix(".tmp").exists()
+
+
+def test_given_the_workers_pcm_when_stop_is_asked_then_the_stop_file_is_written_and_the_result_returned(tmp_path, monkeypatch):
+    pcm = tmp_path / "take.pcm"
+    monkeypatch.setattr(dictate, "running_pcm", lambda pidfile=None: pcm)
+    dictate.write_result({"status": "text", "text": "hello"}, pcm.with_suffix(".result.json"))
+
+    assert dictate.stop() == {"status": "text", "text": "hello"}
+    assert pcm.with_suffix(".stop").is_file()
+    assert not pcm.with_suffix(".result.json").exists()
+
+
+def test_given_the_workers_pcm_when_cancel_is_asked_then_the_cancel_file_is_written(tmp_path, monkeypatch):
+    pcm = tmp_path / "take.pcm"
+    monkeypatch.setattr(dictate, "running_pcm", lambda pidfile=None: pcm)
+
+    assert dictate.cancel() == {"status": "cancelled"}
+    assert pcm.with_suffix(".cancel").is_file()
+
+
+def test_given_no_worker_when_stop_or_cancel_is_asked_then_nothing_is_opened(tmp_path, monkeypatch):
+    monkeypatch.setattr(dictate, "running_pcm", lambda pidfile=None: None)
+
+    assert dictate.stop()["error"].startswith("no take was open")
+    assert dictate.cancel() == {"status": "idle"}
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_given_a_worker_that_vanishes_when_stop_waits_then_it_reports_no_take(tmp_path, monkeypatch):
+    pcm = tmp_path / "take.pcm"
+    seen = {"n": 0}
+
+    def running(pidfile=None):
+        seen["n"] += 1
+        return pcm if seen["n"] == 1 else None
+
+    monkeypatch.setattr(dictate, "running_pcm", running)
+    monkeypatch.setattr(dictate, "RESULT_TIMEOUT_S", 1)
+    monkeypatch.setattr(dictate.time, "sleep", lambda seconds: None)
+
+    result = dictate.stop()
+
+    assert result["status"] == "error" and result["error"].startswith("no take was open")
+    assert not pcm.with_suffix(".stop").exists()
