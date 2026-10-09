@@ -125,13 +125,14 @@ class StubCleaner(cleaner.Cleaner):
     def __init__(self):
         self.cfg = {**CFG, "chunk_min_tokens": 5, "skip_max_words": 2}
         self.spec = CFG["cleaners"]["s1-mini"]
+        self.backend = "llama"
         self.generated = []
 
     def count_tokens(self, text):
         return words(text)
 
-    def _generate(self, prompt, max_tokens, cancelled=None):
-        chunk = prompt.split("\n")[-6]
+    def _generate(self, parts, max_tokens, cancelled=None):
+        chunk = parts[1]
         self.generated.append(chunk)
         return chunk.upper(), 1
 

@@ -21,6 +21,8 @@ class LiveResult(
     val drifts: Int = 0,
     val corrections: Int = 0,
     val correctionsKept: Int = 0,
+    /** Cleans `Pipeline.untrustedClean` rejected for anything but drift, each inserted as heard instead. */
+    val rejects: Int = 0,
 )
 
 /** One model call, as the job log records it. */
@@ -37,11 +39,13 @@ class JobRecord(
     val toMs: Long? = null,
     val context: Boolean? = null,
     val scope: String? = null,
+    /** Why a clean's output was not trusted, as `Pipeline.untrustedClean` names it. */
+    val reason: String? = null,
 )
 
 sealed interface JobResult
 class Decoded(val text: String, val mark: String?, val usedContext: Boolean, val fellBack: Boolean, val ms: Long) : JobResult
-class Cleaned(val text: String?, val drifted: Boolean, val inTokens: Int, val outTokens: Int, val ms: Long) : JobResult
+class Cleaned(val text: String?, val rejected: String?, val inTokens: Int, val outTokens: Int, val ms: Long) : JobResult
 object Loaded : JobResult
 
 /** Work the engine wants done. [run] is the only part that waits on a model, and is safe on another thread. */
@@ -112,6 +116,7 @@ class TakeEngine(
     private var idleCleans = 0
     private var idleHits = 0
     private var drifts = 0
+    private var rejects = 0
     private var contextDecodes = 0
     private var contextFallbacks = 0
 
@@ -190,7 +195,7 @@ class TakeEngine(
             raw, regionText(), if (skipped) 0 else chunks.size, if (skipped) "raw" else "chunks", asrMs, cleanMs,
             asrMs - stopAsrMs, cleanMs - stopCleanMs, inTokens, outTokens, idleCleans, idleHits,
             Pipeline.matchedCue(raw, cfg.selfCorrectionCues), slicer.sampleCount / (Slicer.SAMPLE_RATE / 1000).toLong(),
-            contextDecodes, contextFallbacks, drifts, corrections, correctionsKept,
+            contextDecodes, contextFallbacks, drifts, corrections, correctionsKept, rejects,
         )
     }
 
@@ -285,7 +290,7 @@ class TakeEngine(
                     mark = heard.mark.orEmpty()
                 }
             }
-            Decoded(text, mark, withContext, fellBack, elapsedMs(started))
+            Decoded(Pipeline.stripHidden(text), mark, withContext, fellBack, elapsedMs(started))
         }
     }
 
@@ -336,11 +341,11 @@ class TakeEngine(
             val result = if (plan.abandonable && slicer.lastSpeechEnd != spoken) null else cleaner.clean(CleanRequest(plan.target))
             val ms = elapsedMs(started)
             if (result == null) {
-                Cleaned(null, false, 0, 0, ms)
+                Cleaned(null, null, 0, 0, ms)
             } else {
-                val drifted = Pipeline.factDrift(plan.target, result.text).isNotEmpty()
-                val text = if (drifted) Spoken.convert(plan.target) else result.text
-                Cleaned(Spoken.keepSpokenEnding(plan.target, text), drifted, cleaner.countTokens(plan.target), result.outTokens, ms)
+                val rejected = Pipeline.untrustedClean(plan.target, result.text)
+                val text = if (rejected != null) Spoken.convert(plan.target) else result.text
+                Cleaned(Spoken.keepSpokenEnding(plan.target, text), rejected, cleaner.countTokens(plan.target), result.outTokens, ms)
             }
         }
     }
@@ -354,12 +359,12 @@ class TakeEngine(
         val record = { outcome: String, output: String? ->
             jobs(JobRecord("clean", job.moment.name.lowercase(), cleaned.ms, plan.target, output, outcome,
                 cleaned.inTokens.takeIf { cleaned.text != null }, cleaned.outTokens.takeIf { cleaned.text != null },
-                scope = if (plan.region) "region" else "chunk"))
+                scope = if (plan.region) "region" else "chunk", reason = cleaned.rejected))
         }
         if (cleaned.text != null) {
             inTokens += cleaned.inTokens
             outTokens += cleaned.outTokens
-            if (cleaned.drifted) drifts++
+            if (cleaned.rejected == "drift") drifts++ else if (cleaned.rejected != null) rejects++
         }
         when {
             cleaned.text == null && (plan.abandonable || plan.speculative) -> {
@@ -379,7 +384,7 @@ class TakeEngine(
             else -> {
                 val text = cleaned.text ?: Spoken.convert(plan.target)
                 apply(flight.from, flight.to, text, plan)
-                record(if (cleaned.text == null || cleaned.drifted) "fallback" else "applied", text)
+                record(if (cleaned.text == null || cleaned.rejected != null) "fallback" else "applied", text)
             }
         }
     }

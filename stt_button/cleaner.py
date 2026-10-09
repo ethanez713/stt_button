@@ -1,6 +1,7 @@
 import json
 import re
 import time
+import unicodedata
 import urllib.request
 from collections import Counter
 from collections.abc import Callable
@@ -37,6 +38,16 @@ def render_prompt(system_prompt: str, user_turn: str) -> str:
 
 def user_turn(control_line: str | None, chunk: str) -> str:
     return f"{control_line}\n{chunk}" if control_line else chunk
+
+
+def prompt_parts(system_prompt: str, control_line: str | None, chunk: str) -> tuple[str, str, str]:
+    """render_prompt split around the transcript: (template before, transcript, template after). The
+    template is tokenized with its special tokens and the transcript as plain text, so a transcript
+    that spells out <|im_end|> cannot close the user turn. Line breaks that open the chunk go with the
+    template, so the parts tokenize as the whole prompt does."""
+    text = chunk.lstrip("\n")
+    head = f"<|im_start|>system\n{system_prompt}{END_OF_TURN}\n<|im_start|>user\n{user_turn(control_line, '')}"
+    return head + chunk[:len(chunk) - len(text)], text, f"{END_OF_TURN}\n{ASSISTANT_NO_THINK}"
 
 
 def max_new_tokens(input_tokens: int, ratio: float, pad: int) -> int:
@@ -190,6 +201,62 @@ def fact_drift(raw: str, cleaned: str) -> list[tuple[str, str]]:
             if len(m) > 1 and len(n) > 1 and _edits(m, n) <= (_DRIFT_MAX_EDITS if min(len(m), len(n)) > 3 else 1)]
 
 
+# Characters that render as nothing or that a reader cannot tell apart: format characters (zero-width,
+# bidi controls, the tag block that spells hidden ASCII), controls other than the line break and tab,
+# line and paragraph separators, private-use code points, and variation selectors, which can carry
+# hidden bytes after a visible character.
+_HIDDEN_CATEGORIES = {"Cf", "Cc", "Zl", "Zp", "Co"}
+_VARIATION_SELECTORS = ((0xFE00, 0xFE0F), (0xE0100, 0xE01EF))
+_SPECIAL_TOKEN_TEXT = re.compile(r"<\||\|>|</?think>")
+_LINK = re.compile(r"://|@|www\.|\w\.[^\W\d_]{2,}")
+_LINK_SPOKEN_SEPARATORS = {"dot", "at", "slash", "colon", "dash", "hyphen", "underscore", "period", "point"}
+
+
+def _hidden(c: str) -> bool:
+    if c in "\n\t":
+        return False
+    return unicodedata.category(c) in _HIDDEN_CATEGORIES or any(lo <= ord(c) <= hi for lo, hi in _VARIATION_SELECTORS)
+
+
+def strip_hidden(text: str) -> str:
+    """The text without characters a reader cannot see, which could carry instructions to a model
+    that later reads the text, or make a link look like another."""
+    return "".join(c for c in text if not _hidden(c))
+
+
+def _letters_and_digits(text: str) -> list[str]:
+    return re.findall(r"[^\W_]+", text.lower())
+
+
+def unheard_link(raw: str, cleaned: str) -> str | None:
+    """The first link, address or domain in the cleaned text whose letters and digits the speaker did
+    not say in that order, spoken separators ("dot", "at", "slash") aside. A cleaner may write
+    "example dot com" as example.com, but a link it adds can carry the dictation to a server that a
+    messenger's link preview contacts while the message is still being written."""
+    words = _letters_and_digits(raw)
+    heard = ("".join(words), "".join(w for w in words if w not in _LINK_SPOKEN_SEPARATORS))
+    for word in cleaned.split():
+        if _LINK.search(word) and not any("".join(_letters_and_digits(word)) in h for h in heard):
+            return word
+    return None
+
+
+def untrusted_clean(raw: str, cleaned: str) -> str | None:
+    """Why the cleaner's output for raw must not be inserted, or None. The cleaner is a model from
+    the internet, so what it writes is checked against what was said: no hidden characters, no
+    chat-template tokens, no link the speaker did not dictate, and no name or number swapped for a
+    near one ("drift"). Each falls back to the chunk as heard."""
+    if strip_hidden(cleaned) != cleaned:
+        return "hidden"
+    if _SPECIAL_TOKEN_TEXT.search(cleaned):
+        return "special"
+    if unheard_link(raw, cleaned):
+        return "link"
+    if fact_drift(raw, cleaned):
+        return "drift"
+    return None
+
+
 def casual(text: str, cfg: dict) -> str:
     """Short takes are messages, where the commas and the final period are noise: drop them
     (commas inside numbers stay), and leave everything else as it was."""
@@ -272,10 +339,13 @@ class Cleaner:
         """The cleaned text of one chunk and the tokens generated, or None when cancelled() turned
         true while generating."""
         chunk = spoken_punctuation(chunk)
-        prompt = render_prompt(self.spec["system_prompt"], user_turn(self.spec["control_line"], chunk))
+        if self.backend == "ollama" and _SPECIAL_TOKEN_TEXT.search(chunk):
+            # Ollama parses special tokens anywhere in a raw prompt, so such a chunk is not sent.
+            return chunk.strip(), 0
+        parts = prompt_parts(self.spec["system_prompt"], self.spec["control_line"], chunk)
         limit = max_new_tokens(self.count_tokens(chunk), self.spec["max_new_tokens_ratio"],
                                self.spec["max_new_tokens_pad"])
-        generated = self._generate(prompt, limit, cancelled)
+        generated = self._generate(parts, limit, cancelled)
         return None if generated is None else (generated[0].strip(), generated[1])
 
     def clean(self, raw: str, skip: bool = True, min_tokens: int | None = None) -> Cleaned:
@@ -297,13 +367,13 @@ class Cleaner:
         return Cleaned(casual(text, self.cfg) if skip else text, int((time.monotonic() - started) * 1000),
                        len(chunks), in_tokens, out_tokens)
 
-    def _generate(self, prompt: str, max_tokens: int,
+    def _generate(self, parts: tuple[str, str, str], max_tokens: int,
                   cancelled: Callable[[], bool] | None = None) -> tuple[str, int] | None:
         # Both backends decode greedily with repeat_penalty 1.0: the bindings default to 1.1, and
         # the model cards specify plain greedy decoding. Only a cancellable call streams.
         if self.backend == "ollama":
             body = {
-                "model": self.ollama_model, "prompt": prompt, "raw": True, "stream": False,
+                "model": self.ollama_model, "prompt": "".join(parts), "raw": True, "stream": False,
                 "keep_alive": OLLAMA_KEEP_ALIVE,
                 "options": {"temperature": 0, "repeat_penalty": 1.0, "num_predict": max_tokens,
                             "num_ctx": 4096, "stop": [END_OF_TURN]},
@@ -312,7 +382,10 @@ class Cleaner:
                 return _ollama_stream(body, cancelled)
             reply = _ollama(body)
             return reply["response"], reply.get("eval_count", 0)
-        tokens = self._llm.tokenize(prompt.encode(), add_bos=False, special=True)
+        head, chunk, tail = parts
+        tokens = (self._llm.tokenize(head.encode(), add_bos=False, special=True)
+                  + self._llm.tokenize(chunk.encode(), add_bos=False, special=False)
+                  + self._llm.tokenize(tail.encode(), add_bos=False, special=True))
         if cancelled is None:
             result = self._llm.create_completion(tokens, max_tokens=max_tokens, temperature=0.0,
                                                  repeat_penalty=1.0, stop=[END_OF_TURN])

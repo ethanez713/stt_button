@@ -10,9 +10,12 @@ class LlamaCleaner(modelPath: String, threads: Int = THREADS) : AutoCloseable {
 
     fun countTokens(text: String): Int = LlamaNative.countTokens(handle, text.toByteArray())
 
-    /** Null when cancelled. */
-    fun clean(prompt: String, maxTokens: Int): String? =
-        LlamaNative.clean(handle, prompt.toByteArray(), maxTokens)?.toString(Charsets.UTF_8)
+    /**
+     * Null when cancelled. Special tokens are read in [head] and [tail] only, so [text], the transcript, cannot
+     * spell its way out of the user turn.
+     */
+    fun clean(head: String, text: String, tail: String, maxTokens: Int): String? =
+        LlamaNative.clean(handle, head.toByteArray(), text.toByteArray(), tail.toByteArray(), maxTokens)?.toString(Charsets.UTF_8)
 
     fun cancel() = LlamaNative.cancel(handle)
 

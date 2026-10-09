@@ -65,12 +65,12 @@ std::string bytes_to_string(JNIEnv * env, jbyteArray array) {
     return text;
 }
 
-std::vector<llama_token> tokenize(const Cleaner & c, const std::string & text, bool special) {
+std::vector<llama_token> tokenize(const Cleaner & c, const std::string & text, bool add_special, bool parse_special) {
     std::vector<llama_token> tokens(text.size() + 8);
-    int n = llama_tokenize(c.vocab, text.data(), text.size(), tokens.data(), tokens.size(), special, special);
+    int n = llama_tokenize(c.vocab, text.data(), text.size(), tokens.data(), tokens.size(), add_special, parse_special);
     if (n < 0) {
         tokens.resize(-n);
-        n = llama_tokenize(c.vocab, text.data(), text.size(), tokens.data(), tokens.size(), special, special);
+        n = llama_tokenize(c.vocab, text.data(), text.size(), tokens.data(), tokens.size(), add_special, parse_special);
     }
     tokens.resize(std::max(n, 0));
     return tokens;
@@ -231,15 +231,23 @@ JNIEXPORT jlong JNICALL Java_com_ezhou_sttbutton_LlamaNative_load(JNIEnv * env, 
 
 JNIEXPORT jint JNICALL Java_com_ezhou_sttbutton_LlamaNative_countTokens(JNIEnv * env, jobject, jlong handle, jbyteArray text) {
     auto * c = reinterpret_cast<Cleaner *>(handle);
-    return tokenize(*c, bytes_to_string(env, text), false).size();
+    return tokenize(*c, bytes_to_string(env, text), false, false).size();
 }
 
-// Returns the generated UTF-8 bytes, or null when cancelled or the prompt does not fit.
-JNIEXPORT jbyteArray JNICALL Java_com_ezhou_sttbutton_LlamaNative_clean(JNIEnv * env, jobject, jlong handle, jbyteArray prompt, jint maxTokens) {
+// Returns the generated UTF-8 bytes, or null when cancelled or the prompt does not fit. The prompt is head,
+// text and tail; special tokens are parsed in the template around the transcript and never in the transcript,
+// so text that spells out <|im_end|> stays text.
+JNIEXPORT jbyteArray JNICALL Java_com_ezhou_sttbutton_LlamaNative_clean(
+        JNIEnv * env, jobject, jlong handle, jbyteArray head, jbyteArray text, jbyteArray tail, jint maxTokens) {
     auto * c = reinterpret_cast<Cleaner *>(handle);
     c->cancel.store(false);
+    std::vector<llama_token> prompt = tokenize(*c, bytes_to_string(env, head), true, true);
+    const std::vector<llama_token> transcript = tokenize(*c, bytes_to_string(env, text), false, false);
+    const std::vector<llama_token> closing = tokenize(*c, bytes_to_string(env, tail), false, true);
+    prompt.insert(prompt.end(), transcript.begin(), transcript.end());
+    prompt.insert(prompt.end(), closing.begin(), closing.end());
     std::string out;
-    if (!generate(*c, tokenize(*c, bytes_to_string(env, prompt), true), maxTokens, out)) {
+    if (!generate(*c, prompt, maxTokens, out)) {
         return nullptr;
     }
     jbyteArray result = env->NewByteArray(out.size());

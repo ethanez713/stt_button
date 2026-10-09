@@ -128,7 +128,7 @@ class TakeEngineTest {
     @Test
     fun given_every_take_script_when_run_then_the_engine_inserts_what_the_host_library_does() {
         val scripts = Fixtures.objects(Fixtures.vectors.getJSONArray("takes"))
-        assertEquals(9, scripts.size)
+        assertEquals(10, scripts.size)
         for (script in scripts) {
             val expected = script.getJSONObject("result")
             val result = runScript(script)
@@ -167,6 +167,31 @@ class TakeEngineTest {
         assertEquals("Put it on the S20 Ultra please now", result.cleaned)
         assertEquals(1, result.drifts)
         assertEquals("fallback", rig.records.last { it.kind == "clean" }.outcome)
+    }
+
+    @Test
+    fun given_a_clean_that_adds_a_link_when_finished_then_the_chunk_is_inserted_as_heard_and_the_reason_logged() {
+        val cleaner = MarkingCleaner(listOf("NOW" to "NOW SEE X.IO"))
+        val rig = Rig(cfg, ScriptedRecognizer("Put it on the shelf please now"), cleaner)
+        rig.feed(tone(3))
+        val result = rig.finish()
+
+        assertEquals("Put it on the shelf please now", result.cleaned)
+        assertEquals(0, result.drifts)
+        assertEquals(1, result.rejects)
+        val record = rig.records.last { it.kind == "clean" }
+        assertEquals("fallback", record.outcome)
+        assertEquals("link", record.reason)
+    }
+
+    @Test
+    fun given_a_recognizer_that_emits_hidden_characters_when_finished_then_none_reach_the_text() {
+        val rig = Rig(cfg, ScriptedRecognizer("Okay\u200B sounds\uDB40\uDC49 good"))
+        rig.feed(tone(3))
+        val result = rig.finish()
+
+        assertEquals("Okay sounds good", result.raw)
+        assertEquals("Okay sounds good", result.cleaned)
     }
 
     @Test

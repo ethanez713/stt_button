@@ -104,6 +104,22 @@ class FieldPolicyTest {
     @Test
     fun given_finishedInput_when_checked_then_noField() =
         assertFalse(FieldPolicy.editorIsField(false, InputType.TYPE_CLASS_TEXT, "com.android.chrome", "com.android.chrome"))
+
+    @Test
+    fun given_multiLineNode_when_asked_then_lineBreaksAreText() =
+        assertTrue(FieldPolicy.multiLine(nodeMultiLine = true, inputType = 0))
+
+    @Test
+    fun given_multiLineInputType_when_asked_then_lineBreaksAreText() {
+        assertTrue(FieldPolicy.multiLine(false, InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE))
+        assertTrue(FieldPolicy.multiLine(false, InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_IME_MULTI_LINE))
+    }
+
+    @Test
+    fun given_singleLineOrUnknownField_when_asked_then_lineBreaksAreNotText() {
+        assertFalse(FieldPolicy.multiLine(false, InputType.TYPE_CLASS_TEXT))
+        assertFalse(FieldPolicy.multiLine(false, InputType.TYPE_NULL))
+    }
 }
 
 class MicLocatorTest {
