@@ -97,6 +97,13 @@ class PipelineVectorsTest {
     }
 
     @Test
+    fun given_sign_off_vectors_when_applied_then_text_matches_the_host() {
+        for (case in Fixtures.objects(Fixtures.vectors.getJSONArray("sign_off"))) {
+            assertEquals(case.getString("text"), case.getString("without"), Pipeline.withoutSignOff(case.getString("text")))
+        }
+    }
+
+    @Test
     fun given_casual_vectors_when_applied_then_text_matches_the_host() {
         for (case in Fixtures.objects(Fixtures.vectors.getJSONArray("casual"))) {
             assertEquals(case.getString("text"), case.getString("casual"), Pipeline.casual(case.getString("text"), Fixtures.config))

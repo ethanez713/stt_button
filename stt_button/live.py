@@ -10,7 +10,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from stt_button.asr import SAMPLE_RATE, TRAILING_MARK, Slicer, context_audio, join_slices, settled_mark
-from stt_button.cleaner import casual, fact_drift, join_cleaned, live_chunks, unresolved_corrections, matched_cue, skips_cleaner
+from stt_button.cleaner import casual, fact_drift, join_cleaned, live_chunks, unresolved_corrections, matched_cue, skips_cleaner, without_sign_off
 from stt_button.spoken import keep_spoken_ending, spoken_punctuation
 
 
@@ -126,12 +126,12 @@ class LiveTake:
         self._pending = []
         raw = self.raw
         if skips_cleaner(raw, self.cfg):
-            return LiveResult(raw, casual(spoken_punctuation(raw), self.cfg), 0, "raw", self.asr_ms - self._stop_asr_ms, 0,
+            return LiveResult(raw, casual(without_sign_off(spoken_punctuation(raw)), self.cfg), 0, "raw", self.asr_ms - self._stop_asr_ms, 0,
                               context_decodes=self.context_decodes, context_fallbacks=self.context_fallbacks)
         chunks = self._clean_closed(final=True)
         outputs = [self.cleaned_chunks[c] for c in chunks]
         cleaned = join_cleaned(chunks, outputs, self.cfg["self_correction_cues"])
-        return LiveResult(raw, casual(cleaned, self.cfg), len(chunks), "chunks", self.asr_ms - self._stop_asr_ms,
+        return LiveResult(raw, casual(without_sign_off(cleaned), self.cfg), len(chunks), "chunks", self.asr_ms - self._stop_asr_ms,
                           self.clean_ms - self._stop_clean_ms, self.idle_cleans,
                           sum(c in self.idle_chunks for c in chunks), matched_cue(raw, self.cfg["self_correction_cues"]),
                           self.context_decodes, self.context_fallbacks, self.drifts,

@@ -37,6 +37,10 @@ object Pipeline {
     private val COMMA_OUTSIDE_NUMBER = Regex("(?<![0-9]),|,(?![0-9])")
     private val FINAL_PERIOD = Regex("(?<!\\.)\\.(\\s*)$")
     private val NOT_SPOKEN = Regex("[^\\p{L}\\p{N}_\\s]")
+    private val TRAILING_FILLERS = setOf("um", "umm", "uh", "hmm")
+    private val SIGN_OFFS = setOf("okay", "ok", "yeah", "yep", "alright")
+    private val NOT_WORD_EDGE = Regex("^[^\\p{L}\\p{N}_']+|[^\\p{L}\\p{N}_']+$")
+    private val NON_SPACE = Regex("(?U)\\S+")
     private val TRAILING_MARK = Regex("[.,?!;:]$")
     private const val CONTEXT_LEAD_S = 0.1
     val SENTENCE_ENDS = listOf(".", "?", "!")
@@ -68,6 +72,31 @@ object Pipeline {
 
     fun skipsCleaner(text: String, cfg: PipelineConfig): Boolean =
         wordCount(text) <= cfg.skipMaxWords && matchedCue(text, cfg.selfCorrectionCues) == null
+
+    /** Mirrors `stt_button.cleaner.without_sign_off`. */
+    fun withoutSignOff(text: String): String {
+        var current = text
+        while (true) current = withoutOneSignOff(current) ?: return current
+    }
+
+    private fun withoutOneSignOff(text: String): String? {
+        val spans = NON_SPACE.findAll(text).map { it.range }.toList()
+        val words = spans.map { text.substring(it.first, it.last + 1) }
+        val cores = words.map { NOT_WORD_EDGE.replace(it, "").lowercase() }
+        if (words.size < 2) return null
+        if (cores.last() in TRAILING_FILLERS) {
+            val kept = text.substring(0, spans[spans.size - 2].last + 1).trimEnd(',', ';', ':')
+            val ending = words.last().last().let { if (it in ".?!") it.toString() else "" }
+            return if (kept.lastOrNull()?.let { it in ".?!" } == true) kept else kept + ending
+        }
+        for (size in 2 downTo 1) {
+            if (words.size > size && cores.takeLast(size).all { it in SIGN_OFFS } &&
+                words[words.size - size - 1].last() in ".?!" && words.last().last() !in "?!") {
+                return text.substring(0, spans[spans.size - size - 1].last + 1)
+            }
+        }
+        return null
+    }
 
     /** Mirrors `stt_button.cleaner.casual`. */
     fun casual(text: String, cfg: PipelineConfig): String =

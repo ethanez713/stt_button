@@ -134,7 +134,7 @@ class TakeEngineTest {
             val result = runScript(script)
             val name = script.getString("name")
             assertEquals("$name raw", expected.getString("raw"), result.raw)
-            assertEquals("$name cleaned", expected.getString("cleaned"), Pipeline.casual(result.cleaned, scriptConfig(script.getJSONObject("cfg"))))
+            assertEquals("$name cleaned", expected.getString("cleaned"), Pipeline.casual(Pipeline.withoutSignOff(result.cleaned), scriptConfig(script.getJSONObject("cfg"))))
             assertEquals("$name clean_mode", expected.getString("clean_mode"), result.cleanMode)
             assertEquals("$name chunks", expected.getInt("chunks"), result.chunks)
         }

@@ -160,6 +160,24 @@ def test_casual_rule(text, expected):
     assert cleaner.casual(text, CFG) == expected
 
 
+@pytest.mark.parametrize("text, expected", [
+    ("I need to decide. Okay.", "I need to decide."),
+    ("Even more so than they already were. Yeah.", "Even more so than they already were."),
+    ("easy enough for us to hop to Um", "easy enough for us to hop to"),
+    ("Right. Okay, yeah.", "Right."),
+    ("so, um.", "so."),
+    ("fine. Ok. Um", "fine."),
+    ("ends.\n\nOkay.", "ends."),
+    ("Is that okay?", "Is that okay?"),
+    ("Do it? Okay?", "Do it? Okay?"),
+    ("it thinks I'll Yeah.", "it thinks I'll Yeah."),
+    ("Okay.", "Okay."),
+    ("Um", "Um"),
+])
+def test_given_a_take_that_trails_off_when_signed_off_then_only_the_trailing_okay_or_um_goes(text, expected):
+    assert cleaner.without_sign_off(text) == expected
+
+
 CUES = ["actually", "i mean", "no", "not"]
 
 

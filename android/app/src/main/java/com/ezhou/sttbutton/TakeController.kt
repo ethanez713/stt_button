@@ -294,7 +294,8 @@ class TakeController(
         val field = targetField(run)
         val otherPackage = field != null && take.pkg != UNKNOWN_PACKAGE && field.packageName?.toString() != take.pkg
         val fieldText = if (field != null && !otherPackage) inserter.textOf(field) else null
-        val body = if (fieldText != null && fieldText.isEmpty()) Pipeline.casual(result.cleaned, cfg) else result.cleaned
+        val signedOff = Pipeline.withoutSignOff(result.cleaned)
+        val body = if (fieldText != null && fieldText.isEmpty()) Pipeline.casual(signedOff, cfg) else signedOff
         run.placement = Placement(field, fieldText, body)
         dispatch(current, TakeEvent.EngineFinished(when {
             body.isBlank() -> Delivery.BLANK

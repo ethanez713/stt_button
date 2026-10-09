@@ -15,7 +15,7 @@ from stt_button import asr, config
 from stt_button.asr import context_audio, settled_mark, split_at_junction
 from stt_button.bubble import Bubble
 from stt_button.live import LiveTake
-from stt_button.cleaner import casual, fact_drift, join_cleaned, live_chunks, opens_with_cue, matched_cue, skips_cleaner
+from stt_button.cleaner import casual, fact_drift, join_cleaned, live_chunks, opens_with_cue, matched_cue, skips_cleaner, without_sign_off
 from stt_button.spoken import keep_spoken_ending, spoken_punctuation
 
 FIXTURE = Path(__file__).parent / "fixtures" / "pipeline_vectors.json"
@@ -106,6 +106,13 @@ SKIP_TEXTS = ["", "Yes.", "meet Tuesday, actually no, Wednesday", "Dinner is at 
 
 CASUAL_TEXTS = ["Okay, I'm down.", "I'm down, I think I'm free tomorrow", "Is it the full release?", "It cost 1,000 dollars, I think.",
                 "Wait...", "Okay. Wait, what?", "Hi, there!", "ok.  ", "a, " * 41, "", "Version 2.5."]
+
+
+SIGN_OFF_TEXTS = [
+    "I need to know what last year's gifts were before I can decide. Okay.", "Even more so than they already were. Yeah.",
+    "easy enough for us to hop to Um", "Is that okay?", "Okay.", "Okay", "it thinks I'll Yeah.", "Right. Okay, yeah.",
+    "so, um.", "fine. Ok. Um", "Do it? Okay?", "it works. Yep!", "ends.\n\nOkay.", "Um", "",
+]
 
 
 SPOKEN_TEXTS = [
@@ -356,6 +363,7 @@ def vectors() -> dict:
         "opens_with_cue": [{"sentence": s, "opens": opens_with_cue(s, cfg["self_correction_cues"])} for s in OPENERS],
         "join_cleaned": [{"chunks": c, "outputs": o, "cues": cfg["self_correction_cues"],
                           "joined": join_cleaned(c, o, cfg["self_correction_cues"])} for c, o in JOIN_CLEANED_CASES],
+        "sign_off": [{"text": t, "without": without_sign_off(t)} for t in SIGN_OFF_TEXTS],
         "casual": [{"text": t, "casual": casual(t, cfg)} for t in CASUAL_TEXTS],
         "junction": [{**c, "split": list(split_at_junction(c["tokens"], c["times"], c["junction_s"]))} for c in JUNCTION_CASES],
         "context_audio": [context_audio_vector(c) for c in CONTEXT_AUDIO_CASES],

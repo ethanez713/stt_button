@@ -190,6 +190,36 @@ def fact_drift(raw: str, cleaned: str) -> list[tuple[str, str]]:
             if len(m) > 1 and len(n) > 1 and _edits(m, n) <= (_DRIFT_MAX_EDITS if min(len(m), len(n)) > 3 else 1)]
 
 
+_TRAILING_FILLERS = {"um", "umm", "uh", "hmm"}
+_SIGN_OFFS = {"okay", "ok", "yeah", "yep", "alright"}
+_NOT_WORD_EDGE = re.compile(r"^[^\w']+|[^\w']+$")
+
+
+def _without_one_sign_off(text: str) -> str | None:
+    spans = [match.span() for match in re.finditer(r"\S+", text)]
+    words = [text[start:end] for start, end in spans]
+    cores = [_NOT_WORD_EDGE.sub("", word).lower() for word in words]
+    if len(words) < 2:
+        return None
+    if cores[-1] in _TRAILING_FILLERS:
+        kept = text[:spans[-2][1]].rstrip(",;:")
+        ending = words[-1][-1] if words[-1][-1] in ".?!" else ""
+        return kept if kept[-1:] in (".", "?", "!") else kept + ending
+    for size in (2, 1):
+        if (len(words) > size and all(core in _SIGN_OFFS for core in cores[-size:])
+                and words[-size - 1][-1] in ".?!" and words[-1][-1] not in "?!"):
+            return text[:spans[-size - 1][1]]
+    return None
+
+
+def without_sign_off(text: str) -> str:
+    """The text without the "Okay." or "Um" the speaker trailed off with before stopping the take. A
+    sign-off is a last sentence of only those words, and a lone one is the whole take."""
+    while (shorter := _without_one_sign_off(text)) is not None:
+        text = shorter
+    return text
+
+
 def casual(text: str, cfg: dict) -> str:
     """Short takes are messages, where the commas and the final period are noise: drop them
     (commas inside numbers stay), and leave everything else as it was."""
@@ -283,7 +313,7 @@ class Cleaner:
         replaces the configured chunk size, which experiments use to compare against a whole pass."""
         started = time.monotonic()
         if skip and skips_cleaner(raw, self.cfg):
-            return Cleaned(casual(spoken_punctuation(raw), self.cfg), int((time.monotonic() - started) * 1000), 0, 0, 0)
+            return Cleaned(casual(without_sign_off(spoken_punctuation(raw)), self.cfg), int((time.monotonic() - started) * 1000), 0, 0, 0)
         outputs = []
         in_tokens = out_tokens = 0
         chunks = live_chunks(raw, self.count_tokens, min_tokens or self.cfg["chunk_min_tokens"],
@@ -294,6 +324,7 @@ class Cleaner:
             in_tokens += self.count_tokens(chunk)
             out_tokens += n_out
         text = join_cleaned(chunks, outputs, self.cfg["self_correction_cues"])
+        text = without_sign_off(text)
         return Cleaned(casual(text, self.cfg) if skip else text, int((time.monotonic() - started) * 1000),
                        len(chunks), in_tokens, out_tokens)
 
