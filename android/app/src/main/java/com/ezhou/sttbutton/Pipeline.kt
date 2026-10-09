@@ -50,8 +50,22 @@ object Pipeline {
     fun renderPrompt(systemPrompt: String, userTurn: String): String =
         "<|im_start|>system\n$systemPrompt$END_OF_TURN\n<|im_start|>user\n$userTurn$END_OF_TURN\n$ASSISTANT_NO_THINK"
 
-    fun promptFor(cfg: PipelineConfig, chunk: String): String =
-        renderPrompt(cfg.systemPrompt, cfg.controlLine?.let { "$it\n$chunk" } ?: chunk)
+    fun promptFor(cfg: PipelineConfig, chunk: String): String = promptParts(cfg, chunk).let { (head, text, tail) -> head + text + tail }
+
+    /**
+     * Mirrors `stt_button.cleaner.prompt_parts`: [promptFor] split around the transcript, so the template is
+     * tokenized with its special tokens and the transcript as plain text, which cannot close the user turn.
+     * Line breaks that open the chunk go with the template, so the parts tokenize as the whole prompt does.
+     */
+    fun promptParts(cfg: PipelineConfig, chunk: String): Triple<String, String, String> {
+        val text = chunk.trimStart('\n')
+        return Triple(
+            "<|im_start|>system\n${cfg.systemPrompt}$END_OF_TURN\n<|im_start|>user\n${cfg.controlLine?.let { "$it\n" } ?: ""}" +
+                chunk.substring(0, chunk.length - text.length),
+            text,
+            "$END_OF_TURN\n$ASSISTANT_NO_THINK",
+        )
+    }
 
     fun maxNewTokens(cfg: PipelineConfig, inputTokens: Int): Int =
         (cfg.maxNewTokensRatio * inputTokens + cfg.maxNewTokensPad).toInt()
@@ -151,6 +165,58 @@ object Pipeline {
             }.map { n -> m to n }
         }
     }
+
+    private val HIDDEN_TYPES = setOf(
+        Character.FORMAT, Character.CONTROL, Character.LINE_SEPARATOR, Character.PARAGRAPH_SEPARATOR, Character.PRIVATE_USE,
+    ).map { it.toInt() }.toSet()
+    private val VARIATION_SELECTORS = listOf(0xFE00..0xFE0F, 0xE0100..0xE01EF)
+    private val SPECIAL_TOKEN_TEXT = Regex("<\\||\\|>|</?think>")
+    private val LINK = Regex("://|@|www\\.|[\\p{L}\\p{N}_]\\.\\p{L}{2,}")
+    private val LETTERS_AND_DIGITS = Regex("[\\p{L}\\p{N}]+")
+    private val LINK_SPOKEN_SEPARATORS = setOf("dot", "at", "slash", "colon", "dash", "hyphen", "underscore", "period", "point")
+    private val LINE_BREAKS = Regex("[ \\t]*\\n\\s*")
+
+    private fun hidden(codePoint: Int): Boolean =
+        codePoint != '\n'.code && codePoint != '\t'.code &&
+            (Character.getType(codePoint) in HIDDEN_TYPES || VARIATION_SELECTORS.any { codePoint in it })
+
+    /** Mirrors `stt_button.cleaner.strip_hidden`: the text without characters a reader cannot see. */
+    fun stripHidden(text: String): String {
+        val out = StringBuilder(text.length)
+        var at = 0
+        while (at < text.length) {
+            val codePoint = text.codePointAt(at)
+            if (!hidden(codePoint)) out.appendCodePoint(codePoint)
+            at += Character.charCount(codePoint)
+        }
+        return out.toString()
+    }
+
+    private fun lettersAndDigits(text: String): List<String> = LETTERS_AND_DIGITS.findAll(text.lowercase()).map { it.value }.toList()
+
+    /** Mirrors `stt_button.cleaner.unheard_link`. */
+    fun unheardLink(raw: String, cleaned: String): String? {
+        val words = lettersAndDigits(raw)
+        val heard = listOf(words.joinToString(""), words.filterNot { it in LINK_SPOKEN_SEPARATORS }.joinToString(""))
+        return cleaned.trim().split(WHITESPACE).filter { it.isNotEmpty() }.firstOrNull { word ->
+            LINK.containsMatchIn(word) && heard.none { lettersAndDigits(word).joinToString("") in it }
+        }
+    }
+
+    /** Mirrors `stt_button.cleaner.untrusted_clean`: why the cleaner's output must not be inserted, or null. */
+    fun untrustedClean(raw: String, cleaned: String): String? = when {
+        stripHidden(cleaned) != cleaned -> "hidden"
+        SPECIAL_TOKEN_TEXT.containsMatchIn(cleaned) -> "special"
+        unheardLink(raw, cleaned) != null -> "link"
+        factDrift(raw, cleaned).isNotEmpty() -> "drift"
+        else -> null
+    }
+
+    /**
+     * The text as a field takes it: a field that is not multi-line gets its line breaks as spaces, since an
+     * app may read a committed line break as Enter, and Enter as send or run.
+     */
+    fun forField(text: String, multiLine: Boolean): String = if (multiLine) text else LINE_BREAKS.replace(text, " ")
 
     fun trailingMark(text: String): String = TRAILING_MARK.find(text)?.value ?: ""
 

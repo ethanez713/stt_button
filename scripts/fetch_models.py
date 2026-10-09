@@ -2,6 +2,11 @@
 
 Rerunning re-verifies what is already present and downloads only what is missing.
 A null sha256 is filled in from the first download and must then be committed.
+An archive's "extracted" hashes are checked on the files it unpacks to, every run.
+
+    fetch_models.py --expected unified/encoder.int8.onnx
+
+prints the pinned sha256 of one model file, which push_models.sh checks the phone's copy against.
 """
 
 import hashlib
@@ -39,7 +44,18 @@ def fetch(url: str, dest: Path, expected: str | None) -> str:
     return actual
 
 
+def expected(rel: str) -> str:
+    """The pinned sha256 of a file under $STT_MODEL_DIR, as "<model>/<file>"."""
+    name, _, filename = rel.partition("/")
+    spec = json.loads(MODELS_JSON.read_text()).get(name, {})
+    pinned = spec.get("extracted", {}).get(filename) or spec.get("files", {}).get(filename, {}).get("sha256")
+    return pinned or sys.exit(f"no pinned sha256 for {rel} in {MODELS_JSON}")
+
+
 def main() -> int:
+    if sys.argv[1:2] == ["--expected"]:
+        print(expected(sys.argv[2]))
+        return 0
     root = Path(os.environ.get("STT_MODEL_DIR") or sys.exit("set STT_MODEL_DIR"))
     manifest = json.loads(MODELS_JSON.read_text())
     filled = False
@@ -56,6 +72,11 @@ def main() -> int:
                     tar.extractall(staging, filter="data")
                 (staging / top).rename(root / name)
                 staging.rmdir()
+            for filename, pinned in spec.get("extracted", {}).items():
+                actual = sha256(root / name / filename)
+                if actual != pinned:
+                    sys.exit(f"sha256 mismatch for {root / name / filename}: expected {pinned}, got {actual}")
+                print(f"ok {name}/{filename}", flush=True)
         for filename, f in spec.get("files", {}).items():
             actual = fetch(f["url"], root / name / filename, f["sha256"])
             if f["sha256"] is None:

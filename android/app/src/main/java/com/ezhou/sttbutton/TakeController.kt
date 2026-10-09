@@ -295,7 +295,8 @@ class TakeController(
         val otherPackage = field != null && take.pkg != UNKNOWN_PACKAGE && field.packageName?.toString() != take.pkg
         val fieldText = if (field != null && !otherPackage) inserter.textOf(field) else null
         val signedOff = Pipeline.withoutSignOff(result.cleaned)
-        val body = if (fieldText != null && fieldText.isEmpty()) Pipeline.casual(signedOff, cfg) else signedOff
+        val cleaned = if (fieldText != null && fieldText.isEmpty()) Pipeline.casual(signedOff, cfg) else signedOff
+        val body = if (field == null) cleaned else Pipeline.forField(cleaned, FieldPolicy.multiLine(field.isMultiLine, field.inputType))
         run.placement = Placement(field, fieldText, body)
         dispatch(current, TakeEvent.EngineFinished(when {
             body.isBlank() -> Delivery.BLANK
@@ -331,7 +332,7 @@ class TakeController(
             "in_tokens" to result.inTokens, "out_tokens" to result.outTokens,
             "clean_mode" to result.cleanMode, "clean_policy" to run.engine.policyName, "chunks" to result.chunks,
             "idle_cleans" to result.idleCleans, "idle_hits" to result.idleHits, "cue" to result.cue,
-            "context_decodes" to result.contextDecodes, "context_fallbacks" to result.contextFallbacks, "drifts" to result.drifts,
+            "context_decodes" to result.contextDecodes, "context_fallbacks" to result.contextFallbacks, "drifts" to result.drifts, "rejects" to result.rejects,
             "corrections" to result.corrections, "corrections_kept" to result.correctionsKept,
             "trigger" to trigger, *swapFields(current), "a11y_conn" to service.a11yConnection(),
             "asr_ms_after_stop" to result.asrMsAfterStop, "clean_ms_after_stop" to result.cleanMsAfterStop,
@@ -374,7 +375,8 @@ class TakeController(
         log.write("job", takeId, "kind" to record.kind, "moment" to record.moment, "ms" to record.ms,
             "in" to record.input, "out" to record.output, "outcome" to record.outcome,
             "in_tokens" to record.inTokens, "out_tokens" to record.outTokens,
-            "from_ms" to record.fromMs, "to_ms" to record.toMs, "context" to record.context, "scope" to record.scope)
+            "from_ms" to record.fromMs, "to_ms" to record.toMs, "context" to record.context, "scope" to record.scope,
+            "reason" to record.reason)
     }
 
     private fun swapFields(current: TakeSession): Array<Pair<String, Any?>> =

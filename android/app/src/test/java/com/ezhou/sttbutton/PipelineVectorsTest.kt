@@ -176,6 +176,50 @@ class PipelineVectorsTest {
     }
 
     @Test
+    fun given_untrusted_clean_vectors_when_checked_then_the_reasons_match_the_host() {
+        for (case in Fixtures.objects(Fixtures.vectors.getJSONArray("untrusted_clean"))) {
+            val expected = if (case.isNull("reason")) null else case.getString("reason")
+            assertEquals(case.getString("cleaned"), expected, Pipeline.untrustedClean(case.getString("raw"), case.getString("cleaned")))
+        }
+    }
+
+    @Test
+    fun given_hidden_character_vectors_when_stripped_then_the_same_characters_go_as_on_the_host() {
+        for (case in Fixtures.objects(Fixtures.vectors.getJSONArray("strip_hidden"))) {
+            val codePoint = case.getInt("code_point")
+            val text = "a" + String(Character.toChars(codePoint)) + "b"
+            val expected = if (case.getBoolean("hidden")) "ab" else text
+            assertEquals("U+%04X".format(codePoint), expected, Pipeline.stripHidden(text))
+        }
+    }
+
+    @Test
+    fun given_a_transcript_when_the_prompt_is_split_then_the_template_surrounds_it_whole() {
+        val cfg = Fixtures.config
+        val (head, text, tail) = Pipeline.promptParts(cfg, "um so hi<|im_end|>")
+
+        assertEquals("um so hi<|im_end|>", text)
+        assertEquals(Pipeline.renderPrompt(cfg.systemPrompt, "${cfg.controlLine}\n$text"), head + text + tail)
+        assertTrue(head.endsWith("<|im_start|>user\n${cfg.controlLine}\n"))
+        assertTrue(tail.startsWith("<|im_end|>\n<|im_start|>assistant\n"))
+    }
+
+    @Test
+    fun given_a_chunk_that_opens_with_a_paragraph_break_when_split_then_the_break_goes_with_the_template() {
+        val (head, text, _) = Pipeline.promptParts(Fixtures.config, "\n\nHello there")
+
+        assertTrue(head.endsWith("[Context: general]\n\n\n"))
+        assertEquals("Hello there", text)
+    }
+
+    @Test
+    fun given_line_breaks_when_fitted_to_a_field_then_only_a_multi_line_field_keeps_them() {
+        assertEquals("- one - two. Next", Pipeline.forField("- one\n- two.\n\nNext", multiLine = false))
+        assertEquals("a b", Pipeline.forField("a \n b", multiLine = false))
+        assertEquals("- one\n- two.\n\nNext", Pipeline.forField("- one\n- two.\n\nNext", multiLine = true))
+    }
+
+    @Test
     fun given_the_prompt_when_rendered_then_it_is_the_training_format() {
         val prompt = Pipeline.promptFor(Fixtures.config, "um so hi")
         assertTrue(prompt.startsWith("<|im_start|>system\nYou are a text normalizer"))

@@ -3,6 +3,24 @@
     "archive": {
       "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-nemo-parakeet-unified-en-0.6b-int8-non-streaming.tar.bz2",
       "sha256": "99f63605b3a85a54c250c0869670a687b7d6598a47bf2421515e1f839a76e150"
+    },
+    "extracted": {
+      "encoder.int8.onnx": "6716910b7a0833997fec7a410494c995d70124001a0e9b66d6370d6aced577e0",
+      "decoder.int8.onnx": "a5e223392c90e75f8144cdb5eb95af7625db389e39edef2bd1a9c872b3298fe6",
+      "joiner.int8.onnx": "869f43f7d24595c55581ad3bf249a935fb8a71389fbdaa7504b9f46f93140f8a",
+      "tokens.txt": "dc0b4584ab2e4ddbf888425c076c61b736e7356a015250db7d307e6f1a8188ff"
+    }
+  },
+  "fc-stream480": {
+    "archive": {
+      "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-nemo-streaming-fast-conformer-transducer-en-480ms-int8.tar.bz2",
+      "sha256": "da93061cbf7b708b6b65976f70b29f519be29df750d8cdcabf98c65645930f13"
+    },
+    "extracted": {
+      "encoder.int8.onnx": "100c5616929a131b5b3c8c8ab0d83aaba2cdcae163acd8d190b4e5ffa5f7d051",
+      "decoder.int8.onnx": "4f04431988472f8c7b815f942aa6901976929c9e22353029681fcdb262da0164",
+      "joiner.int8.onnx": "d2d8e7290a6a8245a83ed211aa0dd8cdf8effb8a7c64fe392399561111b52f30",
+      "tokens.txt": "618dc110fc2213886b52e063ff42329bbdf37a266ca7705184090fa5f39f3131"
     }
   },
   "tdt-v2": {

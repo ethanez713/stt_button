@@ -93,13 +93,14 @@ def test_given_a_short_take_with_a_command_when_finished_then_the_raw_path_inser
 def test_given_a_chunk_with_a_command_when_cleaned_then_the_model_sees_the_symbol():
     cleaner = Cleaner.__new__(Cleaner)
     cleaner.spec = config.load()["cleaners"]["s1-mini"]
+    cleaner.backend = "llama"
     cleaner.count_tokens = lambda text: len(text.split())
     prompts = []
-    cleaner._generate = lambda prompt, limit, cancelled: (prompts.append(prompt), ("ok", 1))[1]
+    cleaner._generate = lambda parts, limit, cancelled: (prompts.append(parts), ("ok", 1))[1]
 
     cleaner.clean_chunk("He said quote hi unquote and left")
 
-    assert 'He said "hi" and left' in prompts[0]
+    assert prompts[0][1] == 'He said "hi" and left'
 
 
 def test_given_a_dictated_question_mark_at_the_end_when_the_cleaner_writes_a_full_stop_then_the_mark_comes_back():

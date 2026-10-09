@@ -10,7 +10,8 @@ from dataclasses import dataclass
 import numpy as np
 
 from stt_button.asr import SAMPLE_RATE, TRAILING_MARK, Slicer, context_audio, join_slices, settled_mark
-from stt_button.cleaner import casual, fact_drift, join_cleaned, live_chunks, unresolved_corrections, matched_cue, skips_cleaner, without_sign_off
+from stt_button.cleaner import (casual, join_cleaned, live_chunks, matched_cue, skips_cleaner, strip_hidden,
+                                unresolved_corrections, untrusted_clean, without_sign_off)
 from stt_button.spoken import keep_spoken_ending, spoken_punctuation
 
 
@@ -30,6 +31,7 @@ class LiveResult:
     drifts: int = 0
     corrections: int = 0
     corrections_kept: int = 0
+    rejects: int = 0
 
 
 IDLE_POLL_S = 0.05
@@ -58,6 +60,7 @@ class LiveTake:
         self.context_decodes = 0
         self.context_fallbacks = 0
         self.drifts = 0
+        self.rejects = 0
         self.clean_ms = 0
         self._stop_asr_ms = self._stop_clean_ms = 0
 
@@ -135,11 +138,12 @@ class LiveTake:
                           self.clean_ms - self._stop_clean_ms, self.idle_cleans,
                           sum(c in self.idle_chunks for c in chunks), matched_cue(raw, self.cfg["self_correction_cues"]),
                           self.context_decodes, self.context_fallbacks, self.drifts,
-                          *unresolved_corrections(chunks, outputs, self.cfg["self_correction_cues"]))
+                          *unresolved_corrections(chunks, outputs, self.cfg["self_correction_cues"]),
+                          rejects=self.rejects)
 
     def _recognize(self, start: int, end: int) -> None:
         started = time.monotonic()
-        self.texts.append(self._slice_text(start, end))
+        self.texts.append(strip_hidden(self._slice_text(start, end)))
         self.asr_ms += _ms(started)
         if self.bubble:
             self.bubble.slice_landed(end / SAMPLE_RATE, self.texts[-1])
@@ -179,9 +183,14 @@ class LiveTake:
         return chunks
 
     def _keep(self, chunk: str, cleaned: str) -> None:
-        """A clean that swapped a name or number for another is replaced by the chunk as heard."""
-        if fact_drift(chunk, cleaned):
+        """A clean that swapped a name or number for another, or that untrusted_clean otherwise rejects,
+        is replaced by the chunk as heard."""
+        reason = untrusted_clean(chunk, cleaned)
+        if reason == "drift":
             self.drifts += 1
+        elif reason:
+            self.rejects += 1
+        if reason:
             cleaned = spoken_punctuation(chunk)
         self.cleaned_chunks[chunk] = keep_spoken_ending(chunk, cleaned)
 
