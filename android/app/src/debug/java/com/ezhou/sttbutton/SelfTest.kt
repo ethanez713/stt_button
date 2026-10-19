@@ -21,7 +21,6 @@ import kotlin.concurrent.thread
  * adb shell am start-foreground-service -n com.ezhou.sttbutton/.SelfTest --es asr <name>
  * adb shell am start-foreground-service -n com.ezhou.sttbutton/.SelfTest --es clean <name>
  * adb shell am start-foreground-service -n com.ezhou.sttbutton/.SelfTest --ez replay true [--es policy chunk|revise]
- * adb shell am start-foreground-service -n com.ezhou.sttbutton/.SelfTest --es probe <read|replace|typing|append> [--ez guard true]
  * adb shell am start-foreground-service -n com.ezhou.sttbutton/.SelfTest --es play <name>
  *
  * wav plays files/selftest/<name>.wav through the take pipeline (models, slicer, worker, chunk
@@ -45,7 +44,6 @@ class SelfTest : Service() {
                 intent.getStringExtra("asr")?.let { recognize(this, it, intent.getIntExtra("threads", ParakeetRecognizer.THREADS)) }
                 intent.getStringExtra("clean")?.let { clean(this, it, intent.getStringExtra("with")) }
                 if (intent.hasExtra("replay")) replay(this, intent.getStringExtra("policy") ?: "chunk")
-                intent.getStringExtra("probe")?.let { probe(this, it, intent) }
                 intent.getStringExtra("play")?.let { play(this, it) }
             } catch (e: Throwable) {
                 Log.e(TAG, "selftest failed", e)
@@ -187,13 +185,6 @@ class SelfTest : Service() {
             models.close()
         }
         Log.i(TAG, "selftest replay done ${files.size}")
-    }
-
-    private fun probe(context: Context, mode: String, intent: Intent) {
-        val service = DictationService.live ?: error("the accessibility service is not connected")
-        val out = File(context.filesDir, "selftest/probe.jsonl")
-        FieldProbe(service, out).run(mode, intent.getIntExtra("from", 0), intent.getIntExtra("to", 0), intent.getStringExtra("text").orEmpty(), intent.getBooleanExtra("guard", false))
-        Log.i(TAG, "selftest probe done $mode")
     }
 
     /** A take that has not finished after [STUCK_S] seconds names where every thread of the process is waiting. */
