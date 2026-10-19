@@ -13,8 +13,11 @@ using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
+using System.Threading.Tasks;
 using System.Web.Script.Serialization;
 using System.Windows.Forms;
+using Windows.Foundation;
+using Windows.Media.Control;
 
 static class Program {
     [STAThread]
@@ -83,6 +86,7 @@ class HotkeyWindow : Form {
     readonly string logPath = Path.Combine(Application.StartupPath, "helper.log");
     readonly Indicator indicator = new Indicator();
     readonly Mic mic = new Mic();
+    readonly MediaSessions media;
     // Start is the only call that crosses into WSL, and it runs off the UI thread. Stop and cancel are
     // files written here, so a launch that is timing out cannot hold them.
     readonly BlockingCollection<Action> wslQueue = new BlockingCollection<Action>();
@@ -108,6 +112,7 @@ class HotkeyWindow : Form {
     public HotkeyWindow(string repo, string models) {
         this.repo = repo;
         this.models = models;
+        media = new MediaSessions(Log);
         Directory.CreateDirectory(takesDir);
         CreateHandle();
         RegisterHotKey(Handle, TOGGLE, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, VK_SPACE);
@@ -162,6 +167,7 @@ class HotkeyWindow : Form {
             return;
         }
         takePath = path;
+        media.PauseAll();
         bubblePath = Path.ChangeExtension(path, ".bubble.json");
         bubbleShown = null;
         bubbleTimer.Start();
@@ -214,7 +220,7 @@ class HotkeyWindow : Form {
         if (takePath == null) return;
         capTimer.Stop();
         string path = takePath;
-        mic.EndTake();
+        EndRecording();
         takePath = null;
         WriteFlag(Path.ChangeExtension(path, ".stop"));
         busy = true;
@@ -251,7 +257,7 @@ class HotkeyWindow : Form {
         EndBubble();
         capTimer.Stop();
         string path = takePath;
-        mic.EndTake();
+        EndRecording();
         if (path != null) {
             WriteFlag(Path.ChangeExtension(path, ".cancel"));
             DropStart(path);
@@ -274,7 +280,7 @@ class HotkeyWindow : Form {
         DropLaunch();
         EndBubble();
         capTimer.Stop();
-        mic.EndTake();
+        EndRecording();
         takePath = null;
         resultTimer.Stop();
         resultPath = null;
@@ -523,6 +529,12 @@ class HotkeyWindow : Form {
         } catch (Exception) {
             return "?";
         }
+    }
+
+    // Media pauses with the take and resumes when the microphone stops, not when the result lands.
+    void EndRecording() {
+        mic.EndTake();
+        media.ResumePaused();
     }
 
     void Log(string line) {
@@ -774,5 +786,53 @@ class Mic {
             preRollBytes += chunk.Length;
             while (preRollBytes - preRoll.Peek().Length >= PRE_ROLL_BYTES) preRollBytes -= preRoll.Dequeue().Length;
         }
+    }
+}
+
+// Pauses the media sessions that are playing when a take starts and resumes exactly those when it ends.
+// Calls are chained on one task so a quick stop cannot resume before the pause has run.
+class MediaSessions {
+    readonly Action<string> log;
+    readonly object sync = new object();
+    readonly List<GlobalSystemMediaTransportControlsSession> paused = new List<GlobalSystemMediaTransportControlsSession>();
+    Task last = Task.FromResult(0);
+
+    public MediaSessions(Action<string> log) { this.log = log; }
+
+    public void PauseAll() { Enqueue(Pause); }
+
+    public void ResumePaused() { Enqueue(Resume); }
+
+    void Enqueue(Action work) {
+        lock (sync) {
+            last = last.ContinueWith(t => {
+                try { work(); } catch (Exception e) { log("media: " + e.Message); }
+            });
+        }
+    }
+
+    // The framework's AsTask() needs the SDK's Windows.winmd, which csc here does not have, so the operation is polled.
+    static T Await<T>(IAsyncOperation<T> operation) {
+        while (operation.Status == AsyncStatus.Started) Thread.Sleep(10);
+        if (operation.Status != AsyncStatus.Completed) throw new InvalidOperationException("media request " + operation.Status);
+        return operation.GetResults();
+    }
+
+    void Pause() {
+        var manager = Await(GlobalSystemMediaTransportControlsSessionManager.RequestAsync());
+        foreach (var session in manager.GetSessions()) {
+            if (session.GetPlaybackInfo().PlaybackStatus != GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing) continue;
+            if (Await(session.TryPauseAsync())) paused.Add(session);
+        }
+        log("media paused=" + paused.Count);
+    }
+
+    void Resume() {
+        int resumed = 0;
+        foreach (var session in paused) {
+            try { if (Await(session.TryPlayAsync())) resumed++; } catch (Exception e) { log("media: " + e.Message); }
+        }
+        if (paused.Count > 0) log("media resumed=" + resumed);
+        paused.Clear();
     }
 }

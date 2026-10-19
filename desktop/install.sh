@@ -19,7 +19,9 @@ mkdir -p "$DEST"
 cp "$REPO/desktop/SttHotkey.cs" "$DEST/"
 # csc needs Windows paths, so it runs from the destination directory.
 (cd "$DEST" && "$CSC" /nologo /target:winexe /out:SttHotkey.exe \
-    /r:System.Windows.Forms.dll /r:System.Drawing.dll /r:System.Web.Extensions.dll SttHotkey.cs)
+    /r:System.Windows.Forms.dll /r:System.Drawing.dll /r:System.Web.Extensions.dll \
+    '/r:C:\Windows\System32\WinMetadata\Windows.Media.winmd' '/r:C:\Windows\System32\WinMetadata\Windows.Foundation.winmd' \
+    /r:System.Runtime.dll /r:System.Threading.Tasks.dll SttHotkey.cs)
 
 UNIT_DIR="$HOME/.config/systemd/user"
 mkdir -p "$UNIT_DIR" "$REPO/data/dictation" "$DEST/takes"
