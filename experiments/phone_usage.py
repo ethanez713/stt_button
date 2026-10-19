@@ -173,6 +173,31 @@ def field_reads(lines: list[dict]) -> list[str]:
     return out
 
 
+def field_path(lines: list[dict]) -> list[str]:
+    """Takes written into their field as they were heard: per `insert_path`, how many, the median writes and how
+    many waited for typing; takes the field ended; and the revisions at the stop from the `job` lines."""
+    inserts = [r for r in lines if r.get("event") == "insert" and r.get("insert_path")]
+    ended = [r for r in lines if r.get("event") in ("insert", "discard", "clipboard")]
+    by_field = [r["id"] for r in ended if r.get("trigger") == "field"]
+    revisions = [r for r in lines if r.get("event") == "job" and r.get("kind") == "clean" and r.get("scope") == "region"]
+    if not inserts and not by_field and not revisions:
+        return []
+    out = ["\nfield path:"]
+    for path in sorted({r["insert_path"] for r in inserts}, key=str):
+        rows = [r for r in inserts if r["insert_path"] == path]
+        writes = [r["writes"] for r in rows if r.get("writes") is not None]
+        held = [r for r in rows if (r.get("writes_held") or 0) > 0]
+        longest = max((r.get("held_max_ms") or 0 for r in held), default=None)
+        out.append(f"  {path}: {len(rows)} takes, median writes {fmt(median(writes))}, "
+                   f"{len(held)} with a held write (longest {fmt(longest)} ms)")
+    out.append("  takes ended by the field going away: " + _ids(by_field))
+    revised = [r for r in revisions if r.get("outcome") in ("applied", "fallback")]
+    dropped = [r for r in revisions if r.get("outcome") == "dropped"]
+    out.append(f"  revisions: {len({r['id'] for r in revised})} takes revised, {len(dropped)} dropped, "
+               f"median {fmt(median([r['ms'] for r in revised if r.get('ms') is not None]))} ms")
+    return out
+
+
 def swap_table(lines: list[dict]) -> list[str]:
     """How the keyboard swap went: outcomes, timings, and takes that asked for a swap and left no `ime` line."""
     takes = [r for r in lines if r.get("event") in ("insert", "discard", "clipboard") and r.get("ime_swap")]
@@ -240,6 +265,7 @@ def summarize(lines: list[dict], capacity_mah: float = 5000) -> str:
     out.extend(take_diagnostics(lines))
     out.extend(swap_table(lines))
     out.extend(field_reads(lines))
+    out.extend(field_path(lines))
 
     exits = Counter(line.get("reason") for line in lines if line.get("event") == "exit")
     out.append("process exits: " + (", ".join(f"{k} {n}" for k, n in exits.most_common()) or "none"))

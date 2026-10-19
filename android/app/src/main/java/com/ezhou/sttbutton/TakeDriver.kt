@@ -2,6 +2,7 @@ package com.ezhou.sttbutton
 
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -25,6 +26,13 @@ class TakeDriver(
     private var ended = false
     private var settled: (() -> Unit)? = null
     private var waiting: Pair<Job, Result<JobResult>>? = null
+    private var heldSince = 0L
+
+    /** Results that waited for the user's typing, and the longest wait. */
+    var heldWrites = 0
+        private set
+    var heldMaxMs = 0L
+        private set
     private val tick = object : Runnable {
         override fun run() {
             if (ended) return
@@ -85,7 +93,15 @@ class TakeDriver(
         if (ended || running) return
         try {
             waiting?.let { (job, outcome) ->
-                if (engine.writesHeld()) return
+                if (engine.writesHeld()) {
+                    if (heldSince == 0L) heldSince = SystemClock.uptimeMillis()
+                    return
+                }
+                if (heldSince != 0L) {
+                    heldWrites++
+                    heldMaxMs = maxOf(heldMaxMs, SystemClock.uptimeMillis() - heldSince)
+                    heldSince = 0L
+                }
                 waiting = null
                 engine.complete(job, outcome.getOrThrow())
             }

@@ -248,6 +248,27 @@ class TestPhoneUsage:
         assert "ime_subtype_ok false: 1" in report and "ime_height_delta_px non-zero: 1" in report
         assert "takes with a swap and no ime line: 1 (t3)" in report
 
+    def test_the_field_path_table_counts_writes_holds_revisions_and_takes_the_field_ended(self):
+        from experiments import phone_usage
+        lines = [
+            self.insert(1, insert_path="field", writes=6, writes_held=0, held_max_ms=0, trigger="stop"),
+            self.insert(2, insert_path="field", writes=10, writes_held=2, held_max_ms=1500, trigger="stop"),
+            self.insert(3, insert_path="ladder", trigger="stop"),
+            {"event": "clipboard", "id": "t4", "trigger": "field"},
+            {"event": "job", "id": "t1", "kind": "clean", "scope": "region", "outcome": "applied", "ms": 900},
+            {"event": "job", "id": "t2", "kind": "clean", "scope": "region", "outcome": "dropped", "ms": 700},
+            {"event": "job", "id": "t2", "kind": "clean", "scope": "chunk", "outcome": "applied", "ms": 300},
+        ]
+        report = phone_usage.summarize(lines)
+        assert "field: 2 takes, median writes 8, 1 with a held write (longest 1500 ms)" in report
+        assert "ladder: 1 takes" in report
+        assert "takes ended by the field going away: 1 (t4)" in report
+        assert "revisions: 1 takes revised, 1 dropped, median 900 ms" in report
+
+    def test_a_report_of_takes_from_before_the_field_path_has_no_field_path_table(self):
+        from experiments import phone_usage
+        assert "field path" not in phone_usage.summarize([self.insert(1)])
+
     def test_a_report_of_takes_from_before_the_swap_has_no_swap_table(self):
         from experiments import phone_usage
         assert "keyboard swap" not in phone_usage.summarize([self.insert(1)])

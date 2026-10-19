@@ -10,6 +10,12 @@ class FieldDocument(private val port: EditorPort, private val clock: () -> Long 
     private var lastOutsideEditAt: Long? = null
     private var outsideSinceWrite = false
 
+    /** Writes the take made, and changes it did not make. */
+    var writes = 0
+        private set
+    var outsideEdits = 0
+        private set
+
     /**
      * Gboard owes a space after a swiped word and drops it when the field changes under it, so a write waits
      * while the user's last change is under [TYPING_QUIET_MS] old, and while the caret follows a letter or
@@ -42,6 +48,7 @@ class FieldDocument(private val port: EditorPort, private val clock: () -> Long 
         if (!port.replace(from, to, text, start, end)) return false
         mirror?.wrote(field.text.replaceRange(from, to, text), start, end)
         outsideSinceWrite = false
+        writes++
         return true
     }
 
@@ -56,6 +63,7 @@ class FieldDocument(private val port: EditorPort, private val clock: () -> Long 
         seen.sync(field.text, field.selectionStart, field.selectionEnd)?.let {
             lastOutsideEditAt = clock()
             outsideSinceWrite = true
+            outsideEdits++
             onEdit?.invoke(it)
         }
     }

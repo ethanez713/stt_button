@@ -77,6 +77,10 @@ class TakeController(
         var fieldDoc: FieldDocument? = null
         var fieldId: FieldId? = null
         var textBefore = ""
+        var fieldRead = FieldRead.NONE
+
+        /** Where the dictation sits in the field after the stop. */
+        var writtenSpan: Span? = null
 
         /** The field went away mid-take, so the rest of the take collected in memory. */
         var detached = false
@@ -281,6 +285,7 @@ class TakeController(
         run.fieldDoc = fieldDoc
         run.fieldId = taken
         run.textBefore = fieldDoc?.read()?.text.orEmpty()
+        run.fieldRead = fieldRead
         runs[current] = run
         try {
             recorder.start()
@@ -359,6 +364,7 @@ class TakeController(
         val dictated = state.text.substring(start, end)
         val body = Documents.finalText(dictated, run.textBefore, state.text, FieldPolicy.multiLine(field?.isMultiLine ?: true, field?.inputType ?: 0), cfg)
         if (body != dictated) doc.replace(start, end, body)
+        run.writtenSpan = Span(start, start + body.length)
         run.placement = Placement(field, state.text, body.trim())
         dispatch(current, TakeEvent.EngineFinished(if (body.isBlank()) Delivery.BLANK else Delivery.INSERT))
     }
@@ -426,8 +432,10 @@ class TakeController(
         run.sampler.stop()
         log.write("insert", take.id,
             "pkg" to take.pkg, "raw" to result.raw, "cleaned" to placement.body, "text_before" to run.textBefore,
-            "insert_path" to "field", "readback" to null, "landed_count" to null, "attempts" to null,
+            "insert_path" to "field", "field_read" to run.fieldRead, "readback" to null, "landed_count" to null, "attempts" to null,
             "sel_before" to null, "sel_after" to null,
+            "writes" to run.fieldDoc?.writes, "writes_held" to run.driver.heldWrites, "held_max_ms" to run.driver.heldMaxMs,
+            "edits_seen" to run.fieldDoc?.outsideEdits,
             "asr_ms" to result.asrMs, "clean_ms" to result.cleanMs, "asr_backend" to "cpu", "clean_backend" to "cpu",
             "audio_ms" to result.audioMs, "zero_ms" to run.level.zeroMs, "peak_dbfs" to run.level.peakDbfs,
             "in_tokens" to result.inTokens, "out_tokens" to result.outTokens,
@@ -441,7 +449,7 @@ class TakeController(
             *run.cost.lap().toTypedArray())
         val field = placement.field ?: return
         val caret = run.fieldDoc?.read()
-        track(take, field, placement.body, caret?.selectionEnd)
+        track(take, field, placement.body, caret?.selectionEnd, run.writtenSpan)
     }
 
     /**
@@ -461,7 +469,8 @@ class TakeController(
         if (copied) Toast.makeText(service, R.string.copied_to_clipboard, Toast.LENGTH_LONG).show()
         log.write("clipboard", run.take.id,
             "pkg" to run.take.pkg, "reason" to reason.logName, "trigger" to trigger, "copied" to copied,
-            "raw" to result.raw, "text" to clip, "clean_mode" to result.cleanMode, "clean_policy" to run.engine.policyName,
+            "raw" to result.raw, "text" to clip, "unwritten_chars" to clip.length.takeIf { run.detached },
+            "clean_mode" to result.cleanMode, "clean_policy" to run.engine.policyName,
             "audio_ms" to result.audioMs, "zero_ms" to run.level.zeroMs, "peak_dbfs" to run.level.peakDbfs,
             *swapFields(current), *run.cost.lap().toTypedArray())
     }
@@ -491,10 +500,10 @@ class TakeController(
             "ime_subtype_ok" to subtypeOk, "ime_height_delta_px" to service.imeHeightDelta())
     }
 
-    private fun track(take: Take, field: AccessibilityNodeInfo, landed: String?, caretAfter: Int?) {
+    private fun track(take: Take, field: AccessibilityNodeInfo, landed: String?, caretAfter: Int?, span: Span? = null) {
         val existing = tracker
         if (existing != null && existing.takeId == take.id) existing.refresh(inserter.textOf(field))
-        else tracker = FieldTracker(take.id, field, inserter.textOf(field), landed, caretAfter)
+        else tracker = FieldTracker(take.id, field, inserter.textOf(field), landed, caretAfter, span)
     }
 
     private fun release(current: TakeSession, run: Run) {
@@ -571,11 +580,11 @@ class TakeController(
      */
     private inner class FieldTracker(
         val takeId: String, private val field: AccessibilityNodeInfo, initial: String,
-        private val inserted: String?, caretAfter: Int?,
+        private val inserted: String?, caretAfter: Int?, knownSpan: Span? = null,
     ) {
         private var latest = initial
         private val mirror = FieldMirror(initial)
-        private var span = inserted?.let { SpanLocator.find(initial, it, caretAfter) }
+        private var span = knownSpan ?: inserted?.let { SpanLocator.find(initial, it, caretAfter) }
         private val pkg = field.packageName?.toString()
 
         init {
