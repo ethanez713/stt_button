@@ -15,17 +15,41 @@ import java.util.concurrent.TimeUnit
  */
 class FieldProbe(private val service: DictationService, private val out: File) {
     private val main = Handler(Looper.getMainLooper())
+    private var guard = false
+    private var heldMs = 0L
 
     private class Seen(val text: String, val caret: Int, val fieldRead: String, val offset: Int = 0, val selection: String = "")
 
-    fun run(mode: String, from: Int, to: Int, replacement: String) {
+    fun run(mode: String, from: Int, to: Int, replacement: String, guard: Boolean = false) {
+        this.guard = guard
         when (mode) {
             "read" -> onMain { write(mode, read(), read(), null, null, 0L, 0) }
             "replace" -> onMain { replace(mode, from, to, replacement) }
-            "typing" -> repeat(WRITES) { n -> onMain { typing(mode) }; if (n < WRITES - 1) Thread.sleep(GAP_MS) }
-            "append" -> repeat(WRITES) { n -> onMain { append(mode, n + 1) }; if (n < WRITES - 1) Thread.sleep(GAP_MS) }
+            "typing" -> repeat(WRITES) { n -> whenClear { typing(mode) }; if (n < WRITES - 1) Thread.sleep(GAP_MS) }
+            "append" -> repeat(WRITES) { n -> whenClear { append(mode, n + 1) }; if (n < WRITES - 1) Thread.sleep(GAP_MS) }
             else -> error("unknown probe mode $mode")
         }
+    }
+
+    /**
+     * Gboard owes a space after a swiped word and drops it when the field changes under it, so a guarded
+     * write waits, up to [HOLD_MAX_MS], until the caret follows a character that is not a letter or digit.
+     */
+    private fun whenClear(block: () -> Unit) {
+        val started = System.nanoTime()
+        var done = false
+        while (!done) {
+            onMain {
+                heldMs = (System.nanoTime() - started) / 1_000_000
+                if (!guard || afterWordBoundary() || heldMs >= HOLD_MAX_MS) { block(); done = true }
+            }
+            if (!done) Thread.sleep(POLL_MS)
+        }
+    }
+
+    private fun afterWordBoundary(): Boolean {
+        val seen = read()
+        return seen.text.getOrNull(seen.caret - 1)?.isLetterOrDigit() != true
     }
 
     private fun typing(mode: String) {
@@ -64,6 +88,7 @@ class FieldProbe(private val service: DictationService, private val out: File) {
             .put("caret_before", before.caret).put("caret_after", after.caret).put("caret_expected", expectedCaret ?: JSONObject.NULL)
             .put("ok", ok).put("first_diff", expectedText?.let { ProbeCheck.firstDiff(after.text, it) } ?: JSONObject.NULL)
             .put("ms", ms).put("selections", selections).put("offset", before.offset).put("selection", before.selection)
+            .put("guard", guard).put("held_ms", heldMs)
         out.appendText(line.toString() + "\n")
     }
 
@@ -98,5 +123,7 @@ class FieldProbe(private val service: DictationService, private val out: File) {
         const val GAP_MS = 2_000L
         const val SETTLE_MS = 30L
         const val MAIN_WAIT_S = 10L
+        const val HOLD_MAX_MS = 5_000L
+        const val POLL_MS = 50L
     }
 }

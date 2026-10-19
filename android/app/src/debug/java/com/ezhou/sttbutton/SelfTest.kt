@@ -21,7 +21,7 @@ import kotlin.concurrent.thread
  * adb shell am start-foreground-service -n com.ezhou.sttbutton/.SelfTest --es asr <name>
  * adb shell am start-foreground-service -n com.ezhou.sttbutton/.SelfTest --es clean <name>
  * adb shell am start-foreground-service -n com.ezhou.sttbutton/.SelfTest --ez replay true [--es policy chunk|revise]
- * adb shell am start-foreground-service -n com.ezhou.sttbutton/.SelfTest --es probe <read|replace|typing|append>
+ * adb shell am start-foreground-service -n com.ezhou.sttbutton/.SelfTest --es probe <read|replace|typing|append> [--ez guard true]
  * adb shell am start-foreground-service -n com.ezhou.sttbutton/.SelfTest --es play <name>
  *
  * wav plays files/selftest/<name>.wav through the take pipeline (models, slicer, worker, chunk
@@ -192,7 +192,7 @@ class SelfTest : Service() {
     private fun probe(context: Context, mode: String, intent: Intent) {
         val service = DictationService.live ?: error("the accessibility service is not connected")
         val out = File(context.filesDir, "selftest/probe.jsonl")
-        FieldProbe(service, out).run(mode, intent.getIntExtra("from", 0), intent.getIntExtra("to", 0), intent.getStringExtra("text").orEmpty())
+        FieldProbe(service, out).run(mode, intent.getIntExtra("from", 0), intent.getIntExtra("to", 0), intent.getStringExtra("text").orEmpty(), intent.getBooleanExtra("guard", false))
         Log.i(TAG, "selftest probe done $mode")
     }
 

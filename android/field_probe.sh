@@ -4,6 +4,7 @@
 #     android/field_probe.sh read
 #     android/field_probe.sh replace <from> <to> <text>
 #     android/field_probe.sh typing | append       # ten writes, 2 s apart
+#     GUARD=1 android/field_probe.sh typing          # each write held until the caret follows a non-word character
 #
 # The result is pulled to $OUT (default /tmp/selftest/probe.jsonl). Needs the debug build.
 set -euo pipefail
@@ -15,13 +16,14 @@ S="$("$(dirname "$0")/test_device.sh")"
 PKG=com.ezhou.sttbutton
 
 extras=()
+[ -n "${GUARD:-}" ] && extras+=(--ez guard true)
 if [ "$mode" = replace ]; then
-    extras=(--ei from "${2:?from}" --ei to "${3:?to}" --es text "${4:-}")
+    extras+=(--ei from "${2:?from}" --ei to "${3:?to}" --es text "${4:-}")
 fi
 adb -s "$S" shell "run-as $PKG rm -f files/selftest/probe.jsonl"
 adb -s "$S" logcat -c
 adb -s "$S" shell am start-foreground-service -n "$PKG/.SelfTest" --es probe "$mode" "${extras[@]}" >/dev/null
-for _ in $(seq "${WAIT_LOOPS:-30}"); do
+for _ in $(seq "${WAIT_LOOPS:-60}"); do
     adb -s "$S" logcat -d -s SttButton:* | grep -qE "selftest probe done|selftest failed" && break
     sleep 2
 done
