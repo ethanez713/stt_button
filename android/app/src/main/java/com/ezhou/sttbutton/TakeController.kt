@@ -6,6 +6,7 @@ import android.content.ClipboardManager
 import android.content.ComponentCallbacks2
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.media.AudioManager
 import android.os.Handler
 import android.os.Looper
 import android.os.Process
@@ -39,6 +40,8 @@ class TakeController(
         ConfigId.of(configBytes, ModelFiles.required.map { it to File(service.filesDir, it).length() })
     }
     private val log = EditLog(File(service.filesDir, "logs/edits.jsonl"))
+    private val audio = service.getSystemService(AudioManager::class.java)
+    private val media = MediaPause(AndroidFocusPort(audio))
     private val inserter = Inserter(service)
     private val takesDir = File(service.filesDir, "takes")
 
@@ -192,11 +195,14 @@ class TakeController(
         parked = null
         handler.removeCallbacks(releaseParked)
         val (fieldRead, fieldOffset) = readField()
+        val mediaActive = audio.isMusicActive
+        val mediaFocus = if (media.pause()) "granted" else "failed"
         log.write("start", take.id, "pkg" to take.pkg, "models_warm" to (warm != null), "config_id" to configId,
             "field_read" to fieldRead, "field_offset" to fieldOffset,
             "proc_cpu_ms" to Process.getElapsedCpuTime(),
             "proc_age_ms" to SystemClock.elapsedRealtime() - Process.getStartElapsedRealtime(),
-            "proc_events" to eventsSeen)
+            "proc_events" to eventsSeen,
+            "media_active" to mediaActive, "media_focus" to mediaFocus)
         try {
             service.startForegroundService(Intent(service, RecordingService::class.java))
         } catch (e: Exception) {
@@ -275,6 +281,7 @@ class TakeController(
         panelHeight.takeIf { it > 0 } ?: (TakePanel.DEFAULT_HEIGHT_DP * service.resources.displayMetrics.density).toInt()
 
     private fun stopRecorder(run: Run) {
+        media.resume()
         try {
             run.recorder.stop()
         } catch (e: Exception) {
@@ -399,6 +406,7 @@ class TakeController(
         run.sampler.stop()
         bubble.hide()
         runs.remove(current)
+        media.resume()
         panelBusy = false
         ImeLink.current?.refreshPanel()
         service.stopService(Intent(service, RecordingService::class.java))
