@@ -203,7 +203,7 @@ class RevisePolicyTest {
     }
 
     @Test
-    fun given_a_typed_fix_inside_a_cleaned_section_when_finished_then_it_is_in_the_revisions_input() {
+    fun given_a_typed_fix_inside_a_once_cleaned_region_when_finished_then_it_is_not_revised_and_the_fix_stands() {
         val editor = FakeEditor("")
         val (doc, rig) = rigOver(editor, config(), Upper(), labelled("a", 1))
         rig.feed(audio(3.0, 0.0))
@@ -214,9 +214,25 @@ class RevisePolicyTest {
         doc.sync()
         val result = rig.finish()
 
-        val revision = rig.clean.single { it.scope == "region" }
-        assertTrue(revision.input, revision.input!!.contains("zz"))
-        assertTrue(result.cleaned, result.cleaned.contains("ZZ"))
+        assertTrue(rig.clean.none { it.scope == "region" })
+        assertTrue(result.cleaned, result.cleaned.contains("zz"))
+        assertTrue(editor.text, editor.text.contains("zz"))
+    }
+
+    @Test
+    fun given_a_region_cleaned_twice_when_the_user_edits_it_before_the_finish_then_it_is_not_revised() {
+        val editor = FakeEditor("")
+        val (doc, rig) = rigOver(editor, config(), Upper(), labelled("a", 3), "")
+        rig.feed(audio(3.0, 3.0))
+
+        editor.type(2, 0, "zz")
+        doc.sync()
+        rig.finish()
+
+        assertEquals(2, rig.clean.count { it.scope == "chunk" })
+        assertTrue(rig.clean.none { it.scope == "region" })
+        assertTrue(editor.text, editor.text.contains("zz"))
+        assertFalse(editor.text.contains("REVISED"))
     }
 
     @Test

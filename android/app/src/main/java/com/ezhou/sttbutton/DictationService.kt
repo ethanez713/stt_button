@@ -74,7 +74,17 @@ class DictationService : AccessibilityService() {
         reconcile()
     }
 
-    override fun onCreateInputMethod(): InputMethod = SessionInputMethod(this)
+    override fun onCreateInputMethod(): InputMethod = SessionInputMethod(this).also {
+        it.listener = object : SessionInputMethod.Listener {
+            override fun selectionChanged() {
+                if (::controller.isInitialized) controller.onFieldChanged()
+            }
+
+            override fun inputStarted(session: InputSession, restarting: Boolean) {
+                if (::controller.isInitialized) controller.onInputStarted(session, restarting)
+            }
+        }
+    }
 
     /** `adb shell setprop log.tag.SttTrace DEBUG` logs what each event found: the take, the focused field, every window, and the input session beside the field placement read. */
     private fun trace(event: AccessibilityEvent) {

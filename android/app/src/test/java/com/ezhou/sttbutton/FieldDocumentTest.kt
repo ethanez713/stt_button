@@ -117,4 +117,73 @@ class FieldDocumentTest {
 
         assertFalse(doc.replace(2, 9, "x"))
     }
+
+    private class Clock(var now: Long = 0)
+
+    private fun held(editor: FakeEditor, clock: Clock): FieldDocument {
+        val doc = FieldDocument(editor) { clock.now }
+        assertTrue(doc.sync())
+        return doc
+    }
+
+    @Test
+    fun given_an_outside_edit_when_a_write_is_due_then_it_is_held_until_700_ms_after_the_edit() {
+        val clock = Clock()
+        val editor = FakeEditor("hello ", 6)
+        val doc = held(editor, clock)
+
+        clock.now = 100
+        editor.type(6, 0, " ")
+        doc.sync()
+        clock.now = 399
+        assertTrue(doc.writesHeld())
+        clock.now = 799
+        assertTrue(doc.writesHeld())
+        clock.now = 800
+        assertFalse(doc.writesHeld())
+    }
+
+    @Test
+    fun given_the_caret_after_a_letter_the_user_typed_when_a_write_is_due_then_it_is_held_however_long_it_waits_and_released_after_a_space() {
+        val clock = Clock()
+        val editor = FakeEditor("", 0)
+        val doc = held(editor, clock)
+
+        editor.type(0, 0, "w")
+        doc.sync()
+        clock.now = 100
+        assertTrue(doc.writesHeld())
+        clock.now = 60_000
+        assertTrue(doc.writesHeld())
+        clock.now = 60_001
+        editor.type(1, 0, " ")
+        doc.sync()
+        assertTrue(doc.writesHeld())
+        clock.now = 60_700
+        assertTrue(doc.writesHeld())
+        clock.now = 60_701
+        assertFalse(doc.writesHeld())
+    }
+
+    @Test
+    fun given_the_caret_after_a_letter_nobody_typed_during_the_take_when_a_write_is_due_then_it_is_not_held() {
+        val clock = Clock()
+        val editor = FakeEditor("hello", 5)
+        val doc = held(editor, clock)
+
+        assertFalse(doc.writesHeld())
+        doc.replace(5, 5, " world")
+        assertFalse(doc.writesHeld())
+    }
+
+    @Test
+    fun given_a_field_that_cannot_be_read_when_a_write_is_due_then_it_is_held() {
+        val clock = Clock()
+        val editor = FakeEditor("abc")
+        val doc = held(editor, clock)
+
+        editor.gone = true
+
+        assertTrue(doc.writesHeld())
+    }
 }

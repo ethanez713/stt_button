@@ -15,6 +15,7 @@ sealed interface TakeEvent {
     data object PackageChanged : TakeEvent
     data object LanguageLeft : TakeEvent
     data object ExcludedField : TakeEvent
+    data object FieldGone : TakeEvent
     data object ViewStarted : TakeEvent
     data object ViewFinished : TakeEvent
     data object Error : TakeEvent
@@ -107,6 +108,7 @@ class TakeSession(val take: Take, private val capMs: Long, private val clock: ()
             TakeEvent.Silence -> stop(TRIGGER_SILENCE, out)
             TakeEvent.MicFailed -> stop(TRIGGER_MIC, out)
             TakeEvent.PackageChanged -> stop(TRIGGER_PACKAGE, out)
+            TakeEvent.FieldGone -> stop(TRIGGER_FIELD, out)
             TakeEvent.ExcludedField -> if (swap.holdsTake) stop(TRIGGER_KEYBOARD, out)
             TakeEvent.ViewStarted -> onViewStarted(out)
             TakeEvent.ViewFinished -> if (isOpen && swap.onViewFinish(clock())) {
@@ -248,6 +250,7 @@ class TakeSession(val take: Take, private val capMs: Long, private val clock: ()
         const val TRIGGER_CAP = "cap"
         const val TRIGGER_KEYBOARD = "keyboard"
         const val TRIGGER_PACKAGE = "package"
+        const val TRIGGER_FIELD = "field"
         const val TRIGGER_SILENCE = "silence"
         const val TRIGGER_MIC = "mic"
         const val HIDDEN_GRACE_MS = 700L

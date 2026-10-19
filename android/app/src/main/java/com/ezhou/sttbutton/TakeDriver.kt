@@ -8,7 +8,8 @@ import java.util.concurrent.atomic.AtomicBoolean
  * Runs a [TakeEngine] on the main thread: asks it for a job, hands [Job.run] to [worker], applies the
  * result and asks again. Woken by slices landing, a tick while the take is open (pauses and the silence
  * stop; [onTick] runs on it), a document edit and [stop]; [onDone] gets the result once the engine has
- * nothing left after the stop.
+ * nothing left after the stop. A result that would write while the engine says writes are held waits for a
+ * later tick; the stop does not wait.
  */
 class TakeDriver(
     private val engine: TakeEngine,
@@ -23,6 +24,7 @@ class TakeDriver(
     @Volatile private var running = false
     private var ended = false
     private var settled: (() -> Unit)? = null
+    private var waiting: Pair<Job, Result<JobResult>>? = null
     private val tick = object : Runnable {
         override fun run() {
             if (ended) return
@@ -82,6 +84,11 @@ class TakeDriver(
     private fun pump() {
         if (ended || running) return
         try {
+            waiting?.let { (job, outcome) ->
+                if (engine.writesHeld()) return
+                waiting = null
+                engine.complete(job, outcome.getOrThrow())
+            }
             val job = engine.next()
             if (job == null) {
                 if (engine.stopping) finishNow()
@@ -104,12 +111,8 @@ class TakeDriver(
             settled = null
             return
         }
-        try {
-            engine.complete(job, outcome.getOrThrow())
-            pump()
-        } catch (e: Throwable) {
-            fail(e)
-        }
+        waiting = job to outcome
+        pump()
     }
 
     private fun finishNow() {

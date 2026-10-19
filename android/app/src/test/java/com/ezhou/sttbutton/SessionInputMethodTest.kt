@@ -46,5 +46,21 @@ class SessionInputMethodTest {
     fun given_no_session_and_a_field_when_compared_then_they_disagree() =
         assertFalse(InputSession.EMPTY.agrees("app.one", false, text))
 
-    private fun session(inputType: Int = text) = InputSession("app.one", inputType, starts = 1, finishes = 0)
+    private fun session(inputType: Int = text, fieldId: Int = 7) = InputSession("app.one", inputType, starts = 1, finishes = 0, fieldId = fieldId)
+
+    @Test
+    fun given_a_restart_of_the_same_editor_when_input_starts_then_the_field_has_not_been_left() =
+        assertFalse(FieldId("app.one", 7).leftBy(session(), restarting = true))
+
+    @Test
+    fun given_the_same_editor_again_when_input_starts_then_the_field_has_not_been_left() =
+        assertFalse(FieldId("app.one", 7).leftBy(session(), restarting = false))
+
+    @Test
+    fun given_another_field_of_the_app_when_input_starts_then_the_field_has_been_left() =
+        assertTrue(FieldId("app.one", 7).leftBy(session(fieldId = 8), restarting = false))
+
+    @Test
+    fun given_another_app_when_input_starts_then_the_field_has_been_left() =
+        assertTrue(FieldId("app.two", 7).leftBy(session(), restarting = false))
 }

@@ -11,6 +11,9 @@ interface Document {
     fun replace(from: Int, to: Int, text: String): Boolean
 
     var onEdit: ((Edit) -> Unit)?
+
+    /** True while a write now would disturb the user's typing. */
+    fun writesHeld(): Boolean = false
 }
 
 /** A string and a caret in memory: the document of a take whose text is inserted at the stop. */

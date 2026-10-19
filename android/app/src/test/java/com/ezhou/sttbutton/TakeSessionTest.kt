@@ -80,6 +80,19 @@ class TakeSessionTest {
     }
 
     @Test
+    fun given_the_field_going_away_when_the_take_is_open_then_it_stops_with_the_field_trigger_and_a_second_event_does_nothing() {
+        val s = session()
+        s.open()
+
+        val effects = s.on(TakeEvent.FieldGone)
+
+        assertEquals("field", s.stopTrigger)
+        assertTrue(effects.contains(TakeEffect.StopRecorder))
+        assertTrue(effects.contains(TakeEffect.StopEngine))
+        assertEquals(emptyList<TakeEffect>(), s.on(TakeEvent.FieldGone))
+    }
+
+    @Test
     fun given_a_mic_failure_when_it_stops_the_take_then_the_button_flashes() {
         val s = session()
         s.open()
@@ -338,7 +351,7 @@ class TakeSessionTest {
 
     private val everyEvent: List<TakeEvent> = listOf(
         TakeEvent.Tap(true), TakeEvent.ButtonShown(false), TakeEvent.ButtonShown(true), TakeEvent.Cap, TakeEvent.Silence,
-        TakeEvent.MicFailed, TakeEvent.PackageChanged, TakeEvent.LanguageLeft, TakeEvent.ExcludedField, TakeEvent.ViewStarted,
+        TakeEvent.MicFailed, TakeEvent.PackageChanged, TakeEvent.FieldGone, TakeEvent.LanguageLeft, TakeEvent.ExcludedField, TakeEvent.ViewStarted,
         TakeEvent.ViewFinished, TakeEvent.Error, TakeEvent.EngineFinished(Delivery.INSERT), TakeEvent.EngineFinished(Delivery.BLANK),
         TakeEvent.EngineFinished(Delivery.NO_FIELD), TakeEvent.SwapWaitDue, TakeEvent.KeyboardStopDue, TakeEvent.HiddenCheckDue(1),
     )

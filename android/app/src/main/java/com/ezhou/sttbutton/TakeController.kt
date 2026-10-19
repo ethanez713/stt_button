@@ -72,6 +72,14 @@ class TakeController(
         var result: LiveResult? = null
         var placement: Placement? = null
         var stoppedAtMs = 0L
+
+        /** The document of a take written into its field, the editor it was begun in, and the field's text at the tap. */
+        var fieldDoc: FieldDocument? = null
+        var fieldId: FieldId? = null
+        var textBefore = ""
+
+        /** The field went away mid-take, so the rest of the take collected in memory. */
+        var detached = false
     }
 
     /** Where a finished take's text goes, as the field stood when the engine finished. */
@@ -129,6 +137,22 @@ class TakeController(
             if (focused != null && current.take.pkg != UNKNOWN_PACKAGE && focused != current.take.pkg) dispatch(current, TakeEvent.PackageChanged)
         }
         tracker?.onEvent(event)
+    }
+
+    private fun sessionSnapshot(): InputSession = (service.inputMethod as? SessionInputMethod)?.snapshot() ?: InputSession.EMPTY
+
+    private fun fieldRun(): Run? = open?.let { runs[it] }?.takeIf { it.fieldDoc != null && !it.detached }
+
+    /** The editor's text or selection changed: whatever made the change reaches the take's region. */
+    fun onFieldChanged() {
+        val run = fieldRun() ?: return
+        if (!checkNotNull(run.fieldDoc).sync()) run.engine.detach()
+    }
+
+    /** Input started on an editor: another one than the take's ends its writes, the same one only syncs. */
+    fun onInputStarted(session: InputSession, restarting: Boolean) {
+        val run = fieldRun() ?: return
+        if (checkNotNull(run.fieldId).leftBy(session, restarting)) run.engine.detach() else onFieldChanged()
     }
 
     override fun stopKeyTapped() {
@@ -211,12 +235,22 @@ class TakeController(
         val models = warm ?: Models.forFiles(service.filesDir, cfg)
         val bubbleText = BubbleText().apply { onChange = ::scheduleBubble }
         val slicer = Slicer.fromConfig(cfg)
+        val taken = sessionSnapshot().field()
+        val port = A11yEditorPort({ service.inputMethod?.currentInputConnection }, { sessionSnapshot().field() == taken })
+        val fieldDoc = FieldDocument(port) { SystemClock.uptimeMillis() }
+            .takeIf { Documents.choose(port.read()) == DocumentKind.FIELD && it.sync() }
         val engine = TakeEngine(
-            BufferDocument(), slicer, models.recognizer, models.cleaner(), ChunkPolicy(cfg), cfg,
+            fieldDoc ?: BufferDocument(), slicer, models.recognizer, models.cleaner(),
+            if (fieldDoc != null) RevisePolicy(cfg) else ChunkPolicy(cfg), cfg,
             jobs = { writeJob(take.id, it) }, prepareCleaner = models::prepareCleaner,
         ).also {
-            it.onText = bubbleText::region
+            it.onText = if (fieldDoc != null) null else bubbleText::region
             it.onCovered = bubbleText::covered
+            it.onDetached = {
+                runs[current]?.detached = true
+                it.onText = bubbleText::region
+                dispatch(current, TakeEvent.FieldGone)
+            }
         }
         val executor = Executors.newSingleThreadExecutor { Thread(it, "take-worker") }
         val driver = TakeDriver(
@@ -244,6 +278,9 @@ class TakeController(
         val cost = TakeCost(AndroidCostProbe(service)).also { it.start() }
         val run = Run(take, models, engine, driver, recorder, cost, CostSampler(cost), bubbleText, preview, level, executor)
         run.field = field
+        run.fieldDoc = fieldDoc
+        run.fieldId = taken
+        run.textBefore = fieldDoc?.read()?.text.orEmpty()
         runs[current] = run
         try {
             recorder.start()
@@ -297,6 +334,36 @@ class TakeController(
 
     private fun onEngineDone(current: TakeSession, run: Run, result: LiveResult) {
         run.result = result
+        val doc = run.fieldDoc
+        if (doc != null && !run.detached && doc.read() == null) run.engine.detach()
+        when {
+            doc == null -> deliverThroughLadder(current, run, result)
+            run.detached -> deliverUnwritten(current, run, result)
+            else -> deliverWritten(current, run, doc)
+        }
+    }
+
+    /** The field is gone: what was heard after the last write has nowhere to go but the clipboard. */
+    private fun deliverUnwritten(current: TakeSession, run: Run, result: LiveResult) {
+        val body = Pipeline.withoutSignOff(result.cleaned).trim()
+        run.placement = Placement(null, null, body)
+        dispatch(current, TakeEvent.EngineFinished(if (body.isBlank()) Delivery.BLANK else Delivery.NO_FIELD))
+    }
+
+    /** The dictation is in the field already; the stop only sets it as the ladder would have set an insert. */
+    private fun deliverWritten(current: TakeSession, run: Run, doc: FieldDocument) {
+        val state = checkNotNull(doc.read())
+        val end = run.engine.textEnd.coerceAtMost(state.text.length)
+        val start = run.engine.textStart.coerceAtMost(end)
+        val field = targetField(run)
+        val dictated = state.text.substring(start, end)
+        val body = Documents.finalText(dictated, run.textBefore, state.text, FieldPolicy.multiLine(field?.isMultiLine ?: true, field?.inputType ?: 0), cfg)
+        if (body != dictated) doc.replace(start, end, body)
+        run.placement = Placement(field, state.text, body.trim())
+        dispatch(current, TakeEvent.EngineFinished(if (body.isBlank()) Delivery.BLANK else Delivery.INSERT))
+    }
+
+    private fun deliverThroughLadder(current: TakeSession, run: Run, result: LiveResult) {
         val take = run.take
         val field = targetField(run)
         val otherPackage = field != null && take.pkg != UNKNOWN_PACKAGE && field.packageName?.toString() != take.pkg
@@ -313,6 +380,10 @@ class TakeController(
     }
 
     private fun insert(current: TakeSession, run: Run, trigger: String) {
+        if (run.fieldDoc != null && !run.detached) {
+            logWritten(current, run, trigger)
+            return
+        }
         val take = run.take
         val result = checkNotNull(run.result)
         val placement = checkNotNull(run.placement)
@@ -346,6 +417,31 @@ class TakeController(
             "stop_to_insert_ms" to SystemClock.elapsedRealtime() - run.stoppedAtMs,
             *run.cost.lap().toTypedArray())
         track(take, field, if (outcome.readback == "landed") written else null, caretAfter.end.takeIf { caretAfter.known })
+    }
+
+    private fun logWritten(current: TakeSession, run: Run, trigger: String) {
+        val take = run.take
+        val result = checkNotNull(run.result)
+        val placement = checkNotNull(run.placement)
+        run.sampler.stop()
+        log.write("insert", take.id,
+            "pkg" to take.pkg, "raw" to result.raw, "cleaned" to placement.body, "text_before" to run.textBefore,
+            "insert_path" to "field", "readback" to null, "landed_count" to null, "attempts" to null,
+            "sel_before" to null, "sel_after" to null,
+            "asr_ms" to result.asrMs, "clean_ms" to result.cleanMs, "asr_backend" to "cpu", "clean_backend" to "cpu",
+            "audio_ms" to result.audioMs, "zero_ms" to run.level.zeroMs, "peak_dbfs" to run.level.peakDbfs,
+            "in_tokens" to result.inTokens, "out_tokens" to result.outTokens,
+            "clean_mode" to result.cleanMode, "clean_policy" to run.engine.policyName, "chunks" to result.chunks,
+            "idle_cleans" to result.idleCleans, "idle_hits" to result.idleHits, "cue" to result.cue,
+            "context_decodes" to result.contextDecodes, "context_fallbacks" to result.contextFallbacks, "drifts" to result.drifts, "rejects" to result.rejects,
+            "corrections" to result.corrections, "corrections_kept" to result.correctionsKept,
+            "trigger" to trigger, *swapFields(current), "a11y_conn" to service.a11yConnection(),
+            "asr_ms_after_stop" to result.asrMsAfterStop, "clean_ms_after_stop" to result.cleanMsAfterStop,
+            "stop_to_insert_ms" to SystemClock.elapsedRealtime() - run.stoppedAtMs,
+            *run.cost.lap().toTypedArray())
+        val field = placement.field ?: return
+        val caret = run.fieldDoc?.read()
+        track(take, field, placement.body, caret?.selectionEnd)
     }
 
     /**

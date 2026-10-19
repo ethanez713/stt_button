@@ -72,7 +72,7 @@ private class NeedsCleaner : RuntimeException(null, null, false, false)
  * after audio has begun: the recorder feeds the slicer and calls [onAudio].
  */
 class TakeEngine(
-    private val document: Document,
+    document: Document,
     private val slicer: Slicer,
     private val recognizer: Recognizer,
     private val cleaner: Cleaner,
@@ -90,9 +90,14 @@ class TakeEngine(
     /** Something other than a job result may have changed what [next] returns. */
     var onWoken: (() -> Unit)? = null
 
+    /** The document went away and the rest of the take is in memory. */
+    var onDetached: (() -> Unit)? = null
+
     val policyName: String get() = policy.name
 
-    private val region = TakeRegion(document.read()?.selectionEnd ?: 0)
+    private var document = document
+    private var region = TakeRegion(document.read()?.selectionEnd ?: 0)
+    private var attachedFrom = 0
     private var lead = 0
     private var cleans = 0
     private var editsInside = 0
@@ -127,11 +132,46 @@ class TakeEngine(
         private set
 
     init {
+        hookEdits()
+    }
+
+    private fun hookEdits() {
         document.onEdit = { edit ->
             if (edit.at <= region.end && edit.at + edit.deleted >= region.start) editsInside++
             region.apply(edit)
             onWoken?.invoke()
         }
+    }
+
+    /** Where the take's own words begin and end in the document, after any opener. */
+    val textStart: Int get() = region.start + lead
+    val textEnd: Int get() = region.end
+
+    /** False while a write would land under the user's typing; the stop never waits. */
+    fun writesHeld(): Boolean = !stopping && document.writesHeld()
+
+    /**
+     * The document is gone: what the take hears from here on collects in memory, as the text of a take with no field,
+     * and what it already wrote stays where it is.
+     */
+    fun detach() {
+        document = BufferDocument()
+        hookEdits()
+        region = TakeRegion()
+        attachedFrom = texts.size
+        lead = 0
+        cleans = 0
+        editsInside = 0
+        revisionDropped = false
+        previousInline = false
+        kept.clear()
+        onDetached?.invoke()
+        onText?.invoke(regionText())
+    }
+
+    private fun readText(): String = document.read()?.text ?: run {
+        detach()
+        document.read()!!.text
     }
 
     val raw: String get() = Pipeline.joinSlices(texts)
@@ -204,8 +244,7 @@ class TakeEngine(
         return job
     }
 
-    private fun regionText(): String = document.read()?.text?.let { it.substring(region.start, region.end.coerceAtMost(it.length)) }
-        ?: throw IllegalStateException("the document is gone")
+    private fun regionText(): String = readText().let { it.substring(region.start, region.end.coerceAtMost(it.length)) }
 
     private fun nextSlice(): IntArray? {
         slicer.closedSlices(decoded).firstOrNull()?.let {
@@ -228,8 +267,9 @@ class TakeEngine(
 
     private fun planJob(): Job? {
         var moment = momentNow() ?: return null
+        if (writesHeld()) return null
         while (true) {
-            val text = document.read()?.text ?: throw IllegalStateException("the document is gone")
+            val text = readText()
             val tailStart = region.cleanEnd
             val tail = text.substring(tailStart, region.end.coerceAtMost(text.length))
             val plan = try {
@@ -299,11 +339,11 @@ class TakeEngine(
         asrMs += decoded.ms
         if (decoded.usedContext) contextDecodes++
         if (decoded.fellBack) contextFallbacks++
-        val text = document.read()?.text ?: throw IllegalStateException("the document is gone")
+        val text = readText()
         var from = region.end
-        val opener = if (texts.any { it.isNotEmpty() }) " " else Pipeline.takeOpener(text, region.start)
+        val opener = if (texts.drop(attachedFrom).any { it.isNotEmpty() }) " " else Pipeline.takeOpener(text, region.start)
         var written = if (decoded.text.isEmpty()) "" else opener + decoded.text
-        val previous = texts.lastOrNull().orEmpty()
+        val previous = texts.drop(attachedFrom).lastOrNull().orEmpty()
         if (decoded.mark != null && previous.isNotEmpty()) {
             val old = Pipeline.trailingMark(previous)
             val settled = Pipeline.settledMark(old, decoded.mark)
@@ -314,11 +354,20 @@ class TakeEngine(
                 written = settled + written
             }
         }
-        val first = texts.none { it.isNotEmpty() } && decoded.text.isNotEmpty()
+        var first = texts.drop(attachedFrom).none { it.isNotEmpty() } && decoded.text.isNotEmpty()
         texts += decoded.text
         if (written.isNotEmpty() || from != region.end) {
-            document.replace(from, region.end, written)
-            region.appended(written.length - (region.end - from))
+            if (!document.replace(from, region.end, written)) {
+                detach()
+                attachedFrom = texts.size - 1
+                first = false
+                from = 0
+                written = decoded.text
+                document.replace(0, 0, written)
+                region.appended(written.length)
+            } else {
+                region.appended(written.length - (region.end - from))
+            }
         }
         if (first) {
             lead = opener.length
@@ -405,7 +454,7 @@ class TakeEngine(
 
     /** Writes [output] over the flight, set off from the cleaned text before it as `Pipeline.joinCleaned` sets chunks off. */
     private fun apply(from: Int, to: Int, output: String, plan: CleanPlan) {
-        val text = document.read()?.text ?: throw IllegalStateException("the document is gone")
+        val text = readText()
         if (plan.region) {
             document.replace(from, to, output)
             region.flightReplaced(output.length)
