@@ -30,4 +30,23 @@ class AudioLevelTest {
         assertEquals(0.0, level.peakDbfs, 0.05)
         assertEquals(100, level.zeroMs)
     }
+
+    @Test
+    fun given_no_completed_window_when_read_then_recent_dbfs_is_the_floor() {
+        val level = AudioLevel()
+        assertEquals(-120.0, level.recentDbfs, 0.0)
+        level.add(ShortArray(1599), 1599)
+        assertEquals(-120.0, level.recentDbfs, 0.0)
+    }
+
+    @Test
+    fun given_a_loud_window_then_silence_when_read_then_recent_dbfs_is_the_latest_window() {
+        val level = AudioLevel()
+        level.add(ShortArray(1600) { Short.MIN_VALUE }, 1600)
+        assertEquals(0.0, level.recentDbfs, 0.0)
+        level.add(ShortArray(1600), 1600)
+        assertEquals(-120.0, level.recentDbfs, 0.0)
+        assertEquals(0.0, level.peakDbfs, 0.05)
+        assertEquals(100, level.zeroMs)
+    }
 }

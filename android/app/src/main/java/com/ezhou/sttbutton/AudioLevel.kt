@@ -44,6 +44,10 @@ class AudioLevel {
     /** Samples received so far, including a trailing partial window, in milliseconds. */
     val audioMs: Long get() = synchronized(this) { samples * 1000L / RATE }
 
+    /** dBFS of the latest completed window, or [DBFS_FLOOR] before one, read without the lock [add] holds. */
+    @Volatile var recentDbfs: Double = DBFS_FLOOR
+        private set
+
     private fun score() {
         var sum = 0L
         for (sample in pending) {
@@ -58,6 +62,7 @@ class AudioLevel {
             max(DBFS_FLOOR, 20.0 * log10(rms / FULL_SCALE))
         }
         if (level > peak) peak = level
+        recentDbfs = level
     }
 
     private companion object {
