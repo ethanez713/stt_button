@@ -173,6 +173,41 @@ def field_reads(lines: list[dict]) -> list[str]:
     return out
 
 
+def _number(value) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def lag_table(lines: list[dict]) -> list[str]:
+    """How long a slice's text took to reach the document: per `insert_path`, the median and p90 of `lag_ms` for a
+    take's first slice and for the slices after it, and the median `ms` of `load` jobs."""
+    path_of = {}
+    for line in lines:
+        if line.get("event") == "insert" and line.get("insert_path") and line["id"] not in path_of:
+            path_of[line["id"]] = line["insert_path"]
+    lags = defaultdict(list)
+    seen = defaultdict(int)
+    for line in lines:
+        if line.get("event") != "job" or line.get("kind") != "asr" or line.get("id") not in path_of:
+            continue
+        index = seen[line["id"]]
+        seen[line["id"]] += 1
+        if not _number(line.get("lag_ms")):
+            continue
+        lags[(path_of[line["id"]], "first" if index == 0 else "later")].append(line["lag_ms"])
+    loads = [line["ms"] for line in lines
+             if line.get("event") == "job" and line.get("kind") == "load" and _number(line.get("ms"))]
+    if not lags and not loads:
+        return []
+    out = ["\nlag_ms:"]
+    for path in sorted({path for path, _ in lags}, key=str):
+        for label, key in (("first slice", "first"), ("later slices", "later")):
+            values = lags.get((path, key), [])
+            out.append(f"  {path} {label}: median {fmt(median(values))} "
+                       f"p90 {fmt(percentile(values, 0.9))} over {len(values)}")
+    out.append(f"  load ms: median {fmt(median(loads))} over {len(loads)}")
+    return out
+
+
 def field_path(lines: list[dict]) -> list[str]:
     """Takes written into their field as they were heard: per `insert_path`, how many, the median writes and how
     many waited for typing; takes the field ended; and the revisions at the stop from the `job` lines."""
@@ -266,6 +301,7 @@ def summarize(lines: list[dict], capacity_mah: float = 5000) -> str:
     out.extend(swap_table(lines))
     out.extend(field_reads(lines))
     out.extend(field_path(lines))
+    out.extend(lag_table(lines))
 
     exits = Counter(line.get("reason") for line in lines if line.get("event") == "exit")
     out.append("process exits: " + (", ".join(f"{k} {n}" for k, n in exits.most_common()) or "none"))

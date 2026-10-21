@@ -247,6 +247,7 @@ class TakeController(
             fieldDoc ?: BufferDocument(), slicer, models.recognizer, models.cleaner(),
             if (fieldDoc != null) RevisePolicy(cfg) else ChunkPolicy(cfg), cfg,
             jobs = { writeJob(take.id, it) }, prepareCleaner = models::prepareCleaner,
+            nowMs = SystemClock::elapsedRealtime,
         ).also {
             it.onText = if (fieldDoc != null) null else bubbleText::region
             it.onCovered = bubbleText::covered
@@ -488,7 +489,7 @@ class TakeController(
             "in" to record.input, "out" to record.output, "outcome" to record.outcome,
             "in_tokens" to record.inTokens, "out_tokens" to record.outTokens,
             "from_ms" to record.fromMs, "to_ms" to record.toMs, "context" to record.context, "scope" to record.scope,
-            "reason" to record.reason)
+            "reason" to record.reason, "wait_ms" to record.waitMs, "lag_ms" to record.lagMs)
     }
 
     private fun swapFields(current: TakeSession): Array<Pair<String, Any?>> =

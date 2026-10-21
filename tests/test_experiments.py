@@ -265,6 +265,33 @@ class TestPhoneUsage:
         assert "takes ended by the field going away: 1 (t4)" in report
         assert "revisions: 1 takes revised, 1 dropped, median 900 ms" in report
 
+    def test_the_lag_table_splits_the_first_slice_from_later_ones_and_reports_the_load(self):
+        from experiments import phone_usage
+        lines = [
+            self.insert(1, insert_path="field"),
+            {"event": "job", "id": "t1", "kind": "asr", "lag_ms": 1000},
+            {"event": "job", "id": "t1", "kind": "asr", "lag_ms": 0},
+            {"event": "job", "id": "t1", "kind": "asr", "lag_ms": None},
+            self.insert(2, insert_path="field"),
+            {"event": "job", "id": "t2", "kind": "asr", "lag_ms": 3000},
+            {"event": "job", "id": "t2", "kind": "asr", "lag_ms": 800},
+            self.insert(3, insert_path="ladder"),
+            {"event": "job", "id": "t3", "kind": "asr", "lag_ms": 100},
+            self.insert(4, insert_path="ladder"),
+            {"event": "job", "id": "t4", "kind": "asr", "lag_ms": None},
+            {"event": "job", "id": "t4", "kind": "asr", "lag_ms": 500},
+            {"event": "job", "id": "t1", "kind": "load", "ms": 900},
+            {"event": "job", "id": "t2", "kind": "load", "ms": 1100},
+            {"event": "job", "id": "t1", "kind": "clean", "ms": 50, "lag_ms": 1},
+        ]
+        report = phone_usage.summarize(lines)
+        assert "field first slice: median 2000 p90 3000 over 2" in report
+        assert "field later slices: median 400 p90 800 over 2" in report
+        assert "ladder first slice: median 100 p90 100 over 1" in report
+        assert "ladder later slices: median 500 p90 500 over 1" in report
+        assert "load ms: median 1000 over 2" in report
+        assert "lag_ms:" not in phone_usage.summarize([self.insert(1)])
+
     def test_a_report_of_takes_from_before_the_field_path_has_no_field_path_table(self):
         from experiments import phone_usage
         assert "field path" not in phone_usage.summarize([self.insert(1)])

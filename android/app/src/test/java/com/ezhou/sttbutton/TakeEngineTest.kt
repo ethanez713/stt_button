@@ -63,10 +63,11 @@ class TakeEngineTest {
         val slicer: Slicer = Slicer.fromConfig(cfg),
         prepare: (String) -> Unit = {},
         pauseOpen: Boolean = true,
+        nowMs: () -> Long = { System.nanoTime() / 1_000_000 },
     ) {
         val records = mutableListOf<JobRecord>()
         val policy = GatedPolicy(ChunkPolicy(cfg)).also { it.pauseOpen = pauseOpen }
-        val engine = TakeEngine(doc, slicer, recognizer, cleaner, policy, cfg, jobs = { records += it }, prepareCleaner = prepare)
+        val engine = TakeEngine(doc, slicer, recognizer, cleaner, policy, cfg, jobs = { records += it }, prepareCleaner = prepare, nowMs = nowMs)
         val driver = SerialDriver(engine)
 
         fun feed(samples: ShortArray) {
@@ -495,5 +496,106 @@ class TakeEngineTest {
         assertEquals("chunk", Rig(cfg, ScriptedRecognizer()).engine.policyName)
         assertFalse(Rig(cfg, ScriptedRecognizer()).engine.stopping)
         assertNotNull(Rig(cfg, ScriptedRecognizer()).engine)
+    }
+
+    private class Clock(var now: Long)
+
+    @Test
+    fun given_two_slices_closing_apart_when_each_is_decoded_later_then_wait_and_lag_follow_that_slice() {
+        val clock = Clock(20_000)
+        val rig = Rig(cfg, ScriptedRecognizer("one two three four five", "six seven eight nine ten"), nowMs = { clock.now })
+        val first = audio(3.0, 2.0)
+        rig.slicer.feed(first)
+        rig.engine.onAudio()
+        assertEquals(1, rig.slicer.closedSlices(0).size)
+        clock.now = 30_000
+        rig.slicer.feed(audio(3.0, 2.0))
+        rig.engine.onAudio()
+        assertEquals(2, rig.slicer.closedSlices(0).size)
+        val origin = 20_000 - first.size.toLong() / (Slicer.SAMPLE_RATE / 1000)
+
+        clock.now = 32_000
+        val earlier = rig.engine.next()!!
+        val earlierDecoded = earlier.run()
+        clock.now = 35_000
+        rig.engine.complete(earlier, earlierDecoded)
+        clock.now = 40_000
+        val later = rig.engine.next()!!
+        val laterDecoded = later.run()
+        clock.now = 46_000
+        rig.engine.complete(later, laterDecoded)
+
+        val asr = rig.records.filter { it.kind == "asr" }
+        assertEquals(listOf(12_000L, 10_000L), asr.map { it.waitMs })
+        assertEquals(35_000 - (origin + asr[0].toMs!!), asr[0].lagMs)
+        assertEquals(46_000 - (origin + asr[1].toMs!!), asr[1].lagMs)
+        assertTrue(asr[1].toMs!! > asr[0].toMs!!)
+    }
+
+    @Test
+    fun given_a_slice_whose_decode_is_empty_when_it_lands_then_lag_is_null_and_wait_is_kept() {
+        val clock = Clock(1_000)
+        val rig = Rig(cfg, ScriptedRecognizer(""), nowMs = { clock.now })
+        rig.slicer.feed(audio(3.0, 2.0))
+        rig.engine.onAudio()
+        clock.now = 5_000
+        val job = rig.engine.next()!!
+        val decoded = job.run()
+        clock.now = 9_000
+        rig.engine.complete(job, decoded)
+
+        val asr = rig.records.single { it.kind == "asr" }
+        assertEquals("", rig.doc.read()!!.text)
+        assertEquals(4_000L, asr.waitMs)
+        assertNull(asr.lagMs)
+    }
+
+    @Test
+    fun given_the_tail_when_the_take_stops_then_wait_runs_from_the_stop_and_lag_from_the_last_sample() {
+        val clock = Clock(1_000)
+        val rig = Rig(cfg, ScriptedRecognizer("one two three four five"), nowMs = { clock.now })
+        rig.slicer.feed(audio(3.0, 0.0))
+        rig.engine.onAudio()
+        assertEquals(0, rig.slicer.closedSlices(0).size)
+        clock.now = 5_000
+        rig.engine.stop()
+        clock.now = 8_000
+        val job = rig.engine.next()!!
+        val decoded = job.run()
+        clock.now = 9_000
+        rig.engine.complete(job, decoded)
+
+        val asr = rig.records.single { it.kind == "asr" }
+        assertEquals(3_000L, asr.waitMs)
+        assertEquals(8_000L, asr.lagMs)
+    }
+
+    @Test
+    fun given_a_cleaner_that_has_not_loaded_when_its_load_blocks_then_the_load_line_records_the_milliseconds() {
+        val clock = Clock(0)
+        var loaded = false
+        val cleaner = object : Cleaner {
+            override fun countTokens(text: String): Int {
+                if (text.isEmpty()) clock.now += 1_700
+                loaded = true
+                return Pipeline.wordCount(text)
+            }
+            override val tokenCounter: ((String) -> Int)? get() = if (loaded) ::countTokens else null
+            override fun clean(request: CleanRequest) = CleanResult(request.target.uppercase(), 1)
+            override fun cancel() = Unit
+        }
+        val rig = Rig(cfg, ScriptedRecognizer(labelled("a", 3)), cleaner, nowMs = { clock.now })
+        rig.slicer.feed(audio(3.0, 2.0))
+        rig.engine.onAudio()
+        val decode = rig.engine.next()!!
+        rig.engine.complete(decode, decode.run())
+
+        val load = rig.engine.next()!!
+        assertEquals(Job.Kind.LOAD, load.kind)
+        rig.engine.complete(load, load.run())
+
+        val record = rig.records.single { it.kind == "load" }
+        assertEquals(1_700L, record.ms)
+        assertEquals("slice", record.moment)
     }
 }

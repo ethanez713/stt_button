@@ -25,7 +25,7 @@ class LiveResult(
     val rejects: Int = 0,
 )
 
-/** One model call, as the job log records it. */
+/** One line of the job log. */
 class JobRecord(
     val kind: String,
     val moment: String,
@@ -41,12 +41,14 @@ class JobRecord(
     val scope: String? = null,
     /** Why a clean's output was not trusted, as `Pipeline.untrustedClean` names it. */
     val reason: String? = null,
+    val waitMs: Long? = null,
+    val lagMs: Long? = null,
 )
 
 sealed interface JobResult
-class Decoded(val text: String, val mark: String?, val usedContext: Boolean, val fellBack: Boolean, val ms: Long) : JobResult
+class Decoded(val text: String, val mark: String?, val usedContext: Boolean, val fellBack: Boolean, val ms: Long, val waitMs: Long?) : JobResult
 class Cleaned(val text: String?, val rejected: String?, val inTokens: Int, val outTokens: Int, val ms: Long) : JobResult
-object Loaded : JobResult
+class Loaded(val ms: Long) : JobResult
 
 /** Work the engine wants done. [run] is the only part that waits on a model, and is safe on another thread. */
 class Job internal constructor(
@@ -80,6 +82,7 @@ class TakeEngine(
     private val cfg: PipelineConfig,
     private val jobs: (JobRecord) -> Unit = {},
     private val prepareCleaner: (trigger: String) -> Unit = {},
+    private val nowMs: () -> Long = { System.nanoTime() / 1_000_000 },
 ) {
     /** The region's text, after every change the take made. */
     var onText: ((String) -> Unit)? = null
@@ -127,6 +130,10 @@ class TakeEngine(
 
     @Volatile private var abandonSpoken: Int? = null
     private var timedLoadRequested = false
+    private val timing = Any()
+    private val closedAtMs = HashMap<Int, Long>()
+    private var seenClosed = 0
+    private var recordingStartMs: Long? = null
 
     var stopping = false
         private set
@@ -181,6 +188,7 @@ class TakeEngine(
 
     /** Recorder thread, after each feed of the slicer. */
     fun onAudio() {
+        noteTiming()
         if (!timedLoadRequested && slicer.sampleCount >= cfg.cleanerLoadAfterS * Slicer.SAMPLE_RATE) {
             timedLoadRequested = true
             prepareCleaner("time")
@@ -199,6 +207,9 @@ class TakeEngine(
         if (stopping) return
         stopping = true
         finalSlice = slicer.finish().firstOrNull()
+        val tail = finalSlice ?: return
+        val at = nowMs()
+        synchronized(timing) { closedAtMs.putIfAbsent(tail[1], at) }
     }
 
     fun next(): Job? {
@@ -213,7 +224,7 @@ class TakeEngine(
         when (job.kind) {
             Job.Kind.DECODE -> completeDecode(job, result as Decoded)
             Job.Kind.CLEAN -> completeClean(job, result as Cleaned)
-            Job.Kind.LOAD -> Unit
+            Job.Kind.LOAD -> completeLoad(job, result as Loaded)
         }
     }
 
@@ -300,8 +311,9 @@ class TakeEngine(
     private fun counter(): (String) -> Int = cleaner.tokenCounter ?: { throw NeedsCleaner() }
 
     private fun loadJob(moment: Moment) = start(Job(Job.Kind.LOAD, moment) {
+        val started = nowMs()
         cleaner.countTokens("")
-        Loaded
+        Loaded(nowMs() - started)
     })
 
     private fun samples(from: Int, to: Int): FloatArray = slicer.copy(from, to).let { pcm -> FloatArray(pcm.size) { pcm[it] / 32768f } }
@@ -312,6 +324,7 @@ class TakeEngine(
         val withContext = texts.isNotEmpty() && before != null && after != null && after < slice[1]
         val moment = if (stopping) Moment.FINISH else Moment.SLICE
         return Job(Job.Kind.DECODE, moment, slice = slice) {
+            val waited = waitMs(slice[1])
             val started = System.nanoTime()
             fun plain() = recognizer.recognize(RecognizeRequest(samples(slice[0], slice[1]))).text
             var text: String
@@ -330,7 +343,7 @@ class TakeEngine(
                     mark = heard.mark.orEmpty()
                 }
             }
-            Decoded(Pipeline.stripHidden(text), mark, withContext, fellBack, elapsedMs(started))
+            Decoded(Pipeline.stripHidden(text), mark, withContext, fellBack, elapsedMs(started), waited)
         }
     }
 
@@ -356,7 +369,8 @@ class TakeEngine(
         }
         var first = texts.drop(attachedFrom).none { it.isNotEmpty() } && decoded.text.isNotEmpty()
         texts += decoded.text
-        if (written.isNotEmpty() || from != region.end) {
+        val wrote = written.isNotEmpty() || from != region.end
+        if (wrote) {
             if (!document.replace(from, region.end, written)) {
                 detach()
                 attachedFrom = texts.size - 1
@@ -374,7 +388,8 @@ class TakeEngine(
             region.skipLead(lead)
         }
         jobs(JobRecord("asr", job.moment.name.lowercase(), decoded.ms, null, decoded.text, if (decoded.fellBack) "fallback" else "applied",
-            fromMs = slice[0].toLong() / (Slicer.SAMPLE_RATE / 1000), toMs = slice[1].toLong() / (Slicer.SAMPLE_RATE / 1000), context = decoded.usedContext))
+            fromMs = samplesToMs(slice[0]), toMs = samplesToMs(slice[1]), context = decoded.usedContext,
+            waitMs = decoded.waitMs, lagMs = lagMs(slice[1], wrote)))
         sliceLanded = true
         if (!Pipeline.skipsCleaner(raw, cfg)) prepareCleaner("text")
         onCovered?.invoke(slice[1].toDouble() / Slicer.SAMPLE_RATE)
@@ -475,6 +490,33 @@ class TakeEngine(
         region.flightReplaced((separator + output).length)
         onText?.invoke(regionText())
     }
+
+    private fun completeLoad(job: Job, loaded: Loaded) {
+        jobs(JobRecord("load", job.moment.name.lowercase(), loaded.ms, null, null, "applied"))
+    }
+
+    private fun noteTiming() {
+        val samples = slicer.sampleCount
+        val at = nowMs()
+        val fresh = slicer.closedSlices(seenClosed)
+        synchronized(timing) {
+            if (recordingStartMs == null) recordingStartMs = at - samplesToMs(samples)
+            for (slice in fresh) closedAtMs.putIfAbsent(slice[1], at)
+            seenClosed += fresh.size
+        }
+    }
+
+    private fun waitMs(sliceEnd: Int): Long? = synchronized(timing) {
+        closedAtMs[sliceEnd]?.let { nowMs() - it }
+    }
+
+    private fun lagMs(sliceEnd: Int, wrote: Boolean): Long? {
+        if (!wrote) return null
+        val toMs = samplesToMs(sliceEnd)
+        return synchronized(timing) { recordingStartMs?.let { nowMs() - (it + toMs) } }
+    }
+
+    private fun samplesToMs(samples: Int) = samples.toLong() / (Slicer.SAMPLE_RATE / 1000)
 
     private fun elapsedMs(since: Long) = (System.nanoTime() - since) / 1_000_000
 }
