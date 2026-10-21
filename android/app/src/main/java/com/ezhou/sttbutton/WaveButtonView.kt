@@ -105,10 +105,6 @@ class WaveButtonView(
         scheduled = false
         if (mode != ButtonMode.RECORDING || !isAttachedToWindow) return
         val now = SystemClock.uptimeMillis()
-        if (lastDrawnAt != 0L && now - lastDrawnAt < MIN_FRAME_MS) {
-            postFrame()
-            return
-        }
         val dt = if (lastDrawnAt == 0L) 0.0 else (now - lastDrawnAt) / 1000.0
         lastDrawnAt = now
         shown = wave.update(level())
@@ -120,7 +116,7 @@ class WaveButtonView(
     private fun postFrame() {
         if (scheduled || mode != ButtonMode.RECORDING || !isAttachedToWindow) return
         scheduled = true
-        postOnAnimation(frame)
+        postOnAnimationDelayed(frame, MIN_FRAME_MS)
     }
 
     private fun stopFrames() {
