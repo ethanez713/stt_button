@@ -20,3 +20,8 @@ data/
 # Fetched by android/fetch_native.sh
 android/app/src/main/jniLibs/
 android/app/.cxx/
+
+# Local notes: kept on disk, not published
+CLAUDE.local.md
+docs/plans/
+docs/research/

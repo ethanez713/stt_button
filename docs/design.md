@@ -2,7 +2,7 @@
 
 A personal Android dictation tool: while Gboard is in English, a button sits on Gboard's microphone, runs local speech recognition, then a small cleanup model, and types the result into whatever field is focused. On any other keyboard language the microphone is left uncovered, so Gboard's own voice typing still receives the tap. The host can record from this machine's microphone and run the same two stages on the recording, so model choices are tested here before anything is installed on the phone.
 
-Wispr Flow is the behavior reference. Its architecture is recorded in `docs/research/wispr-flow.md`. Nothing in that build is reused: no code, no endpoints, no account, no analytics SDK.
+Wispr Flow is the behavior reference. Nothing in that build is reused: no code, no endpoints, no account, no analytics SDK.
 
 ## Constraints
 
