@@ -8,6 +8,9 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import kotlin.concurrent.thread
 
 /**
  * Goal: one engine replaces the earlier take class without changing what any take inserts.
@@ -53,6 +56,26 @@ class TakeEngineTest {
         override fun cancel() {
             cancelled = true
         }
+    }
+
+    private class LatchCleaner(private val release: CountDownLatch) : Cleaner {
+        val entered = CountDownLatch(1)
+        @Volatile private var loaded = false
+
+        override fun countTokens(text: String): Int {
+            if (!loaded) {
+                entered.countDown()
+                if (!release.await(8, TimeUnit.SECONDS)) error("cleaner load was not released")
+                loaded = true
+            }
+            return Pipeline.wordCount(text)
+        }
+
+        override val tokenCounter: ((String) -> Int)? get() = if (loaded) ::countTokens else null
+
+        override fun clean(request: CleanRequest) = CleanResult(request.target.uppercase(), 1)
+
+        override fun cancel() = Unit
     }
 
     private class Rig(
@@ -585,8 +608,9 @@ class TakeEngineTest {
             override fun cancel() = Unit
         }
         val rig = Rig(cfg, ScriptedRecognizer(labelled("a", 3)), cleaner, nowMs = { clock.now })
-        rig.slicer.feed(audio(3.0, 2.0))
+        rig.slicer.feed(audio(3.0, 0.0))
         rig.engine.onAudio()
+        rig.engine.stop()
         val decode = rig.engine.next()!!
         rig.engine.complete(decode, decode.run())
 
@@ -596,6 +620,142 @@ class TakeEngineTest {
 
         val record = rig.records.single { it.kind == "load" }
         assertEquals(1_700L, record.ms)
-        assertEquals("slice", record.moment)
+        assertEquals("finish", record.moment)
+    }
+
+    @Test(timeout = 10_000)
+    fun given_a_cleaner_load_blocked_on_a_latch_when_a_second_slice_closes_then_it_is_decoded_and_written() {
+        val release = CountDownLatch(1)
+        val cleaner = LatchCleaner(release)
+        var loader: Thread? = null
+        val triggers = mutableListOf<String>()
+        try {
+            val rig = Rig(cfg, ScriptedRecognizer(labelled("a", 3), labelled("b", 3)), cleaner, prepare = { trigger ->
+                triggers += trigger
+                if (loader == null) loader = thread(name = "cleaner-loader") { cleaner.countTokens("") }
+            })
+            rig.slicer.feed(audio(3.0, 2.0))
+            rig.engine.onAudio()
+            val first = rig.engine.next()!!
+            assertEquals(Job.Kind.DECODE, first.kind)
+            rig.engine.complete(first, first.run())
+
+            assertNull(rig.engine.next())
+            assertEquals(listOf("text", "text"), triggers)
+            assertTrue(cleaner.entered.await(5, TimeUnit.SECONDS))
+
+            rig.slicer.feed(audio(3.0, 2.0))
+            rig.engine.onAudio()
+            val second = rig.engine.next()!!
+            assertEquals(Job.Kind.DECODE, second.kind)
+            rig.engine.complete(second, second.run())
+
+            assertEquals(labelled("a", 3) + " " + labelled("b", 3), rig.doc.read()!!.text)
+            assertTrue(rig.records.none { it.kind == "load" })
+            assertTrue(loader!!.isAlive)
+        } finally {
+            release.countDown()
+            loader?.join(5_000)
+        }
+    }
+
+    @Test(timeout = 10_000)
+    fun given_a_cleaner_load_blocked_on_a_latch_when_the_take_finishes_then_it_waits_and_cleans() {
+        val release = CountDownLatch(1)
+        val cleaner = LatchCleaner(release)
+        try {
+            val rig = Rig(cfg, ScriptedRecognizer(labelled("a", 3)), cleaner)
+            rig.slicer.feed(audio(3.0, 0.0))
+            rig.engine.onAudio()
+            rig.engine.stop()
+            val decode = rig.engine.next()!!
+            rig.engine.complete(decode, decode.run())
+
+            val load = rig.engine.next()!!
+            assertEquals(Job.Kind.LOAD, load.kind)
+            var failure: Throwable? = null
+            val runner = thread {
+                try {
+                    rig.engine.complete(load, load.run())
+                } catch (t: Throwable) {
+                    failure = t
+                }
+            }
+            assertTrue(cleaner.entered.await(5, TimeUnit.SECONDS))
+            assertTrue(runner.isAlive)
+            release.countDown()
+            runner.join(5_000)
+            assertFalse(runner.isAlive)
+            assertNull(failure)
+
+            rig.driver.drain()
+            val result = rig.engine.result()
+            assertEquals("chunks", result.cleanMode)
+            assertTrue(result.chunks > 0)
+            assertTrue(result.cleaned.contains("A1"))
+            assertFalse(result.cleaned.contains("a"))
+            assertEquals("finish", rig.records.single { it.kind == "load" }.moment)
+        } finally {
+            release.countDown()
+        }
+    }
+
+    @Test(timeout = 10_000)
+    fun given_a_held_slice_plan_when_the_cleaner_arrives_then_the_callback_lets_it_proceed() {
+        val release = CountDownLatch(1)
+        val entered = CountDownLatch(1)
+        val models = Models(
+            {
+                object : ClosableRecognizer {
+                    override fun recognize(request: RecognizeRequest) = Recognized("")
+                    override fun close() = Unit
+                }
+            },
+            {
+                entered.countDown()
+                if (!release.await(8, TimeUnit.SECONDS)) error("cleaner load was not released")
+                object : ClosableCleaner {
+                    override fun countTokens(text: String) = Pipeline.wordCount(text)
+                    override fun clean(request: CleanRequest) = CleanResult(request.target.uppercase(), 1)
+                    override fun cancel() = Unit
+                    override fun close() = Unit
+                }
+            },
+            { },
+        )
+        try {
+            val rig = Rig(cfg, ScriptedRecognizer(labelled("a", 3)), models.cleaner(), prepare = models::prepareCleaner)
+            val proceeded = CountDownLatch(1)
+            var failure: Throwable? = null
+            var threadName = ""
+            models.onCleanerLoaded = {
+                threadName = Thread.currentThread().name
+                try {
+                    val job = rig.engine.next() ?: error("held plan did not proceed")
+                    check(job.kind == Job.Kind.CLEAN)
+                    rig.engine.complete(job, job.run())
+                } catch (t: Throwable) {
+                    failure = t
+                } finally {
+                    proceeded.countDown()
+                }
+            }
+            rig.slicer.feed(audio(3.0, 2.0))
+            rig.engine.onAudio()
+            val decode = rig.engine.next()!!
+            rig.engine.complete(decode, decode.run())
+            assertTrue(entered.await(5, TimeUnit.SECONDS))
+            assertNull(rig.engine.next())
+
+            release.countDown()
+            assertTrue(proceeded.await(5, TimeUnit.SECONDS))
+            assertNull(failure)
+            assertEquals("cleaner-loader", threadName)
+            assertTrue(rig.doc.read()!!.text.contains("A1"))
+            assertEquals("applied", rig.records.last { it.kind == "clean" }.outcome)
+        } finally {
+            release.countDown()
+            models.close()
+        }
     }
 }

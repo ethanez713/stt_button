@@ -176,24 +176,27 @@ class Models(
         }
     }.apply { name = "preview-loader"; start() }
 
+    /** The cleaner load ended; a take waiting on the token counter can plan again. */
+    @Volatile var onCleanerLoaded: (() -> Unit)? = null
+
     /** Starts loading the cleaner if nothing has; [trigger] is logged by the call that starts it. */
     fun prepareCleaner(trigger: String) {
         if (!cleanerRequested.compareAndSet(false, true)) return
         synchronized(this) {
-            if (closed) {
-                cleanerReady.countDown()
-                return
-            }
+            val alreadyClosed = closed
             cleanerLoader = Thread {
                 try {
-                    val started = System.nanoTime()
-                    cleanerModel = loadCleaner()
-                    log("cleaner loaded ms=${(System.nanoTime() - started) / 1_000_000} trigger=$trigger")
+                    if (!alreadyClosed) {
+                        val started = System.nanoTime()
+                        cleanerModel = loadCleaner()
+                        log("cleaner loaded ms=${(System.nanoTime() - started) / 1_000_000} trigger=$trigger")
+                    }
                 } catch (e: Throwable) {
                     cleanerFailure = e
                     Log.e(DictationService.TAG, "cleaner load failed", e)
                 } finally {
                     cleanerReady.countDown()
+                    onCleanerLoaded?.invoke()
                 }
             }.apply { name = "cleaner-loader"; start() }
         }

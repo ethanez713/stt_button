@@ -4,6 +4,8 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 class ModelsTest {
     private class FakeRecognizer : ClosableRecognizer {
@@ -103,5 +105,53 @@ class ModelsTest {
         val failure = runCatching { models.cleaner().countTokens("x") }.exceptionOrNull()
         assertTrue(failure is IllegalStateException)
         assertEquals(0, cleanerLoads)
+    }
+
+    @Test(timeout = 10_000)
+    fun given_a_cleaner_load_when_it_finishes_then_the_callback_sees_the_token_counter() {
+        val models = models()
+        val ran = CountDownLatch(1)
+        var tokens: Int? = null
+        var threadName = ""
+        models.onCleanerLoaded = {
+            threadName = Thread.currentThread().name
+            tokens = models.cleaner().tokenCounter?.invoke("a b")
+            ran.countDown()
+        }
+        models.prepareCleaner("text")
+        assertTrue(ran.await(5, TimeUnit.SECONDS))
+        assertEquals("cleaner-loader", threadName)
+        assertEquals(2, tokens)
+        models.close()
+    }
+
+    @Test(timeout = 10_000)
+    fun given_a_cleaner_that_fails_to_load_when_the_load_ends_then_the_callback_runs() {
+        val models = Models({ recognizer }, { error("no model") }, { logs += it })
+        val ran = CountDownLatch(1)
+        var reusable = true
+        models.onCleanerLoaded = {
+            reusable = models.reusable
+            ran.countDown()
+        }
+        models.prepareCleaner("text")
+        assertTrue(ran.await(5, TimeUnit.SECONDS))
+        assertEquals(false, reusable)
+        models.close()
+    }
+
+    @Test(timeout = 10_000)
+    fun given_closed_models_when_prepare_runs_then_the_callback_runs_on_the_loader_thread() {
+        val models = models()
+        models.close()
+        val ran = CountDownLatch(1)
+        var threadName = ""
+        models.onCleanerLoaded = {
+            threadName = Thread.currentThread().name
+            ran.countDown()
+        }
+        models.prepareCleaner("text")
+        assertTrue(ran.await(5, TimeUnit.SECONDS))
+        assertEquals("cleaner-loader", threadName)
     }
 }

@@ -270,6 +270,7 @@ class TakeController(
             },
             onTick = { runs[current]?.let { if (cfg.stopSilenceS?.let { limit -> engine.silenceS() >= limit } == true) dispatch(current, TakeEvent.Silence) } },
         )
+        models.onCleanerLoaded = driver::wake
         val preview = PreviewRecognizer(models::awaitPreview, bubbleText::preview)
         val pcm = File(takesDir, "${take.id}.pcm")
         val level = AudioLevel()
@@ -511,6 +512,7 @@ class TakeController(
     }
 
     private fun release(current: TakeSession, run: Run) {
+        run.models.onCleanerLoaded = null
         Log.i(tag, "take end state=${run.take.state} reason=${run.take.discardReason?.logName}")
         run.sampler.stop()
         bubble.hide()

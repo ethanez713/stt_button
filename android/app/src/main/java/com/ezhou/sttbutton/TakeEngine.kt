@@ -291,8 +291,10 @@ class TakeEngine(
                     ),
                     moment,
                 )
-            } catch (e: NeedsCleaner) {
-                return loadJob(moment)
+            } catch (_: NeedsCleaner) {
+                if (moment == Moment.FINISH) return loadJob(moment)
+                prepareCleaner("text")
+                return null
             }
             if (plan == null) {
                 if (moment != Moment.SLICE) return null
