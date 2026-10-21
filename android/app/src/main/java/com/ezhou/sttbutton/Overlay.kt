@@ -25,11 +25,12 @@ class Overlay(
     private val context: Context,
     private val onTap: () -> Unit,
     private val onPlacementChanged: () -> Unit,
+    private val level: () -> Double?,
 ) {
     private val windowManager = context.getSystemService(WindowManager::class.java)
     private val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
     private val density = context.resources.displayMetrics.density
-    private var view: View? = null
+    private var view: WaveButtonView? = null
     private var mode = ButtonMode.IDLE
     private var zones: DropZonesView? = null
     private var style = ButtonStyle.load(prefs)
@@ -89,6 +90,7 @@ class Overlay(
         params.flags = if (next == ButtonMode.IDLE) params.flags and WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON.inv()
         else params.flags or WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
         view?.let {
+            it.setMode(mode)
             it.background = oval(style.color(mode))
             windowManager.updateViewLayout(it, params)
         }
@@ -147,7 +149,7 @@ class Overlay(
     }
 
     @SuppressLint("ClickableViewAccessibility")
-    private fun createView(): View = View(context).apply {
+    private fun createView(): WaveButtonView = WaveButtonView(context, level, mode).apply {
         background = oval(style.color(mode))
         val slop = ViewConfiguration.get(context).scaledTouchSlop
         var downX = 0f

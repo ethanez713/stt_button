@@ -134,6 +134,9 @@ class TakeController(
         open?.let { dispatch(it, TakeEvent.LanguageLeft) }
     }
 
+    /** dBFS of the open take's latest window, or null when no take is open. */
+    fun currentLevelDbfs(): Double? = open?.let { runs[it] }?.level?.recentDbfs
+
     fun onAccessibilityEvent(event: AccessibilityEvent) {
         eventsSeen++
         open?.let { current ->
