@@ -101,3 +101,107 @@ def test_without_pause_s_nothing_is_ever_paused():
     slicer = asr.Slicer(30, 5)
     slicer.feed(np.zeros(10 * SR, dtype=np.float32))
     assert not slicer.paused and slicer.last_speech_end is None
+
+
+# Same audio and cut offsets as android/.../SlicerCutTest.kt.
+# 0.5 s of silence, 3 s of amplitude-8000 noise, then silence. The 0.5 s cut falls at 60000;
+# the 1.6 s cut at 68800. Leading silence keeps the noise above the floor.
+SPEECH_THEN_SILENCE = [["silence", 0.5], ["noise", 3, 8000], ["silence", 2]]
+CUT_AT_FIELD_PAUSE = 60000
+CUT_AT_BUFFER_PAUSE = 68800
+# 64800 is the centre of a 0.1 s gap at 4 s inside the 8 s field slice.
+# 16800 is the centre of a dip at 1 s; a quieter dip at 0.5 s sits outside that search.
+FIELD_HARD_CUT = 64800
+FIELD_CAPPED_CUT = 16800
+
+
+def _float(segments):
+    from tests import make_vectors
+
+    return make_vectors.to_float(make_vectors.pcm_signal(segments))
+
+
+def _gapped(seconds, *gaps):
+    from tests import make_vectors
+
+    pcm = make_vectors.pcm_signal([["noise", seconds, 8000]])
+    for start in gaps:
+        at = int(start * SR)
+        pcm[at:at + SR // 10] = 0
+    return make_vectors.to_float(pcm)
+
+
+def _dipped():
+    """Constant samples, so a lower dip is the unique quietest window and neither dip is speech."""
+    pcm = np.full(9 * SR, 8000, dtype=np.int16)
+    pcm[SR // 2:SR // 2 + SR // 10] = 5000
+    pcm[SR:SR + SR // 10] = 6000
+    return pcm.astype(np.float32) / 32768
+
+
+def test_cut_pause_closes_a_slice_while_paused_waits_for_pause_s():
+    audio = _float(SPEECH_THEN_SILENCE)
+    slicer = asr.Slicer(30, 5, 1.6, 2, 10, cut_pause_s=0.5)
+
+    early = slicer.feed(audio[:int(4.0 * SR)])
+    assert early == [(0, CUT_AT_FIELD_PAUSE)]
+    assert not slicer.paused
+    assert slicer.feed(audio[int(4.0 * SR):int(5.0 * SR)]) == []
+    assert not slicer.paused
+    assert slicer.feed(audio[int(5.0 * SR):int(5.1 * SR)]) == []
+    assert slicer.paused
+
+    whole = asr.Slicer(30, 5, 1.6, 2, 10, cut_pause_s=0.5)
+    assert whole.feed(audio[:int(5.1 * SR)]) == [(0, CUT_AT_FIELD_PAUSE)]
+    assert whole.paused
+
+
+def test_field_hard_cut_lands_at_field_slice_max():
+    from stt_button import config
+
+    audio = _gapped(9, 4.0)
+    slicer = asr.Slicer.from_config_for_field(config.load())
+    cuts = slicer.feed(audio)
+
+    assert cuts == [(0, FIELD_HARD_CUT)]
+    assert cuts[0][1] <= 8 * SR
+    assert not slicer.paused
+
+
+def test_field_factory_search_window_fits_inside_the_hard_cut():
+    from stt_button import config
+
+    cfg = {**config.load(), "slice_search_s": 100}
+    audio = _dipped()
+    slicer = asr.Slicer.from_config_for_field(cfg)
+    cuts = slicer.feed(audio)
+
+    assert cuts == [(0, FIELD_CAPPED_CUT)]
+    assert cuts[0][1] < cfg["field_slice_max_s"] * SR
+
+
+def test_buffer_factory_keeps_pause_s_and_slice_max_s():
+    from stt_button import config
+
+    cfg = config.load()
+    audio = _float(SPEECH_THEN_SILENCE)
+    buffered = asr.Slicer.from_config(cfg)
+    plain = asr.Slicer(cfg["slice_max_s"], cfg["slice_search_s"], cfg["pause_s"], cfg["slice_min_s"],
+                       cfg["pause_margin_db"])
+    explicit = asr.Slicer(cfg["slice_max_s"], cfg["slice_search_s"], cfg["pause_s"], cfg["slice_min_s"],
+                          cfg["pause_margin_db"], cut_pause_s=cfg["pause_s"])
+
+    assert buffered.feed(audio[:int(4.0 * SR)]) == []
+    assert not buffered.paused
+    rest = audio[int(4.0 * SR):int(5.1 * SR)]
+    plain.feed(audio[:int(4.0 * SR)])
+    assert buffered.feed(rest) == plain.feed(rest) == [(0, CUT_AT_BUFFER_PAUSE)]
+    assert buffered.paused and plain.paused
+    assert explicit.feed(audio[:int(5.1 * SR)]) == [(0, CUT_AT_BUFFER_PAUSE)]
+
+    long = _float([["noise", 35, 8000]])
+    bounds = asr.slice_bounds(long, cfg["slice_max_s"], cfg["slice_search_s"], pause_s=cfg["pause_s"],
+                              slice_min_s=cfg["slice_min_s"], pause_margin_db=cfg["pause_margin_db"])
+    got = asr.Slicer.from_config(cfg)
+    assert got.feed(long) + got.finish() == bounds
+    assert 8 * SR < bounds[0][1] <= 30 * SR

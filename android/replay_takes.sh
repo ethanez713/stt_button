@@ -1,17 +1,26 @@
 #!/usr/bin/env bash
 # Runs recordings (.pcm or .wav) through the phone's own take pipeline and pulls one JSON line each.
 #
-#     android/replay_takes.sh [--config pipeline.json] <out.jsonl> <files...>
+#     android/replay_takes.sh [--config pipeline.json] [--policy chunk|revise] <out.jsonl> <files...>
 #
 # With --config the phone replays under that file in place of the bundled pipeline.json, and each
-# line's config_id is computed from it; daily takes are untouched. Needs the debug build.
+# line's config_id is computed from it; daily takes are untouched. --policy defaults to chunk.
+# Needs the debug build.
 set -euo pipefail
 
 config=""
-if [ "${1:-}" = "--config" ]; then
-    config="$2"
-    shift 2
-fi
+policy=""
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --config) config="$2"; shift 2 ;;
+        --policy) policy="$2"; shift 2 ;;
+        *) break ;;
+    esac
+done
+case "$policy" in
+    ""|chunk|revise) ;;
+    *) echo "replay_takes: --policy must be chunk or revise" >&2; exit 2 ;;
+esac
 [ "$#" -ge 2 ] || { sed -n '2,8p' "$0" >&2; exit 2; }
 out="$1"
 shift
@@ -34,7 +43,9 @@ adb -s "$S" push "$@" "$STAGE/" >/dev/null
 [ -z "$config" ] || adb -s "$S" push "$config" "$STAGE/pipeline.json" >/dev/null
 adb -s "$S" shell "run-as $PKG sh -c 'rm -rf $DIR files/selftest/replay.jsonl; mkdir -p $DIR; cp $STAGE/* $DIR/'; rm -rf $STAGE"
 adb -s "$S" logcat -c
-adb -s "$S" shell am start-foreground-service -n "$PKG/.SelfTest" --ez replay true >/dev/null
+extras=(--ez replay true)
+[ -z "$policy" ] || extras+=(--es policy "$policy")
+adb -s "$S" shell am start-foreground-service -n "$PKG/.SelfTest" "${extras[@]}" >/dev/null
 result=""
 for _ in $(seq "${WAIT_LOOPS:-900}"); do
     result="$(adb -s "$S" logcat -d -s SttButton:* | grep -E "selftest replay done|selftest failed" || true)"

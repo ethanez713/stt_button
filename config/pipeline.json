@@ -3,6 +3,8 @@
   "slice_max_s": 30,
   "slice_search_s": 5,
   "pause_s": 1.6,
+  "field_cut_pause_s": 0.5,
+  "field_slice_max_s": 8,
   "stop_silence_s": 30,
   "stop_silence_dbfs": -48,
   "slice_min_s": 2,

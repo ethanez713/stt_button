@@ -33,21 +33,26 @@ class Slicer:
     """Cuts recognizer slices from audio that may still be growing.
 
     A slice ends at the centre of a pause once it holds slice_min_s of audio and has had speech,
-    when pause_s is set (design § Pipeline). A slice that reaches slice_max_s without a pause is
-    cut at the centre of the quietest CUT_WINDOW_S window within its final search_s, so a word is
-    not split when a gap is available. Each cut needs only the audio up to the point it is made,
-    so feeding audio in pieces gives the same cuts as feeding it whole.
+    when a cut pause is set (design § Pipeline). The cut pause is cut_pause_s, or pause_s when
+    that is omitted. paused stays the last pause_s of audio, the pause a take treats as the user
+    thinking. A slice that reaches slice_max_s without that cut is cut at the centre of the
+    quietest CUT_WINDOW_S window within its final search_s, so a word is not split when a gap is
+    available. Each cut needs only the audio up to the point it is made, so feeding audio in
+    pieces gives the same cuts as feeding it whole.
 
     Window energies are exact integer sums of squared int16 samples, so the silence test gives the
     same answer in every language that implements it.
     """
 
     def __init__(self, slice_max_s: float, search_s: float, pause_s: float | None = None,
-                 slice_min_s: float = 2.0, pause_margin_db: float = 10.0):
+                 slice_min_s: float = 2.0, pause_margin_db: float = 10.0,
+                 cut_pause_s: float | None = None):
         self.max_len = int(slice_max_s * SAMPLE_RATE)
         self.search = int(search_s * SAMPLE_RATE)
         self.win = int(CUT_WINDOW_S * SAMPLE_RATE)
         self.pause_windows = None if pause_s is None else round(pause_s / CUT_WINDOW_S)
+        cut = pause_s if cut_pause_s is None else cut_pause_s
+        self.cut_windows = None if cut is None else round(cut / CUT_WINDOW_S)
         self.min_len = int(slice_min_s * SAMPLE_RATE)
         self.margin = 10 ** (pause_margin_db / 10)
         self.floor_min = self.win * 32768 ** 2 * 10 ** (NOISE_FLOOR_DBFS / 10)
@@ -62,6 +67,12 @@ class Slicer:
     def from_config(cls, cfg: dict) -> "Slicer":
         return cls(cfg["slice_max_s"], cfg["slice_search_s"], cfg["pause_s"], cfg["slice_min_s"],
                    cfg["pause_margin_db"])
+
+    @classmethod
+    def from_config_for_field(cls, cfg: dict) -> "Slicer":
+        hard = cfg["field_slice_max_s"]
+        return cls(hard, min(cfg["slice_search_s"], hard - 1), cfg["pause_s"], cfg["slice_min_s"],
+                   cfg["pause_margin_db"], cut_pause_s=cfg["field_cut_pause_s"])
 
     @property
     def paused(self) -> bool:
@@ -92,7 +103,7 @@ class Slicer:
         """Append audio; return the slices it completed, as (start, end) sample offsets."""
         self.samples = np.concatenate([self.samples, chunk.astype(np.float32)])
         done: list[tuple[int, int]] = []
-        while self.pause_windows is not None and (self._energies + 1) * self.win <= len(self.samples):
+        while self.cut_windows is not None and (self._energies + 1) * self.win <= len(self.samples):
             self._classify_next_window()
             self._cut_at((self._energies) * self.win, done)
         while len(self.samples) - self.start > self.max_len:
@@ -127,9 +138,10 @@ class Slicer:
 
     def _pause_cut(self, boundary: int) -> int | None:
         speech = self._last_speech
-        if speech is None or speech < -(-self.start // self.win) or boundary - self.start < self.min_len:
+        if (self.cut_windows is None or speech is None or speech < -(-self.start // self.win)
+                or boundary - self.start < self.min_len):
             return None
-        if self._energies - 1 - speech < self.pause_windows:
+        if self._energies - 1 - speech < self.cut_windows:
             return None
         return ((speech + 1) * self.win + boundary) // 2
 

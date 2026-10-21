@@ -15,10 +15,12 @@ class Slicer(
     sliceMinS: Double = 2.0,
     pauseMarginDb: Double = 10.0,
     loudDbfs: Double = -48.0,
+    cutPauseS: Double? = null,
 ) {
     private val maxLen = (sliceMaxS * SAMPLE_RATE).toInt()
     private val search = (searchS * SAMPLE_RATE).toInt()
     private val pauseWindows = pauseS?.let { Math.round(it / CUT_WINDOW_S).toInt() }
+    private val cutWindows = (cutPauseS ?: pauseS)?.let { Math.round(it / CUT_WINDOW_S).toInt() }
     private val minLen = (sliceMinS * SAMPLE_RATE).toInt()
     private val margin = Math.pow(10.0, pauseMarginDb / 10)
     private val loudEnergy = WIN.toDouble() * 32768.0 * 32768.0 * Math.pow(10.0, loudDbfs / 10.0)
@@ -52,7 +54,7 @@ class Slicer(
     fun feed(chunk: ShortArray, length: Int = chunk.size): List<IntArray> = synchronized(this) {
         append(chunk, length)
         val done = mutableListOf<IntArray>()
-        while (pauseWindows != null && (energies + 1) * WIN <= size) {
+        while (cutWindows != null && (energies + 1) * WIN <= size) {
             classifyNextWindow()
             cutAt(energies * WIN, done)
         }
@@ -114,8 +116,9 @@ class Slicer(
 
     private fun pauseCut(boundary: Int): Int? {
         val speech = lastSpeech
+        val need = cutWindows ?: return null
         if (speech < 0 || speech < (start + WIN - 1) / WIN || boundary - start < minLen) return null
-        if (energies - 1 - speech < pauseWindows!!) return null
+        if (energies - 1 - speech < need) return null
         return ((speech + 1) * WIN + boundary) / 2
     }
 
@@ -150,5 +153,11 @@ class Slicer(
 
         fun fromConfig(cfg: PipelineConfig) =
             Slicer(cfg.sliceMaxS, cfg.sliceSearchS, cfg.pauseS, cfg.sliceMinS, cfg.pauseMarginDb, cfg.stopSilenceDbfs)
+
+        fun fromConfigForField(cfg: PipelineConfig): Slicer {
+            val hard = cfg.fieldSliceMaxS
+            val search = min(cfg.sliceSearchS, hard - 1)
+            return Slicer(hard, search, cfg.pauseS, cfg.sliceMinS, cfg.pauseMarginDb, cfg.stopSilenceDbfs, cfg.fieldCutPauseS)
+        }
     }
 }

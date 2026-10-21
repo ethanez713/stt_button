@@ -241,11 +241,11 @@ class TakeController(
         }
         val models = warm ?: Models.forFiles(service.filesDir, cfg)
         val bubbleText = BubbleText().apply { onChange = ::scheduleBubble }
-        val slicer = Slicer.fromConfig(cfg)
         val taken = sessionSnapshot().field()
         val port = A11yEditorPort({ service.inputMethod?.currentInputConnection }, { sessionSnapshot().field() == taken })
         val fieldDoc = FieldDocument(port) { SystemClock.uptimeMillis() }
             .takeIf { Documents.choose(port.read()) == DocumentKind.FIELD && it.sync() }
+        val slicer = if (fieldDoc != null) Slicer.fromConfigForField(cfg) else Slicer.fromConfig(cfg)
         val engine = TakeEngine(
             fieldDoc ?: BufferDocument(), slicer, models.recognizer, models.cleaner(),
             if (fieldDoc != null) RevisePolicy(cfg) else ChunkPolicy(cfg), cfg,
