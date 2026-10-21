@@ -703,3 +703,283 @@ def test_field_reads_count_kinds_per_package_and_name_unusual_offsets():
     assert "ai.x.grok: offset_unknown 2" in text
     assert "com.android.chrome: full 1, partial 1, other offsets {7: 1}" in text
     assert "old" not in text
+
+
+def _grid_audio():
+    from tests import make_vectors
+
+    return make_vectors.to_float(make_vectors.pcm_signal(
+        [["silence", 0.3], ["noise", 3, 8000], ["silence", 2.0], ["noise", 12, 8000]]))
+
+
+class _Result:
+    def __init__(self, tokens, timestamps):
+        self.tokens, self.timestamps = tokens, timestamps
+
+
+class _GridRecognizer:
+    def __init__(self, text="alpha bravo"):
+        self.text = text
+        self.plain = 0
+        self.context = []
+
+    def recognize(self, samples):
+        self.plain += 1
+        return self.text
+
+    def decode(self, samples):
+        self.context.append(len(samples))
+        words = self.text.split()
+        return _Result([" " + word for word in words], [1e6] * len(words))
+
+
+def _decode_counts(audio, cfg, pauses, hards):
+    from stt_button.asr import Slicer, slice_bounds
+
+    from experiments.boundary_punct import capped_search_s
+
+    plain, context = set(), set()
+    for start, end in slice_bounds(audio, cfg["slice_max_s"], cfg["slice_search_s"]):
+        plain.add((start, end))
+    for pause in pauses:
+        for hard in hards:
+            slicer = Slicer(hard, capped_search_s(hard, cfg["slice_search_s"]), pause, 2, 10)
+            bounds = slicer.feed(audio) + slicer.finish()
+            for n, (start, end) in enumerate(bounds):
+                before = slicer.speech_before(start) if n else None
+                after = slicer.speech_after(start) if n else None
+                if n and before is not None and after is not None and after < end:
+                    context.add((start, end, before, after))
+                else:
+                    plain.add((start, end))
+    return plain, context
+
+
+def _default_table(audio, metas, pauses, cfg):
+    import statistics
+
+    from experiments import wer
+    from experiments.boundary_punct import boundary_counts
+    from stt_button.asr import SAMPLE_RATE, join_slices, slice_bounds
+
+    cache = {}
+    stats = {arm: {"counts": dict.fromkeys(("breaks", "caps", "caps_after_j", "j_fixed", "j_harms"), 0),
+                   "words": 0, "cuts": 0, "minutes": 0.0, "tails": [], "errors": 0, "ref": 0}
+             for arm in pauses}
+
+    def text_for(meta_id, bounds):
+        texts = []
+        for start, end in bounds:
+            key = (meta_id, start, end)
+            if key not in cache:
+                cache[key] = "alpha bravo"
+            texts.append(cache[key])
+        return texts
+
+    for meta in metas:
+        reference = join_slices(text_for(meta["id"], slice_bounds(audio, cfg["slice_max_s"], cfg["slice_search_s"])))
+        for arm in pauses:
+            bounds = slice_bounds(audio, cfg["slice_max_s"], cfg["slice_search_s"],
+                                  pause_s=arm, slice_min_s=2, pause_margin_db=10)
+            slice_texts = text_for(meta["id"], bounds)
+            slot = stats[arm]
+            for name, value in boundary_counts(slice_texts, reference).items():
+                slot["counts"][name] += value
+            slot["words"] += len(reference.split())
+            slot["cuts"] += len(bounds) - 1
+            slot["minutes"] += len(audio) / SAMPLE_RATE / 60
+            slot["tails"].append((bounds[-1][1] - bounds[-1][0]) / SAMPLE_RATE)
+            if meta["mode"] == "read":
+                ref = wer.normalize(meta["reference"])
+                slot["errors"] += wer.word_errors(ref, wer.normalize(join_slices(slice_texts)))
+                slot["ref"] += len(ref)
+    lines = [
+        "| pause_s | Read WER | False breaks /100 | False capitals /100 | Capitals after J /100 | J fixes | J harms | Cuts/min | Median last slice (s) |",
+        "|---|---|---|---|---|---|---|---|---|",
+    ]
+    for arm in pauses:
+        slot, counts = stats[arm], stats[arm]["counts"]
+        lines.append(
+            f"| {arm} | {100 * slot['errors'] / slot['ref']:.2f}% | {100 * counts['breaks'] / slot['words']:.2f} | "
+            f"{100 * counts['caps'] / slot['words']:.2f} | {100 * counts['caps_after_j'] / slot['words']:.2f} | "
+            f"{counts['j_fixed']} | {counts['j_harms']} | {slot['cuts'] / slot['minutes']:.1f} | "
+            f"{statistics.median(slot['tails']):.1f} |")
+    return "\n".join(lines) + "\n"
+
+
+class TestGridPick:
+    def row(self, pause, hard, wer, breaks):
+        return {"cut_pause": pause, "hard_cut": hard, "read_wer": wer, "false_breaks": breaks,
+                "false_caps": 0.0, "cuts_per_min": 1.0, "median_slice_s": 4.0}
+
+    def test_a_wer_on_the_bar_passes_and_a_wer_over_it_fails(self):
+        from experiments.boundary_punct import pick
+        on_bar = self.row(1.2, 15, 11.54, 0.0)
+        over = self.row(0.5, 8, 11.55, 0.0)
+        assert pick([over, on_bar]) == on_bar
+
+    def test_false_breaks_on_the_bar_pass_and_over_it_fail(self):
+        from experiments.boundary_punct import pick
+        on_bar = self.row(1.2, 15, 0.0, 0.5)
+        over = self.row(0.5, 8, 0.0, 0.51)
+        assert pick([over, on_bar]) == on_bar
+
+    def test_the_smallest_cut_pause_wins_and_then_the_smallest_hard_cut(self):
+        from experiments.boundary_punct import pick
+        assert pick([
+            self.row(0.8, 8, 9.0, 0.0),
+            self.row(0.6, 15, 10.0, 0.0),
+            self.row(0.6, 10, 11.0, 0.0),
+        ]) == self.row(0.6, 10, 11.0, 0.0)
+
+    def test_no_passing_pair(self):
+        from experiments.boundary_punct import pick
+        assert pick([self.row(0.5, 8, 11.55, 0.0), self.row(1.2, 15, 10.0, 0.51)]) is None
+
+    def test_the_table_names_the_pick_or_says_that_none_passes(self):
+        from experiments.boundary_punct import format_grid
+        chosen = self.row(0.6, 10, 11.0, 0.4)
+        other = self.row(0.8, 8, 9.0, 0.0)
+        assert format_grid([other, chosen]).splitlines()[-1] == "pick: cut_pause 0.6, hard_cut 10"
+        assert format_grid([self.row(0.5, 8, 12.0, 0.0)]).splitlines()[-1] == "no pair passes"
+
+
+class TestDecodeArm:
+    def test_an_unmodified_arm_still_cuts_where_pause_1_6_and_the_config_slice_max_do(self):
+        from stt_button import config
+        from stt_button.asr import SAMPLE_RATE, Slicer
+
+        from experiments.boundary_punct import decode_arm
+
+        audio = _grid_audio()
+        cfg = config.load()
+        seen = []
+
+        class Recognizer:
+            def recognize(self, samples):
+                seen.append(len(samples))
+                return "update the plan."
+
+            def decode(self, samples):
+                raise AssertionError("the baseline arm decodes each slice on its own")
+
+        text, decoded = decode_arm(Recognizer(), audio, cfg, None)
+        slicer = Slicer.from_config({**cfg, "pause_s": 1.6})
+        bounds = slicer.feed(audio) + slicer.finish()
+        assert seen == [end - start for start, end in bounds]
+        assert text == " ".join(["update the plan."] * len(bounds))
+        assert decoded == len(audio) / SAMPLE_RATE
+
+    def test_a_context_arm_still_replaces_the_previous_slice_mark_from_the_junction(self):
+        from stt_button import config
+        from stt_button.asr import Slicer
+
+        from experiments.boundary_punct import decode_arm
+
+        audio = _grid_audio()
+        cfg = config.load()
+        calls = {"plain": 0, "context": 0}
+
+        class Recognizer:
+            def recognize(self, samples):
+                calls["plain"] += 1
+                return "update the plan."
+
+            def decode(self, samples):
+                calls["context"] += 1
+                return _Result([" plan", " have", " monitoring"], [0.0, 1e6, 1e6])
+
+        text, _decoded = decode_arm(Recognizer(), audio, cfg, (4, 0.2))
+        slicer = Slicer.from_config({**cfg, "pause_s": 1.6})
+        n = len(slicer.feed(audio) + slicer.finish())
+        assert n >= 2
+        assert calls == {"plain": 1, "context": n - 1}
+        assert text == " ".join(["update the plan"] + ["have monitoring"] * (n - 1))
+
+
+class TestGrid:
+    def test_every_pair_is_a_row_and_the_default_table_is_unchanged(self, monkeypatch, capsys):
+        import sys
+
+        from stt_button import config
+        from stt_button.asr import Slicer, context_audio
+
+        from experiments import boundary_punct as bp
+
+        audio = _grid_audio()
+        cfg = config.load()
+        metas = [{"id": "read1", "mode": "read", "reference": "alpha bravo"}]
+        pauses = [0.8, 1.2, 1.6]
+        fake = _GridRecognizer()
+        monkeypatch.setattr(bp, "Recognizer", lambda: fake)
+        monkeypatch.setattr(bp.paths, "sidecars", lambda recordings=None: metas)
+        monkeypatch.setattr(bp, "read_wav", lambda path: audio)
+
+        monkeypatch.setattr(sys, "argv", ["boundary_punct"])
+        assert bp.main() == 0
+        assert capsys.readouterr().out == _default_table(audio, metas, pauses, cfg)
+        assert fake.context == []
+
+        fake.plain = 0
+        monkeypatch.setattr(sys, "argv", ["boundary_punct", "--grid"])
+        assert bp.main() == 0
+        out = capsys.readouterr().out
+        plain, context = _decode_counts(audio, cfg, bp.CUT_PAUSES, bp.HARD_CUTS)
+        assert (fake.plain, len(fake.context)) == (len(plain), len(context))
+        assert list(bp.CUT_PAUSES) == [0.5, 0.6, 0.8, 1.0, 1.2]
+        assert list(bp.HARD_CUTS) == [8, 10, 15]
+        for pause in bp.CUT_PAUSES:
+            for hard in bp.HARD_CUTS:
+                assert f"| {pause} | {hard} |" in out
+        assert out.splitlines()[0] == ("| cut_pause | hard_cut | Read WER | False breaks /100 | False capitals /100 | "
+                                       "Cuts/min | Median slice (s) |")
+        assert out.splitlines()[-1] == "no pair passes"
+        rows = bp.grid_rows(_GridRecognizer(), list(zip(metas, [audio])), cfg, bp.CUT_PAUSES, bp.HARD_CUTS)
+        assert [(row["cut_pause"], row["hard_cut"]) for row in rows] == [
+            (pause, hard) for pause in bp.CUT_PAUSES for hard in bp.HARD_CUTS]
+        assert out == bp.format_grid(rows)
+        assert all(row["cuts_per_min"] > 0 and row["median_slice_s"] > 0 for row in rows)
+
+        slicer = Slicer(bp.HARD_CUTS[0], bp.capped_search_s(bp.HARD_CUTS[0], cfg["slice_search_s"]),
+                        bp.CUT_PAUSES[0], 2, 10)
+        bounds = slicer.feed(audio) + slicer.finish()
+        start, end = bounds[1]
+        phone, _junction = context_audio(audio, slicer.speech_before(start), slicer.speech_after(start), end, 4, 0.2)
+        assert len(phone) in fake.context
+
+    def test_a_ramble_is_left_out_of_read_wer(self):
+        from stt_button import config
+
+        from experiments.boundary_punct import CUT_PAUSES, HARD_CUTS, grid_rows
+
+        audio = _grid_audio()
+        cfg = config.load()
+        read = {"id": "read1", "mode": "read", "reference": "alpha bravo"}
+        ramble = {"id": "ram1", "mode": "ramble", "reference": "completely different words here"}
+        one = grid_rows(_GridRecognizer(), [(read, audio)], cfg, CUT_PAUSES, HARD_CUTS)
+        two = grid_rows(_GridRecognizer(), [(read, audio), (ramble, audio)], cfg, CUT_PAUSES, HARD_CUTS)
+        assert [row["read_wer"] for row in one] == [row["read_wer"] for row in two]
+        assert one[0]["read_wer"] > 11.54
+
+    def test_the_search_window_never_exceeds_the_hard_cut_minus_one_second(self):
+        import statistics
+
+        from stt_button import config
+        from stt_button.asr import CUT_WINDOW_S, SAMPLE_RATE, Slicer
+
+        from experiments.boundary_punct import capped_search_s, grid_rows
+
+        assert capped_search_s(8, 5) == 5
+        assert capped_search_s(15, 5) == 5
+        assert capped_search_s(8, 100) == 7
+        assert capped_search_s(1.0, 5) == CUT_WINDOW_S
+        assert capped_search_s(0.05, 5) == 0.05
+
+        audio = _grid_audio()
+        cfg = {**config.load(), "slice_search_s": 100}
+        meta = {"id": "read1", "mode": "read", "reference": "alpha bravo"}
+        rows = grid_rows(_GridRecognizer(), [(meta, audio)], cfg, [0.5], [8])
+        slicer = Slicer(8, 7, 0.5, 2, 10)
+        bounds = slicer.feed(audio) + slicer.finish()
+        lengths = [(end - start) / SAMPLE_RATE for start, end in bounds]
+        assert rows[0]["median_slice_s"] == statistics.median(lengths)

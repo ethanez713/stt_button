@@ -1,6 +1,7 @@
 """Punctuation and capitals that a slice boundary invents, and what a join repair does about them.
 
     STT_MODEL_DIR=~/models/stt_button pyrun python -m experiments.boundary_punct [--pause 0.8 1.2 1.6]
+    STT_MODEL_DIR=~/models/stt_button pyrun python -m experiments.boundary_punct --grid [--cut-pause 0.5 0.6 0.8 1.0 1.2] [--hard-cut 8 10 15]
 
 Each recording is recognized with the 30 s rule alone (the reference) and with pause cuts at each
 pause_s. The words of a candidate are aligned to the reference's, and at every slice boundary:
@@ -11,6 +12,14 @@ pause_s. The words of a candidate are aligned to the reference's, and at every s
 With --thinking it measures what a 2.5 s thinking pause does: pauses are spliced into each recording at
 word gaps of the 30 s decode, and the plain slice decodes (baseline) are compared with context decodes
 (each slice decoded with the speech before the pause, then split at the junction) at those gaps.
+
+With --grid each recording is cut at every cut pause and hard cut, with slice_min_s 2 and pause_margin_db
+10. The search window stays slice_search_s and is never longer than the hard cut minus 1 s. Slices are
+decoded as the phone decodes them: 4 s of context, the junction squeezed to 0.2 s. Against the same 30 s
+plain-decode reference, the table gives read-passage WER, false breaks and false capitals per 100 words,
+cuts per minute and the median slice length. The pick is the smallest cut pause, then the smallest hard
+cut, whose read WER is at most 11.54% and whose false breaks are at most 0.5 per 100 words; otherwise it
+reports that no pair passes.
 
 Join repair J lowercases the first letter of a slice's first word when the slice before it does not
 end in . ! or ?, unless the word is I or an I contraction. A J-harm is a word J lowercases that the
@@ -28,8 +37,11 @@ import numpy as np
 
 from experiments import paths, wer
 from stt_button import config
-from stt_button.asr import (SAMPLE_RATE, Recognizer, Slicer, context_audio, join_slices, read_wav, slice_bounds,
-                            split_at_junction)
+from stt_button.asr import (CUT_WINDOW_S, SAMPLE_RATE, Recognizer, Slicer, context_audio, join_slices, read_wav,
+                            slice_bounds, split_at_junction)
+
+CUT_PAUSES = (0.5, 0.6, 0.8, 1.0, 1.2)
+HARD_CUTS = (8, 10, 15)
 
 SENTENCE_END = re.compile(r"[.!?][\"')\]]*$")
 
@@ -143,10 +155,47 @@ def thinking_pauses(samples: np.ndarray, words: list[list], seed: str) -> tuple[
     return np.concatenate(pieces), [(i, kind) for i, kind, _ in chosen]
 
 
-def decode_arm(recognizer: Recognizer, samples: np.ndarray, cfg: dict, arm) -> tuple[str, float]:
-    """The joined text of a pause-cut take under an arm (None = plain slice decodes), and the audio
-    seconds decoded."""
-    slicer = Slicer.from_config({**cfg, "pause_s": 1.6})
+def plain_text(recognizer, samples: np.ndarray, start: int, end: int, cache: dict | None) -> str:
+    key = (start, end, None)
+    if cache is not None and key in cache:
+        return cache[key]
+    text = recognizer.recognize(samples[start:end])
+    if cache is not None:
+        cache[key] = text
+    return text
+
+
+def context_text(recognizer, samples: np.ndarray, before: int, after: int, end: int, arm, start: int,
+                 cache: dict | None) -> tuple[str, str, int]:
+    """(mark, slice text, decoded samples). Speech edges follow the audio and the margin, so one
+    recording's cache can key a context decode by the bounds and the arm."""
+    key = (start, end, (arm[0], arm[1], before, after))
+    if cache is not None and key in cache:
+        return cache[key]
+    audio, junction = context_audio(samples, before, after, end, arm[0], arm[1])
+    result = recognizer.decode(audio)
+    mark, text = split_at_junction(result.tokens, result.timestamps, junction)
+    value = (mark, text, len(audio))
+    if cache is not None:
+        cache[key] = value
+    return value
+
+
+def decode_slices(recognizer, samples: np.ndarray, cfg: dict, arm, *, pause_s: float = 1.6,
+                  slice_max_s: float | None = None, search_s: float | None = None,
+                  slice_min_s: float | None = None, pause_margin_db: float | None = None,
+                  cache: dict | None = None) -> tuple[list[str], float, list[tuple[int, int]]]:
+    """Slice texts under an arm, the audio seconds decoded, and the bounds.
+
+    Defaults match the thinking measurement: pause_s 1.6 and the config's other slicer fields.
+    """
+    slicer = Slicer(
+        cfg["slice_max_s"] if slice_max_s is None else slice_max_s,
+        cfg["slice_search_s"] if search_s is None else search_s,
+        pause_s,
+        cfg["slice_min_s"] if slice_min_s is None else slice_min_s,
+        cfg["pause_margin_db"] if pause_margin_db is None else pause_margin_db,
+    )
     bounds = slicer.feed(samples) + slicer.finish()
     texts: list[str] = []
     decoded = 0.0
@@ -154,20 +203,30 @@ def decode_arm(recognizer: Recognizer, samples: np.ndarray, cfg: dict, arm) -> t
         before = slicer.speech_before(start) if n else None
         after = slicer.speech_after(start) if n else None
         if arm is None or before is None or after is None or after >= end:
-            texts.append(recognizer.recognize(samples[start:end]))
+            texts.append(plain_text(recognizer, samples, start, end, cache))
             decoded += (end - start) / SAMPLE_RATE
             continue
-        audio, junction = context_audio(samples, before, after, end, arm[0], arm[1])
-        result = recognizer.decode(audio)
-        mark, text = split_at_junction(result.tokens, result.timestamps, junction)
-        decoded += len(audio) / SAMPLE_RATE
+        mark, text, audio_len = context_text(recognizer, samples, before, after, end, arm, start, cache)
+        decoded += audio_len / SAMPLE_RATE
         if not text:
-            texts.append(recognizer.recognize(samples[start:end]))
+            texts.append(plain_text(recognizer, samples, start, end, cache))
             decoded += (end - start) / SAMPLE_RATE
             continue
         if texts and texts[-1]:
             texts[-1] = re.sub(r"[.,?!;:]$", "", texts[-1]) + mark
         texts.append(text)
+    return texts, decoded, bounds
+
+
+def decode_arm(recognizer: Recognizer, samples: np.ndarray, cfg: dict, arm, *, pause_s: float = 1.6,
+               slice_max_s: float | None = None, search_s: float | None = None,
+               slice_min_s: float | None = None, pause_margin_db: float | None = None,
+               cache: dict | None = None) -> tuple[str, float]:
+    """The joined text of a pause-cut take under an arm (None = plain slice decodes), and the audio
+    seconds decoded."""
+    texts, decoded, _bounds = decode_slices(
+        recognizer, samples, cfg, arm, pause_s=pause_s, slice_max_s=slice_max_s, search_s=search_s,
+        slice_min_s=slice_min_s, pause_margin_db=pause_margin_db, cache=cache)
     return join_slices(texts), decoded
 
 
@@ -226,13 +285,95 @@ def thinking_main() -> int:
     return 0
 
 
+def pick(rows: list[dict]) -> dict | None:
+    passing = [row for row in rows if row["read_wer"] <= 11.54 and row["false_breaks"] <= 0.5]
+    return min(passing, key=lambda row: (row["cut_pause"], row["hard_cut"])) if passing else None
+
+
+def capped_search_s(hard_cut: float, cfg_search: float) -> float:
+    limit = hard_cut - 1.0
+    if limit < CUT_WINDOW_S:
+        # _hard_cut's argmin needs one full window; a shorter search is empty.
+        limit = CUT_WINDOW_S if hard_cut >= CUT_WINDOW_S else hard_cut
+    return min(cfg_search, limit)
+
+
+def grid_rows(recognizer, recordings, cfg: dict, cut_pauses, hard_cuts) -> list[dict]:
+    arm = (cfg["context_s"], cfg["junction_squeeze_s"])
+    stats = {
+        (pause, hard): {"breaks": 0, "caps": 0, "words": 0, "cuts": 0, "minutes": 0.0, "lengths": [],
+                        "errors": 0, "ref": 0}
+        for pause in cut_pauses for hard in hard_cuts
+    }
+    for meta, samples in recordings:
+        cache: dict = {}
+        ref_bounds = slice_bounds(samples, cfg["slice_max_s"], cfg["slice_search_s"])
+        reference = join_slices(plain_text(recognizer, samples, start, end, cache) for start, end in ref_bounds)
+        words = len(reference.split())
+        minutes = len(samples) / SAMPLE_RATE / 60
+        read_ref = wer.normalize(meta["reference"]) if meta["mode"] == "read" else None
+        for pause in cut_pauses:
+            for hard in hard_cuts:
+                texts, _decoded, bounds = decode_slices(
+                    recognizer, samples, cfg, arm, pause_s=pause, slice_max_s=hard,
+                    search_s=capped_search_s(hard, cfg["slice_search_s"]), slice_min_s=2, pause_margin_db=10,
+                    cache=cache)
+                slot = stats[(pause, hard)]
+                counts = boundary_counts(texts, reference)
+                slot["breaks"] += counts["breaks"]
+                slot["caps"] += counts["caps"]
+                slot["words"] += words
+                slot["cuts"] += len(bounds) - 1
+                slot["minutes"] += minutes
+                slot["lengths"].extend((end - start) / SAMPLE_RATE for start, end in bounds)
+                if read_ref is not None:
+                    slot["errors"] += wer.word_errors(read_ref, wer.normalize(join_slices(texts)))
+                    slot["ref"] += len(read_ref)
+    rows = []
+    for pause in cut_pauses:
+        for hard in hard_cuts:
+            slot = stats[(pause, hard)]
+            rows.append({
+                "cut_pause": pause,
+                "hard_cut": hard,
+                "read_wer": 100 * slot["errors"] / slot["ref"],
+                "false_breaks": 100 * slot["breaks"] / slot["words"],
+                "false_caps": 100 * slot["caps"] / slot["words"],
+                "cuts_per_min": slot["cuts"] / slot["minutes"],
+                "median_slice_s": statistics.median(slot["lengths"]),
+            })
+    return rows
+
+
+def format_grid(rows: list[dict]) -> str:
+    lines = [
+        "| cut_pause | hard_cut | Read WER | False breaks /100 | False capitals /100 | Cuts/min | Median slice (s) |",
+        "|---|---|---|---|---|---|---|",
+    ]
+    for row in rows:
+        lines.append(f"| {row['cut_pause']} | {row['hard_cut']} | {row['read_wer']:.2f}% | {row['false_breaks']:.2f} | "
+                     f"{row['false_caps']:.2f} | {row['cuts_per_min']:.1f} | {row['median_slice_s']:.1f} |")
+    chosen = pick(rows)
+    lines.append("no pair passes" if chosen is None
+                 else f"pick: cut_pause {chosen['cut_pause']}, hard_cut {chosen['hard_cut']}")
+    return "\n".join(lines) + "\n"
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--pause", type=float, nargs="+", default=[0.8, 1.2, 1.6])
     parser.add_argument("--thinking", action="store_true")
+    parser.add_argument("--grid", action="store_true")
+    parser.add_argument("--cut-pause", type=float, nargs="+", default=CUT_PAUSES)
+    parser.add_argument("--hard-cut", type=float, nargs="+", default=HARD_CUTS)
     args = parser.parse_args()
     if args.thinking:
         return thinking_main()
+    if args.grid:
+        cfg = config.load()
+        recordings = ((meta, read_wav(paths.RECORDINGS / f"{meta['id']}.wav")) for meta in paths.sidecars())
+        print(format_grid(grid_rows(Recognizer(), recordings, cfg, args.cut_pause, args.hard_cut)), end="")
+        return 0
 
     cfg = config.load()
     recognizer = Recognizer()
