@@ -6,6 +6,17 @@ While the keyboard is in English, the button covers that microphone, records on 
 
 The long version is `docs/design.md`.
 
+## Screenshots
+
+<table>
+  <tr>
+    <td width="30%"><img src="docs/screenshots/phone-settings.png" alt="Phone app settings"></td>
+    <td width="70%" valign="top"><img src="docs/screenshots/host-pipeline.png" alt="Host pipeline run"><br><br>
+      <b>Host pipeline</b> (right). The same slicer, Parakeet recognizer and S1-mini cleaner run on a wav, here synthesized speech. Fillers are dropped and the spoken correction "Thursday. No wait, Friday" is resolved, in 647 ms to recognise and 1.1 s to clean on this machine.<br><br>
+      <b>Phone app</b> (left). Setup status, then where the button sits relative to Gboard's microphone, its size, opacity and colours. Recording, recognition and cleanup all run on the phone.</td>
+  </tr>
+</table>
+
 ## Pipeline
 
 ```mermaid
