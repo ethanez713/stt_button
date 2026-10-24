@@ -1,30 +1,31 @@
 package com.ezhou.sttbutton
 
+import kotlin.math.pow
+
 /**
- * Displayed wave height. Silence stays a faint line, a louder window appears at once, and a
- * quieter one eases down.
+ * Displayed wave height. The room on this mic sits near −58 dBFS, under the gate, so silence
+ * is a flat line. Above that the height is the window's amplitude relative to a clear
+ * syllable, and it follows the latest window at once, up or down.
  */
 class WaveLevel {
-    private var level = FLOOR
+    private var level = 0.0
 
     fun update(dbfs: Double?): Double {
-        val goal = if (dbfs == null) 0.0 else target(dbfs)
-        val next = if (goal >= level) goal else goal + (level - goal) * FALL
-        level = if (next < FLOOR) FLOOR else next
+        level = if (dbfs == null) 0.0 else target(dbfs)
         return level
     }
 
     fun reset() {
-        level = FLOOR
+        level = 0.0
     }
 
     companion object {
-        private const val QUIET_DBFS = -55.0
-        private const val LOUD_DBFS = -20.0
-        private const val FALL = 0.85
-        private const val FLOOR = 0.06
+        private const val QUIET_DBFS = -50.0
+        private const val LOUD_DBFS = -32.0
 
-        fun target(dbfs: Double): Double =
-            ((dbfs - QUIET_DBFS) / (LOUD_DBFS - QUIET_DBFS)).coerceIn(0.0, 1.0)
+        fun target(dbfs: Double): Double {
+            if (dbfs <= QUIET_DBFS) return 0.0
+            return 10.0.pow((dbfs - LOUD_DBFS) / 20.0).coerceAtMost(1.0)
+        }
     }
 }
