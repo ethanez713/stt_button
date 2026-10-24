@@ -243,6 +243,49 @@ def join_slices(texts: list[str]) -> str:
     return " ".join(t for t in texts if t)
 
 
+# A short slice decoded on its own capitalizes a function word and ends the previous one with a period.
+# Those are not sentence boundaries; a name is left capitalized.
+_CONTINUE_LOWER = {
+    "a", "an", "the", "and", "or", "but", "to", "of", "in", "on", "for", "with", "it", "that", "this",
+    "is", "was", "are", "were", "where", "when", "if", "so", "because", "which", "who", "what", "how",
+    "we", "they", "he", "she", "you", "there", "then", "than", "as", "at", "from", "by", "not", "also",
+    "just", "its", "be", "been", "have", "has", "had", "do", "does", "did", "can", "could", "would",
+    "should", "will", "about", "into", "over", "after", "before", "out", "up", "my", "your",
+}
+_WORD_CORE = re.compile(r"^[^\w']+|[^\w']+$")
+_CONTINUATION_WORD = re.compile(r"^([^\w']*)([\w']+)")
+
+
+def _word_core(word: str) -> str:
+    return _WORD_CORE.sub("", word).lower()
+
+
+def continue_fragment(previous: str, nxt: str) -> tuple[str, str]:
+    """(previous, next) once a slice decoded without the speech around it is joined to the one before.
+    A repeated boundary word is dropped, a full stop on the previous slice is not kept, and a function
+    word that opens the next slice is lower-cased. A question or exclamation mark stays."""
+    previous, nxt = previous.rstrip(), nxt.strip()
+    if not previous or not nxt:
+        return previous, nxt
+    prev_words, next_words = previous.split(), nxt.split()
+    if prev_words and next_words and _word_core(prev_words[-1]) == _word_core(next_words[0]) and _word_core(prev_words[-1]):
+        nxt = " ".join(next_words[1:])
+        if not nxt:
+            return previous, ""
+    if previous.endswith(".") and not previous.endswith(".."):
+        previous = previous[:-1].rstrip()
+    if previous and previous[-1] not in "?!":
+        nxt = _lowercase_continuation(nxt)
+    return previous, nxt
+
+
+def _lowercase_continuation(text: str) -> str:
+    match = _CONTINUATION_WORD.match(text)
+    if match is None or match.group(2).lower() not in _CONTINUE_LOWER:
+        return text
+    return match.group(1) + match.group(2).lower() + text[match.end():]
+
+
 def _one(model: Path, pattern: str) -> Path:
     matches = sorted(model.glob(pattern))
     if len(matches) != 1:

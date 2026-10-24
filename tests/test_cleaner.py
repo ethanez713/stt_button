@@ -162,6 +162,19 @@ def test_casual_rule(text, expected):
 
 
 @pytest.mark.parametrize("text, expected", [
+    ("See you at five.", "See you at five"),
+    ("See you at five!", "See you at five"),
+    ("See you at five?", "See you at five?"),
+    ("See you at five...", "See you at five..."),
+    ("See you at five,", "See you at five"),
+    ("hello!.", "hello"),
+    ("Wait...", "Wait..."),
+])
+def test_given_a_message_when_its_end_is_trimmed_then_only_the_trailing_punctuation_goes(text, expected):
+    assert cleaner.trim_message_end(text) == expected
+
+
+@pytest.mark.parametrize("text, expected", [
     ("I need to decide. Okay.", "I need to decide."),
     ("Even more so than they already were. Yeah.", "Even more so than they already were."),
     ("easy enough for us to hop to Um", "easy enough for us to hop to"),
@@ -171,7 +184,10 @@ def test_casual_rule(text, expected):
     ("ends.\n\nOkay.", "ends."),
     ("Is that okay?", "Is that okay?"),
     ("Do it? Okay?", "Do it? Okay?"),
-    ("it thinks I'll Yeah.", "it thinks I'll Yeah."),
+    ("it thinks I'll Yeah.", "it thinks I'll"),
+    ("I added about 1.25 cups of percarbonate powder Yeah.", "I added about 1.25 cups of percarbonate powder"),
+    ("The impact will be. Mm.", "The impact will be."),
+    ("that's okay", "that's okay"),
     ("Okay.", "Okay."),
     ("Um", "Um"),
 ])

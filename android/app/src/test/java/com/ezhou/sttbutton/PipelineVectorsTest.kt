@@ -220,6 +220,37 @@ class PipelineVectorsTest {
     }
 
     @Test
+    fun given_a_sign_off_glued_on_or_a_trailing_mm_when_dropped_then_the_sentence_stays() {
+        assertEquals("it thinks I'll", Pipeline.withoutSignOff("it thinks I'll Yeah."))
+        assertEquals("I added about 1.25 cups of percarbonate powder", Pipeline.withoutSignOff("I added about 1.25 cups of percarbonate powder Yeah."))
+        assertEquals("The impact will be.", Pipeline.withoutSignOff("The impact will be. Mm."))
+        assertEquals("that's okay", Pipeline.withoutSignOff("that's okay"))
+        assertEquals("Is that okay?", Pipeline.withoutSignOff("Is that okay?"))
+        assertEquals("Okay.", Pipeline.withoutSignOff("Okay."))
+    }
+
+    @Test
+    fun given_a_message_when_its_end_is_trimmed_then_only_the_trailing_punctuation_goes() {
+        assertEquals("See you at five", Pipeline.trimMessageEnd("See you at five."))
+        assertEquals("See you at five", Pipeline.trimMessageEnd("See you at five!"))
+        assertEquals("See you at five?", Pipeline.trimMessageEnd("See you at five?"))
+        assertEquals("See you at five...", Pipeline.trimMessageEnd("See you at five..."))
+        assertEquals("hello", Pipeline.trimMessageEnd("hello!."))
+        assertEquals("Wait...", Pipeline.trimMessageEnd("Wait..."))
+    }
+
+    @Test
+    fun given_a_slice_decoded_on_its_own_when_joined_then_the_boundary_is_not_a_new_sentence() {
+        assertEquals("store it in" to "Mom and dad's", Pipeline.continueFragment("store it in.", "Mom and dad's"))
+        assertEquals("the world?" to "Where do we put it", Pipeline.continueFragment("the world?", "Where do we put it"))
+        assertEquals("call" to "both of them", Pipeline.continueFragment("call", "Call both of them"))
+        assertEquals("call" to "me", Pipeline.continueFragment("call.", "Call me"))
+        assertEquals("See you" to "and then we left", Pipeline.continueFragment("See you.", "And then we left"))
+        assertEquals("Wait..." to "and more", Pipeline.continueFragment("Wait...", "And more"))
+        assertEquals("hello." to "", Pipeline.continueFragment("hello.", "hello"))
+    }
+
+    @Test
     fun given_the_prompt_when_rendered_then_it_is_the_training_format() {
         val prompt = Pipeline.promptFor(Fixtures.config, "um so hi")
         assertTrue(prompt.startsWith("<|im_start|>system\nYou are a text normalizer"))

@@ -9,9 +9,10 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from stt_button.asr import SAMPLE_RATE, TRAILING_MARK, Slicer, context_audio, join_slices, settled_mark
+from stt_button.asr import (SAMPLE_RATE, TRAILING_MARK, Slicer, context_audio, continue_fragment, join_slices,
+                            settled_mark)
 from stt_button.cleaner import (casual, join_cleaned, live_chunks, matched_cue, skips_cleaner, strip_hidden,
-                                unresolved_corrections, untrusted_clean, without_sign_off)
+                                trim_message_end, unresolved_corrections, untrusted_clean, without_sign_off)
 from stt_button.spoken import keep_spoken_ending, spoken_punctuation
 
 
@@ -129,12 +130,12 @@ class LiveTake:
         self._pending = []
         raw = self.raw
         if skips_cleaner(raw, self.cfg):
-            return LiveResult(raw, casual(without_sign_off(spoken_punctuation(raw)), self.cfg), 0, "raw", self.asr_ms - self._stop_asr_ms, 0,
+            return LiveResult(raw, trim_message_end(casual(without_sign_off(spoken_punctuation(raw)), self.cfg)), 0, "raw", self.asr_ms - self._stop_asr_ms, 0,
                               context_decodes=self.context_decodes, context_fallbacks=self.context_fallbacks)
         chunks = self._clean_closed(final=True)
         outputs = [self.cleaned_chunks[c] for c in chunks]
         cleaned = join_cleaned(chunks, outputs, self.cfg["self_correction_cues"])
-        return LiveResult(raw, casual(without_sign_off(cleaned), self.cfg), len(chunks), "chunks", self.asr_ms - self._stop_asr_ms,
+        return LiveResult(raw, trim_message_end(casual(without_sign_off(cleaned), self.cfg)), len(chunks), "chunks", self.asr_ms - self._stop_asr_ms,
                           self.clean_ms - self._stop_clean_ms, self.idle_cleans,
                           sum(c in self.idle_chunks for c in chunks), matched_cue(raw, self.cfg["self_correction_cues"]),
                           self.context_decodes, self.context_fallbacks, self.drifts,
@@ -154,17 +155,26 @@ class LiveTake:
         punctuation is then the one the context decode gave it."""
         before, after = self.slicer.speech_before(start), self.slicer.speech_after(start)
         if not self.texts or before is None or after is None or after >= end:
-            return self.recognizer.recognize(self.slicer.samples[start:end])
+            return self._without_context(self.recognizer.recognize(self.slicer.samples[start:end]))
         audio, junction_s = context_audio(self.slicer.samples, before, after, end, self.cfg["context_s"],
                                           self.cfg["junction_squeeze_s"])
         self.context_decodes += 1
         mark, text = self.recognizer.recognize_after(audio, junction_s)
         if not text:
             self.context_fallbacks += 1
-            return self.recognizer.recognize(self.slicer.samples[start:end])
+            return self._without_context(self.recognizer.recognize(self.slicer.samples[start:end]))
         if self.texts[-1]:
             own = TRAILING_MARK.search(self.texts[-1])
             self.texts[-1] = TRAILING_MARK.sub("", self.texts[-1]) + settled_mark(own.group() if own else "", mark)
+        return text
+
+    def _without_context(self, text: str) -> str:
+        if not text:
+            return text
+        for index in range(len(self.texts) - 1, -1, -1):
+            if self.texts[index]:
+                self.texts[index], text = continue_fragment(self.texts[index], text)
+                break
         return text
 
     def _clean_closed(self, final: bool) -> list[str]:
@@ -185,7 +195,7 @@ class LiveTake:
     def _keep(self, chunk: str, cleaned: str) -> None:
         """A clean that swapped a name or number for another, or that untrusted_clean otherwise rejects,
         is replaced by the chunk as heard."""
-        reason = untrusted_clean(chunk, cleaned)
+        reason = "empty" if not cleaned.strip() else untrusted_clean(chunk, cleaned)
         if reason == "drift":
             self.drifts += 1
         elif reason:

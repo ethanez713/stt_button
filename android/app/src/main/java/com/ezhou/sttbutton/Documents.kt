@@ -8,11 +8,12 @@ object Documents {
 
     /**
      * What the dictated stretch should read at the end of a field take: the sign-off dropped, the casual rule when the
-     * field held nothing before and holds nothing but the dictation now, and no line breaks in a single-line field.
+     * field held nothing before and holds nothing but the dictation now, no line breaks in a single-line field, and
+     * the punctuation at the very end removed.
      */
     fun finalText(dictated: String, fieldBefore: String, fieldNow: String, multiLine: Boolean, cfg: PipelineConfig): String {
         val signedOff = Pipeline.withoutSignOff(dictated)
         val casual = if (fieldBefore.isEmpty() && fieldNow == dictated) Pipeline.casual(signedOff, cfg) else signedOff
-        return Pipeline.forField(casual, multiLine)
+        return Pipeline.trimMessageEnd(Pipeline.forField(casual, multiLine))
     }
 }

@@ -116,11 +116,11 @@ class RevisePolicyTest {
 
         val result = rig.finish()
 
-        val first = labelled("a", 2).uppercase() + "\n\n" + labelled("a", 3).substringAfter(labelled("a", 2) + " ").uppercase()
+        val heard = labelled("a", 3)
         val revision = rig.clean.single { it.scope == "region" }
-        assertEquals(first, revision.input)
-        assertEquals(first + " REVISED", result.cleaned)
-        assertEquals(first + " REVISED", editor.text)
+        assertEquals(heard, revision.input)
+        assertEquals(heard.uppercase(), result.cleaned)
+        assertEquals(heard.uppercase(), editor.text)
         assertEquals(2, rig.clean.count { it.scope == "chunk" })
     }
 
@@ -183,14 +183,15 @@ class RevisePolicyTest {
             val (_, rig) = rigOver(editor, config(revise = "pause"), Upper(), labelled("a", 3))
             rig.feed(audio(3.0, 3.0))
 
-            assertTrue(editor.text, editor.text.endsWith(" REVISED"))
+            assertEquals(labelled("a", 3).uppercase(), editor.text)
             assertEquals("pause", rig.clean.single { it.scope == "region" }.moment)
         }
         lateinit var rig: Rig
         val editor = FakeEditor("")
         var spoke = false
+        val heard = labelled("a", 3)
         val cleaner = Upper { target ->
-            if (target.contains("\n\n") && !spoke) {
+            if (target == heard && !spoke) {
                 spoke = true
                 rig.slicer.feed(audio(1.0, 0.0))
                 rig.engine.onAudio()
@@ -244,7 +245,7 @@ class RevisePolicyTest {
         val result = rig.finish()
 
         assertTrue(doc.read()!!.text, doc.read()!!.text.startsWith("seed "))
-        assertEquals(" " + labelled("a", 2).uppercase() + "\n\n" + labelled("a", 3).substringAfter(labelled("a", 2) + " ").uppercase() + " REVISED", result.cleaned)
+        assertEquals(" " + labelled("a", 3).uppercase(), result.cleaned)
         assertEquals("seed" + result.cleaned, doc.read()!!.text)
     }
 }

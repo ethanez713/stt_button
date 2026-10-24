@@ -302,15 +302,24 @@ class TakeEngine(
                 moment = momentNow() ?: return null
                 continue
             }
+            val heard = reviseFromRaw(plan)
             when {
-                plan.local -> applyLocal(plan)
-                !plan.speculative && plan.target in kept -> applyKept(plan)
-                else -> return cleanJob(plan, moment)
+                heard.local -> applyLocal(heard)
+                !heard.speculative && heard.target in kept -> applyKept(heard)
+                else -> return cleanJob(heard, moment)
             }
         }
     }
 
     private fun counter(): (String) -> Int = cleaner.tokenCounter ?: { throw NeedsCleaner() }
+
+    /** A revision cleans the words that were heard. The field already holds each slice's own punctuation. */
+    private fun reviseFromRaw(plan: CleanPlan): CleanPlan {
+        if (!plan.region) return plan
+        val heard = raw.trim()
+        if (heard.isEmpty() || counter()(heard) > cfg.chunkMaxTokens) return plan
+        return CleanPlan(plan.from, plan.to, heard, plan.abandonable, plan.speculative, plan.local, plan.spaceAfter, region = true)
+    }
 
     private fun loadJob(moment: Moment) = start(Job(Job.Kind.LOAD, moment) {
         val started = nowMs()
@@ -356,9 +365,10 @@ class TakeEngine(
         if (decoded.fellBack) contextFallbacks++
         val text = readText()
         var from = region.end
-        val opener = if (texts.drop(attachedFrom).any { it.isNotEmpty() }) " " else Pipeline.takeOpener(text, region.start)
-        var written = if (decoded.text.isEmpty()) "" else opener + decoded.text
         val previous = texts.drop(attachedFrom).lastOrNull().orEmpty()
+        var sliceText = decoded.text
+        var prefix = ""
+        var replacing = false
         if (decoded.mark != null && previous.isNotEmpty()) {
             val old = Pipeline.trailingMark(previous)
             val settled = Pipeline.settledMark(old, decoded.mark)
@@ -366,11 +376,30 @@ class TakeEngine(
             val markStart = region.end - old.length
             if (old != settled && markStart >= region.cleanEnd && text.startsWith(old, markStart)) {
                 from = markStart
-                written = settled + written
+                prefix = settled
+                replacing = true
+            }
+        } else if (previous.isNotEmpty() && sliceText.isNotEmpty()) {
+            val continued = Pipeline.continueFragment(previous, sliceText)
+            sliceText = continued.second
+            if (continued.first != previous && previous.startsWith(continued.first)) {
+                texts[texts.lastIndex] = continued.first
+                val removed = previous.removePrefix(continued.first)
+                val at = region.end - removed.length
+                if (at >= region.cleanEnd && at <= text.length && text.startsWith(removed, at)) {
+                    from = at
+                    replacing = true
+                }
             }
         }
-        var first = texts.drop(attachedFrom).none { it.isNotEmpty() } && decoded.text.isNotEmpty()
-        texts += decoded.text
+        val opener = when {
+            sliceText.isEmpty() -> ""
+            replacing || texts.drop(attachedFrom).any { it.isNotEmpty() } -> " "
+            else -> Pipeline.takeOpener(text, region.start)
+        }
+        var written = prefix + opener + sliceText
+        var first = texts.drop(attachedFrom).none { it.isNotEmpty() } && sliceText.isNotEmpty()
+        if (sliceText.isNotEmpty()) texts += sliceText
         val wrote = written.isNotEmpty() || from != region.end
         if (wrote) {
             if (!document.replace(from, region.end, written)) {
@@ -378,7 +407,7 @@ class TakeEngine(
                 attachedFrom = texts.size - 1
                 first = false
                 from = 0
-                written = decoded.text
+                written = sliceText
                 document.replace(0, 0, written)
                 region.appended(written.length)
             } else {
@@ -409,7 +438,7 @@ class TakeEngine(
             if (result == null) {
                 Cleaned(null, null, 0, 0, ms)
             } else {
-                val rejected = Pipeline.untrustedClean(plan.target, result.text)
+                val rejected = if (result.text.isBlank()) "empty" else Pipeline.untrustedClean(plan.target, result.text)
                 val text = if (rejected != null) Spoken.convert(plan.target) else result.text
                 Cleaned(Spoken.keepSpokenEnding(plan.target, text), rejected, cleaner.countTokens(plan.target), result.outTokens, ms)
             }

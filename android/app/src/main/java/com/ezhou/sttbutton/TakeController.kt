@@ -355,7 +355,7 @@ class TakeController(
 
     /** The field is gone: what was heard after the last write has nowhere to go but the clipboard. */
     private fun deliverUnwritten(current: TakeSession, run: Run, result: LiveResult) {
-        val body = Pipeline.withoutSignOff(result.cleaned).trim()
+        val body = Pipeline.trimMessageEnd(Pipeline.withoutSignOff(result.cleaned).trim())
         run.placement = Placement(null, null, body)
         dispatch(current, TakeEvent.EngineFinished(if (body.isBlank()) Delivery.BLANK else Delivery.NO_FIELD))
     }
@@ -381,7 +381,8 @@ class TakeController(
         val fieldText = if (field != null && !otherPackage) inserter.textOf(field) else null
         val signedOff = Pipeline.withoutSignOff(result.cleaned)
         val cleaned = if (fieldText != null && fieldText.isEmpty()) Pipeline.casual(signedOff, cfg) else signedOff
-        val body = if (field == null) cleaned else Pipeline.forField(cleaned, FieldPolicy.multiLine(field.isMultiLine, field.inputType))
+        val shaped = if (field == null) cleaned else Pipeline.forField(cleaned, FieldPolicy.multiLine(field.isMultiLine, field.inputType))
+        val body = Pipeline.trimMessageEnd(shaped)
         run.placement = Placement(field, fieldText, body)
         dispatch(current, TakeEvent.EngineFinished(when {
             body.isBlank() -> Delivery.BLANK

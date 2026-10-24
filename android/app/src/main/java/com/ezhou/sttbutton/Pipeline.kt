@@ -39,8 +39,10 @@ object Pipeline {
     private val COMMA_OUTSIDE_NUMBER = Regex("(?<![0-9]),|,(?![0-9])")
     private val FINAL_PERIOD = Regex("(?<!\\.)\\.(\\s*)$")
     private val NOT_SPOKEN = Regex("[^\\p{L}\\p{N}_\\s]")
-    private val TRAILING_FILLERS = setOf("um", "umm", "uh", "hmm")
+    private val TRAILING_FILLERS = setOf("um", "umm", "uh", "hmm", "mm", "mmm", "mhm", "mhmm")
     private val SIGN_OFFS = setOf("okay", "ok", "yeah", "yep", "alright")
+    private val END_PUNCT = Regex("[,;:!]+$")
+    private val END_PERIOD = Regex("(?<!\\.)\\.$")
     private val NOT_WORD_EDGE = Regex("^[^\\p{L}\\p{N}_']+|[^\\p{L}\\p{N}_']+$")
     // Android's ICU regex rejects the Unicode-class inline flag; \p{Z} gives the JVM the Unicode spaces Python's \S excludes.
     private val NON_SPACE = Regex("[^\\s\\p{Z}]+")
@@ -75,6 +77,42 @@ object Pipeline {
 
     fun joinSlices(texts: List<String>): String = texts.filter { it.isNotEmpty() }.joinToString(" ")
 
+    private val CONTINUE_LOWER = setOf(
+        "a", "an", "the", "and", "or", "but", "to", "of", "in", "on", "for", "with", "it", "that", "this",
+        "is", "was", "are", "were", "where", "when", "if", "so", "because", "which", "who", "what", "how",
+        "we", "they", "he", "she", "you", "there", "then", "than", "as", "at", "from", "by", "not", "also",
+        "just", "its", "be", "been", "have", "has", "had", "do", "does", "did", "can", "could", "would",
+        "should", "will", "about", "into", "over", "after", "before", "out", "up", "my", "your",
+    )
+    private val CONTINUATION_WORD = Regex("^([^\\p{L}\\p{N}_']*)([\\p{L}\\p{N}_']+)")
+
+    /** Mirrors `stt_button.asr.continue_fragment`. */
+    fun continueFragment(previous: String, next: String): Pair<String, String> {
+        var prev = previous.trimEnd()
+        var nxt = next.trim()
+        if (prev.isEmpty() || nxt.isEmpty()) return prev to nxt
+        val prevWords = prev.split(WHITESPACE).filter { it.isNotEmpty() }
+        val nextWords = nxt.split(WHITESPACE).filter { it.isNotEmpty() }
+        if (prevWords.isNotEmpty() && nextWords.isNotEmpty() && wordCore(prevWords.last()) == wordCore(nextWords.first()) &&
+            wordCore(prevWords.last()).isNotEmpty()
+        ) {
+            nxt = nextWords.drop(1).joinToString(" ")
+            if (nxt.isEmpty()) return prev to ""
+        }
+        if (prev.endsWith(".") && !prev.endsWith("..")) prev = prev.dropLast(1).trimEnd()
+        if (prev.isNotEmpty() && prev.last() !in "?!") nxt = lowercaseContinuation(nxt)
+        return prev to nxt
+    }
+
+    private fun wordCore(word: String): String = NOT_WORD_EDGE.replace(word, "").lowercase()
+
+    private fun lowercaseContinuation(text: String): String {
+        val match = CONTINUATION_WORD.find(text) ?: return text
+        val core = match.groupValues[2]
+        if (core.lowercase() !in CONTINUE_LOWER) return text
+        return match.groupValues[1] + core.lowercase() + text.substring(match.range.last + 1)
+    }
+
     fun splitSentences(text: String): List<String> = SENTENCE_BREAK.split(text.trim()).filter { it.isNotEmpty() }
 
     fun wordCount(text: String): Int = text.trim().split(WHITESPACE).count { it.isNotEmpty() }
@@ -106,6 +144,10 @@ object Pipeline {
             val ending = words.last().last().let { if (it in ".?!") it.toString() else "" }
             return if (kept.lastOrNull()?.let { it in ".?!" } == true) kept else kept + ending
         }
+        val glued = NOT_WORD_EDGE.replace(words.last(), "")
+        if (glued.firstOrNull()?.isUpperCase() == true && cores.last() in SIGN_OFFS && words.last().last() !in "?!") {
+            return text.substring(0, spans[spans.size - 2].last + 1).trimEnd(',', ';', ':')
+        }
         for (size in 2 downTo 1) {
             if (words.size > size && cores.takeLast(size).all { it in SIGN_OFFS } &&
                 words[words.size - size - 1].last() in ".?!" && words.last().last() !in "?!") {
@@ -113,6 +155,16 @@ object Pipeline {
             }
         }
         return null
+    }
+
+    /** Mirrors `stt_button.cleaner.trim_message_end`. */
+    fun trimMessageEnd(text: String): String {
+        var body = text.trimEnd()
+        while (true) {
+            val stripped = END_PERIOD.replace(END_PUNCT.replace(body, ""), "").trimEnd()
+            if (stripped == body) return body
+            body = stripped
+        }
     }
 
     /** Mirrors `stt_button.cleaner.casual`. */

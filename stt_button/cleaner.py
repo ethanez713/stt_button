@@ -201,9 +201,11 @@ def fact_drift(raw: str, cleaned: str) -> list[tuple[str, str]]:
             if len(m) > 1 and len(n) > 1 and _edits(m, n) <= (_DRIFT_MAX_EDITS if min(len(m), len(n)) > 3 else 1)]
 
 
-_TRAILING_FILLERS = {"um", "umm", "uh", "hmm"}
+_TRAILING_FILLERS = {"um", "umm", "uh", "hmm", "mm", "mmm", "mhm", "mhmm"}
 _SIGN_OFFS = {"okay", "ok", "yeah", "yep", "alright"}
 _NOT_WORD_EDGE = re.compile(r"^[^\w']+|[^\w']+$")
+_END_PUNCT = re.compile(r"[,;:!]+$")
+_END_PERIOD = re.compile(r"(?<!\.)\.$")
 
 
 def _without_one_sign_off(text: str) -> str | None:
@@ -216,6 +218,9 @@ def _without_one_sign_off(text: str) -> str | None:
         kept = text[:spans[-2][1]].rstrip(",;:")
         ending = words[-1][-1] if words[-1][-1] in ".?!" else ""
         return kept if kept[-1:] in (".", "?", "!") else kept + ending
+    glued = _NOT_WORD_EDGE.sub("", words[-1])
+    if glued[:1].isupper() and cores[-1] in _SIGN_OFFS and words[-1][-1] not in "?!":
+        return text[:spans[-2][1]].rstrip(",;:")
     for size in (2, 1):
         if (len(words) > size and all(core in _SIGN_OFFS for core in cores[-size:])
                 and words[-size - 1][-1] in ".?!" and words[-1][-1] not in "?!"):
@@ -224,8 +229,8 @@ def _without_one_sign_off(text: str) -> str | None:
 
 
 def without_sign_off(text: str) -> str:
-    """The text without the "Okay." or "Um" the speaker trailed off with before stopping the take. A
-    sign-off is a last sentence of only those words, and a lone one is the whole take."""
+    """The text without the "Okay." or "Um" trailed off at the end of the take. A sign-off is a last
+    sentence of only those words, or a capitalized one glued on, and a lone one is the whole take."""
     while (shorter := _without_one_sign_off(text)) is not None:
         text = shorter
     return text
@@ -285,6 +290,17 @@ def untrusted_clean(raw: str, cleaned: str) -> str | None:
     if fact_drift(raw, cleaned):
         return "drift"
     return None
+
+
+def trim_message_end(text: str) -> str:
+    """The message without the punctuation left on its last character. A question mark stays, and so
+    does an ellipsis; a final period, comma, semicolon, colon or exclamation mark goes."""
+    body = text.rstrip()
+    while True:
+        stripped = _END_PERIOD.sub("", _END_PUNCT.sub("", body)).rstrip()
+        if stripped == body:
+            return body
+        body = stripped
 
 
 def casual(text: str, cfg: dict) -> str:

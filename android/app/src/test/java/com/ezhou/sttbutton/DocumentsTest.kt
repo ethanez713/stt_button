@@ -25,17 +25,24 @@ class DocumentsTest {
     }
 
     @Test
-    fun given_a_field_with_other_text_when_finished_then_the_casual_rule_does_not_apply() {
+    fun given_a_field_with_other_text_when_finished_then_commas_stay_and_the_final_period_goes() {
         val dictated = "Sounds good, see you at five."
 
+        assertEquals("Sounds good, see you at five", Documents.finalText(dictated, "Hi. ", "Hi. $dictated", true, cfg))
+        assertEquals("Sounds good, see you at five", Documents.finalText(dictated, "", "Hi. $dictated", true, cfg))
+    }
+
+    @Test
+    fun given_a_question_when_finished_then_its_question_mark_stays() {
+        val dictated = "Do you need a subscription for that?"
+
         assertEquals(dictated, Documents.finalText(dictated, "Hi. ", "Hi. $dictated", true, cfg))
-        assertEquals(dictated, Documents.finalText(dictated, "", "Hi. $dictated", true, cfg))
     }
 
     @Test
     fun given_a_single_line_field_when_finished_then_line_breaks_become_spaces() {
         val dictated = "First part of a long dictation that goes on and on and on for quite a few words here.\n\nSecond part of it."
 
-        assertEquals(dictated.replace("\n\n", " "), Documents.finalText(dictated, "x", "x$dictated", false, cfg))
+        assertEquals(dictated.replace("\n\n", " ").removeSuffix("."), Documents.finalText(dictated, "x", "x$dictated", false, cfg))
     }
 }

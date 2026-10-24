@@ -6,6 +6,7 @@ import wave
 import numpy as np
 
 from stt_button import asr, dictate
+from stt_button.cleaner import trim_message_end
 
 SR = asr.SAMPLE_RATE
 
@@ -168,10 +169,10 @@ def test_given_a_three_slice_take_when_fed_then_chunks_are_cleaned_before_the_st
     take.mark_stop()
     result = take.finish()
 
-    assert len(cleaner.calls) == 4
-    assert result.chunks == 4 and result.clean_mode == "chunks"
-    assert result.cleaned == "\n\n".join(c.upper() for c in cleaner.calls)
-    assert result.raw == " ".join(slices)
+    assert len(cleaner.calls) == 3
+    assert result.chunks == 3 and result.clean_mode == "chunks"
+    assert result.cleaned == trim_message_end("\n\n".join(c.upper() for c in cleaner.calls))
+    assert result.raw == " ".join((slices[0][:-1], slices[1][:-1], slices[2]))
 
 
 def test_given_a_five_word_take_when_finished_then_it_is_raw_and_the_cleaner_is_never_asked_for():
@@ -213,7 +214,7 @@ def test_given_a_pause_when_idle_then_the_stop_finds_the_remainder_already_clean
 
     assert len(cleaner.calls) == 2
     assert (result.chunks, result.idle_cleans, result.idle_hits) == (2, 1, 1)
-    assert result.cleaned == "\n\n".join(c.upper() for c in cleaner.calls)
+    assert result.cleaned == trim_message_end("\n\n".join(c.upper() for c in cleaner.calls))
 
 
 def test_given_speech_during_an_idle_clean_when_polled_then_it_is_cancelled_and_the_text_is_unchanged():

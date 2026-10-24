@@ -1235,7 +1235,7 @@
    },
    "result": {
     "raw": "a1 a1 a1 a1 a1 a1 a1 a1 a1. a2 a2 a2 a2 a2 a2 a2 a2 a2. a3 a3 a3 a3 a3 a3 a3 a3 a3. b1 b1 b1 b1 b1 b1 b1 b1 b1. b2 b2 b2 b2 b2 b2 b2 b2 b2. b3 b3 b3 b3 b3 b3 b3 b3 b3. c1 c1 c1 c1 c1 c1 c1 c1 c1.",
-    "cleaned": "A1 A1 A1 A1 A1 A1 A1 A1 A1. A2 A2 A2 A2 A2 A2 A2 A2 A2.\n\nA3 A3 A3 A3 A3 A3 A3 A3 A3. B1 B1 B1 B1 B1 B1 B1 B1 B1.\n\nB2 B2 B2 B2 B2 B2 B2 B2 B2. B3 B3 B3 B3 B3 B3 B3 B3 B3.\n\nC1 C1 C1 C1 C1 C1 C1 C1 C1.",
+    "cleaned": "A1 A1 A1 A1 A1 A1 A1 A1 A1. A2 A2 A2 A2 A2 A2 A2 A2 A2.\n\nA3 A3 A3 A3 A3 A3 A3 A3 A3. B1 B1 B1 B1 B1 B1 B1 B1 B1.\n\nB2 B2 B2 B2 B2 B2 B2 B2 B2. B3 B3 B3 B3 B3 B3 B3 B3 B3.\n\nC1 C1 C1 C1 C1 C1 C1 C1 C1",
     "clean_mode": "chunks",
     "chunks": 4
    }
@@ -1314,7 +1314,7 @@
    },
    "result": {
     "raw": "a1 a1 a1 a1 a1 a1 a1 a1 a1. b1 b1 b1 b1 b1 b1 b1 b1 b1. c1 c1 c1 c1 c1 c1 c1 c1 c1. c2 c2 c2 c2 c2 c2 c2 c2 c2. tail end here.",
-    "cleaned": "A1 A1 A1 A1 A1 A1 A1 A1 A1. B1 B1 B1 B1 B1 B1 B1 B1 B1.\n\nC1 C1 C1 C1 C1 C1 C1 C1 C1. C2 C2 C2 C2 C2 C2 C2 C2 C2.\n\nTAIL END HERE.",
+    "cleaned": "A1 A1 A1 A1 A1 A1 A1 A1 A1. B1 B1 B1 B1 B1 B1 B1 B1 B1.\n\nC1 C1 C1 C1 C1 C1 C1 C1 C1. C2 C2 C2 C2 C2 C2 C2 C2 C2.\n\nTAIL END HERE",
     "clean_mode": "chunks",
     "chunks": 3
    }
@@ -1377,7 +1377,7 @@
    },
    "result": {
     "raw": "a1 a1 a1 a1 a1 a1 a1 a1 a1. b1 b1 b1 b1 b1 b1 b1 b1 b1. c1 c1 c1 c1 c1 c1 c1 c1 c1. c2 c2 c2 c2 c2 c2 c2 c2 c2.",
-    "cleaned": "A1 A1 A1 A1 A1 A1 A1 A1 A1. B1 B1 B1 B1 B1 B1 B1 B1 B1.\n\nC1 C1 C1 C1 C1 C1 C1 C1 C1. C2 C2 C2 C2 C2 C2 C2 C2 C2.",
+    "cleaned": "A1 A1 A1 A1 A1 A1 A1 A1 A1. B1 B1 B1 B1 B1 B1 B1 B1 B1.\n\nC1 C1 C1 C1 C1 C1 C1 C1 C1. C2 C2 C2 C2 C2 C2 C2 C2 C2",
     "clean_mode": "chunks",
     "chunks": 2
    }
@@ -1450,7 +1450,7 @@
    },
    "result": {
     "raw": "one nine word sentence sits right here. b1 b1 b1 b1 b1 b1 b1 b1 b1. b2 b2 b2 b2 b2 b2 b2 b2 b2. c1 c1 c1 c1 c1 c1 c1 c1 c1. c2 c2 c2 c2 c2 c2 c2 c2 c2.",
-    "cleaned": "ONE NINE WORD SENTENCE SITS RIGHT HERE. B1 B1 B1 B1 B1 B1 B1 B1 B1.\n\nB2 B2 B2 B2 B2 B2 B2 B2 B2. C1 C1 C1 C1 C1 C1 C1 C1 C1.\n\nC2 C2 C2 C2 C2 C2 C2 C2 C2.",
+    "cleaned": "ONE NINE WORD SENTENCE SITS RIGHT HERE. B1 B1 B1 B1 B1 B1 B1 B1 B1.\n\nB2 B2 B2 B2 B2 B2 B2 B2 B2. C1 C1 C1 C1 C1 C1 C1 C1 C1.\n\nC2 C2 C2 C2 C2 C2 C2 C2 C2",
     "clean_mode": "chunks",
     "chunks": 3
    }
@@ -1494,7 +1494,7 @@
    },
    "result": {
     "raw": "Put it on the S20 Ultra please now today.",
-    "cleaned": "Put it on the S20 Ultra please now today.",
+    "cleaned": "Put it on the S20 Ultra please now today",
     "clean_mode": "chunks",
     "chunks": 1
    }
@@ -1538,7 +1538,7 @@
    },
    "result": {
     "raw": "Send the plan to the team please now today.",
-    "cleaned": "Send the plan to the team please now today.",
+    "cleaned": "Send the plan to the team please now today",
     "clean_mode": "chunks",
     "chunks": 1
    }
@@ -8110,7 +8110,7 @@
   },
   {
    "text": "it thinks I'll Yeah.",
-   "without": "it thinks I'll Yeah."
+   "without": "it thinks I'll"
   },
   {
    "text": "Right. Okay, yeah.",

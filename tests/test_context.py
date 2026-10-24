@@ -1,6 +1,6 @@
 import numpy as np
 
-from stt_button.asr import SAMPLE_RATE, Slicer, context_audio, settled_mark, split_at_junction
+from stt_button.asr import SAMPLE_RATE, Slicer, context_audio, continue_fragment, settled_mark, split_at_junction
 
 
 def test_given_context_and_slice_words_when_split_at_the_junction_then_the_context_mark_and_the_slice_text_come_back():
@@ -99,8 +99,18 @@ def test_given_a_context_decode_with_no_words_after_the_junction_when_decoded_th
     take = two_slice_take(recognizer)
     take.finish()
 
-    assert take.raw == "One sentence. plain fallback"
+    assert take.raw == "One sentence plain fallback"
     assert (take.context_decodes, take.context_fallbacks) == (1, 1)
+
+
+def test_given_a_slice_decoded_on_its_own_when_joined_then_the_boundary_is_not_a_new_sentence():
+    assert continue_fragment("store it in.", "Mom and dad's") == ("store it in", "Mom and dad's")
+    assert continue_fragment("the world?", "Where do we put it") == ("the world?", "Where do we put it")
+    assert continue_fragment("call", "Call both of them") == ("call", "both of them")
+    assert continue_fragment("call.", "Call me") == ("call", "me")
+    assert continue_fragment("See you.", "And then we left") == ("See you", "and then we left")
+    assert continue_fragment("Wait...", "And more") == ("Wait...", "and more")
+    assert continue_fragment("hello.", "hello") == ("hello.", "")
 
 
 def test_given_a_closing_mark_rewritten_by_the_next_slice_when_chunked_then_the_early_chunks_are_still_a_prefix():

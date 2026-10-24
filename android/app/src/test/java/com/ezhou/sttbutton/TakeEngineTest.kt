@@ -158,7 +158,7 @@ class TakeEngineTest {
             val result = runScript(script)
             val name = script.getString("name")
             assertEquals("$name raw", expected.getString("raw"), result.raw)
-            assertEquals("$name cleaned", expected.getString("cleaned"), Pipeline.casual(Pipeline.withoutSignOff(result.cleaned), scriptConfig(script.getJSONObject("cfg"))))
+            assertEquals("$name cleaned", expected.getString("cleaned"), Pipeline.trimMessageEnd(Pipeline.casual(Pipeline.withoutSignOff(result.cleaned), scriptConfig(script.getJSONObject("cfg")))))
             assertEquals("$name clean_mode", expected.getString("clean_mode"), result.cleanMode)
             assertEquals("$name chunks", expected.getInt("chunks"), result.chunks)
         }
@@ -174,11 +174,11 @@ class TakeEngineTest {
         assertEquals(2, cleaner.calls.size)
         val result = rig.finish()
 
-        assertEquals(4, cleaner.calls.size)
-        assertEquals(4, result.chunks)
+        assertEquals(3, cleaner.calls.size)
+        assertEquals(3, result.chunks)
         assertEquals("chunks", result.cleanMode)
         assertEquals(cleaner.calls.joinToString("\n\n") { it.uppercase() }, result.cleaned)
-        assertEquals(slices.joinToString(" "), result.raw)
+        assertEquals(slices[0].dropLast(1) + " " + slices[1].dropLast(1) + " " + slices[2], result.raw)
     }
 
     @Test
@@ -191,6 +191,30 @@ class TakeEngineTest {
         assertEquals("Put it on the S20 Ultra please now", result.cleaned)
         assertEquals(1, result.drifts)
         assertEquals("fallback", rig.records.last { it.kind == "clean" }.outcome)
+    }
+
+    @Test
+    fun given_a_clean_that_returns_nothing_when_finished_then_the_chunk_is_inserted_as_heard() {
+        val heard = "Put it on the shelf please now"
+        val cleaner = MarkingCleaner(listOf(heard.uppercase() to ""))
+        val rig = Rig(cfg, ScriptedRecognizer(heard), cleaner)
+        rig.feed(tone(3))
+        val result = rig.finish()
+
+        assertEquals(heard, result.cleaned)
+        assertEquals(1, result.rejects)
+        val record = rig.records.last { it.kind == "clean" }
+        assertEquals("fallback", record.outcome)
+        assertEquals("empty", record.reason)
+    }
+
+    @Test
+    fun given_a_finish_tail_without_context_when_joined_then_a_provisional_stop_is_not_kept() {
+        val rig = Rig(cfg, ScriptedRecognizer("store it in.", "Mom and dad's house."))
+        rig.feedInPieces(audio(2.5, 2.0))
+        val result = rig.finish()
+
+        assertEquals("store it in Mom and dad's house.", result.raw)
     }
 
     @Test
@@ -501,7 +525,7 @@ class TakeEngineTest {
         val rig = Rig(cfg, ScriptedRecognizer(labelled("a", 3), labelled("b", 3)), slicer = slicer)
         rig.driver.drain()
 
-        assertEquals(labelled("a", 3) + " " + labelled("b", 3), rig.engine.raw)
+        assertEquals(labelled("a", 3).dropLast(1) + " " + labelled("b", 3), rig.engine.raw)
         assertEquals(2, rig.records.count { it.kind == "asr" })
     }
 
