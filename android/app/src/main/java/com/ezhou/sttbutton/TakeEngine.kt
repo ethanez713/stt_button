@@ -206,6 +206,7 @@ class TakeEngine(
     fun stop() {
         if (stopping) return
         stopping = true
+        region.close()
         finalSlice = slicer.finish().firstOrNull()
         val tail = finalSlice ?: return
         val at = nowMs()

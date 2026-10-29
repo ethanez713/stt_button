@@ -135,6 +135,27 @@ class RevisePolicyTest {
     }
 
     @Test
+    fun given_letters_typed_at_the_end_after_the_stop_when_the_take_finishes_then_they_are_left_as_typed() {
+        val editor = FakeEditor("")
+        val doc = FieldDocument(editor)
+        var typed = false
+        val cleaner = Upper { target ->
+            if (!typed && target.startsWith("a1") && target.contains("a3")) {
+                typed = true
+                editor.type(editor.text.length, 0, "po")
+                doc.sync()
+            }
+        }
+        val rig = Rig(config(), cleaner, doc, Heard(labelled("a", 3)))
+        rig.feed(audio(3.0, 0.0))
+
+        rig.finish()
+
+        assertEquals(labelled("a", 3).uppercase() + "po", editor.text)
+        assertTrue(rig.clean.none { it.input == "po" })
+    }
+
+    @Test
     fun given_a_pause_clean_abandoned_by_speech_when_it_ends_then_the_tail_is_as_it_was() {
         lateinit var rig: Rig
         val editor = FakeEditor("")

@@ -45,9 +45,16 @@ class TakeRegion(start: Int = 0, cleanEnd: Int = start, end: Int = cleanEnd) {
         flight = null
     }
 
+    private var closed = false
+
+    /** The take has stopped: what the user types at the end from here on is theirs, not the take's to clean. */
+    fun close() {
+        closed = true
+    }
+
     fun apply(edit: Edit) {
         val dirtied = flight?.let { touches(it, edit) } == true
-        val insertedAtEnd = edit.deleted == 0 && edit.at == end
+        val insertedAtEnd = !closed && edit.deleted == 0 && edit.at == end
         start = movedAsStart(start, edit)
         cleanEnd = movedAsEnd(cleanEnd, edit)
         end = if (insertedAtEnd) end + edit.inserted else movedAsEnd(end, edit)

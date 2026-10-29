@@ -464,11 +464,13 @@ class TakeEngineTest {
     }
 
     @Test
-    fun given_text_typed_at_the_end_when_finished_then_it_is_cleaned_with_the_tail() {
-        val rig = oneSliceRig(text = labelled("a", 1))
+    fun given_text_typed_at_the_end_during_the_take_when_finished_then_it_is_cleaned_with_the_tail() {
+        val rig = Rig(cfg, ScriptedRecognizer(labelled("a", 1), ""), MarkingCleaner())
+        rig.slicer.feed(audio(3.0, 3.0))
         val decode = rig.engine.next()!!
         rig.engine.complete(decode, decode.run())
         rig.doc.userEdit(rig.doc.read()!!.text.length, rig.doc.read()!!.text.length, " typed words here")
+        rig.engine.stop()
         rig.driver.drain()
         val result = rig.engine.result()
 
