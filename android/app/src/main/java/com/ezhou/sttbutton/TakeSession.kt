@@ -18,6 +18,12 @@ sealed interface TakeEvent {
     data object LanguageLeft : TakeEvent
     data object ExcludedField : TakeEvent
     data object FieldGone : TakeEvent
+
+    /** The take writes into its field as the words are heard, so the bubble stays hidden unless writes are held. */
+    data object FieldTake : TakeEvent
+
+    /** [held] while a write would land under the user's typing. */
+    data class WritesHeld(val held: Boolean) : TakeEvent
     data object ViewStarted : TakeEvent
     data object ViewFinished : TakeEvent
     data object Error : TakeEvent
@@ -75,6 +81,10 @@ class TakeSession(val take: Take, private val capMs: Long, private val clock: ()
     private var hiddenToken = 0
     private var bubbleShown = false
     private var flashing = false
+    private var intoField = false
+    private var writesHeld = false
+    private var provisionalWrites = 0
+    private var firstTextMs: Long? = null
 
     var swap: SwapState = SwapState.off()
         private set
@@ -93,11 +103,19 @@ class TakeSession(val take: Take, private val capMs: Long, private val clock: ()
     var cleanup = "abandoned"
         private set
 
+    /** [provisionalWrites] and [firstTextMs] (tap to the first write into the field) land on the ending line. */
+    fun noteTextTiming(provisionalWrites: Int, firstTextMs: Long?) {
+        this.provisionalWrites = provisionalWrites
+        this.firstTextMs = firstTextMs
+    }
+
     fun endingFields(trigger: String?): Array<Pair<String, Any?>> = arrayOf(
         "trigger" to trigger,
         "triggers" to JSONArray(triggers),
         "resumes" to resumes,
         "cleanup" to cleanup,
+        "provisional_writes" to provisionalWrites,
+        "first_text_ms" to firstTextMs,
     )
 
     /** The take has ended and no flash is left on the button; a tap now starts another take. */
@@ -134,6 +152,14 @@ class TakeSession(val take: Take, private val capMs: Long, private val clock: ()
             TakeEvent.MicFailed -> stop(TRIGGER_MIC, out)
             TakeEvent.PackageChanged -> stop(TRIGGER_PACKAGE, out)
             TakeEvent.FieldGone -> stop(TRIGGER_FIELD, out)
+            TakeEvent.FieldTake -> {
+                intoField = true
+                if (isOpen) syncBubble(out)
+            }
+            is TakeEvent.WritesHeld -> {
+                writesHeld = event.held
+                if (isOpen && intoField) syncBubble(out)
+            }
             TakeEvent.ExcludedField -> if (swap.holdsTake) stop(TRIGGER_KEYBOARD, out)
             TakeEvent.ViewStarted -> onViewStarted(out)
             TakeEvent.ViewFinished -> if (isOpen && swap.onViewFinish(clock())) {
@@ -172,10 +198,28 @@ class TakeSession(val take: Take, private val capMs: Long, private val clock: ()
     private fun opened(out: MutableList<TakeEffect>) {
         phase = Phase.OPEN
         out += TakeEffect.AskSwap
-        bubbleShown = true
-        out += TakeEffect.ShowBubble
+        showBubble(out)
         out += TakeEffect.Schedule(capMs, TakeEvent.Cap)
         out += TakeEffect.SetButton(buttonMode)
+    }
+
+    /** A field take shows the bubble only while writes are held; the preview then has nowhere else to go. */
+    private fun bubbleWanted(): Boolean = !intoField || writesHeld
+
+    private fun showBubble(out: MutableList<TakeEffect>) {
+        if (bubbleShown || !bubbleWanted()) return
+        bubbleShown = true
+        out += TakeEffect.ShowBubble
+    }
+
+    private fun hideBubble(out: MutableList<TakeEffect>) {
+        if (!bubbleShown) return
+        bubbleShown = false
+        out += TakeEffect.HideBubble
+    }
+
+    private fun syncBubble(out: MutableList<TakeEffect>) {
+        if (bubbleWanted()) showBubble(out) else hideBubble(out)
     }
 
     private fun onButtonShown(shown: Boolean, out: MutableList<TakeEffect>) {
@@ -190,10 +234,7 @@ class TakeSession(val take: Take, private val capMs: Long, private val clock: ()
         }
         val recording = take.state == TakeState.OPEN
         when (val wait = hiddenWatch.stopInMs(shown, recording, clock())) {
-            null -> if (recording && !bubbleShown) {
-                bubbleShown = true
-                out += TakeEffect.ShowBubble
-            }
+            null -> if (recording) showBubble(out)
             0L -> stop(TRIGGER_KEYBOARD, out)
             else -> if (recording) out += TakeEffect.Schedule(wait, TakeEvent.HiddenCheckDue(hiddenToken))
         }
@@ -226,10 +267,7 @@ class TakeSession(val take: Take, private val capMs: Long, private val clock: ()
         out += TakeEffect.ResumeEngine
         out += TakeEffect.StartRecorder
         out += TakeEffect.PanelBusy(false)
-        if (!bubbleShown) {
-            bubbleShown = true
-            out += TakeEffect.ShowBubble
-        }
+        showBubble(out)
         out += TakeEffect.SetButton(buttonMode)
     }
 

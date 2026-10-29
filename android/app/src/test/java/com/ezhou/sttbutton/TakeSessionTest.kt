@@ -409,6 +409,62 @@ class TakeSessionTest {
     }
 
     @Test
+    fun given_a_field_take_when_it_opens_and_resumes_then_the_bubble_stays_hidden() {
+        val s = session()
+        s.on(TakeEvent.Tap(true))
+        s.on(TakeEvent.FieldTake)
+
+        val opening = s.on(TakeEvent.RecorderStarted)
+        assertFalse(opening.contains(TakeEffect.ShowBubble))
+        s.on(TakeEvent.Tap(true))
+        val resuming = s.on(TakeEvent.Tap(true))
+
+        assertFalse(resuming.contains(TakeEffect.ShowBubble))
+        assertEquals(ButtonMode.RECORDING, s.buttonMode)
+        s.on(TakeEvent.ButtonShown(false))
+        assertFalse(s.on(TakeEvent.ButtonShown(true)).contains(TakeEffect.ShowBubble))
+    }
+
+    @Test
+    fun given_a_field_take_when_writes_are_held_then_the_bubble_shows_until_they_are_not() {
+        val s = session()
+        s.on(TakeEvent.Tap(true))
+        s.on(TakeEvent.FieldTake)
+        s.on(TakeEvent.RecorderStarted)
+
+        val held = s.on(TakeEvent.WritesHeld(true))
+        val released = s.on(TakeEvent.WritesHeld(false))
+
+        assertTrue(held.contains(TakeEffect.ShowBubble))
+        assertTrue(released.contains(TakeEffect.HideBubble))
+    }
+
+    @Test
+    fun given_writes_held_on_a_take_that_is_not_in_a_field_when_the_bubble_is_hidden_then_it_stays_hidden() {
+        val s = session()
+        s.open()
+        s.on(TakeEvent.ButtonShown(false))
+
+        val held = s.on(TakeEvent.WritesHeld(true))
+
+        assertFalse(held.contains(TakeEffect.ShowBubble))
+    }
+
+    @Test
+    fun given_text_timing_when_noted_then_the_ending_line_names_the_provisional_writes_and_the_first_text() {
+        val s = session()
+        val before = s.endingFields(null).toMap()
+        assertEquals(0, before["provisional_writes"])
+        assertEquals(null, before["first_text_ms"])
+
+        s.noteTextTiming(4, 320L)
+        val after = s.endingFields("stop").toMap()
+
+        assertEquals(4, after["provisional_writes"])
+        assertEquals(320L, after["first_text_ms"])
+    }
+
+    @Test
     fun given_a_returned_keyboard_when_the_ime_line_is_due_then_it_is_written() {
         val s = session()
         s.open(liveSwap())

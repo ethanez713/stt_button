@@ -6,6 +6,7 @@ class SerialDriver(private val engine: TakeEngine) {
     fun drain(): Int {
         var jobs = 0
         while (true) {
+            engine.flushProvisional()
             val job = engine.next() ?: return jobs
             engine.complete(job, job.run())
             jobs++

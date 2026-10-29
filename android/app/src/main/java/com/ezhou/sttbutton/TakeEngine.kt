@@ -134,6 +134,21 @@ class TakeEngine(
     private var recordingStartMs: Long? = null
     private var silenceFrom = 0
 
+    /** Preview words no decode has covered, written after the region. Not part of the region. */
+    private var requestedPreview: String? = null
+    private var previewDirty = false
+    private var provisional: Span? = null
+    private var provisionalAt: Long? = null
+    private var detaching = false
+
+    /** Rewrites of the preview into the field. Job lines do not record them. */
+    var provisionalWrites = 0
+        private set
+
+    /** [nowMs] when the take first wrote into a field, or null when it has not. */
+    var firstWriteMs: Long? = null
+        private set
+
     var stopping = false
         private set
 
@@ -142,12 +157,24 @@ class TakeEngine(
     }
 
     private fun hookEdits() {
-        document.onEdit = { edit ->
-            if (edit.at <= region.end && edit.at + edit.deleted >= region.start) editsInside++
-            region.apply(edit)
-            onWoken?.invoke()
-        }
+        document.onEdit = ::applyEdit
     }
+
+    private fun applyEdit(edit: Edit) {
+        if (edit.at <= region.end && edit.at + edit.deleted >= region.start) editsInside++
+        val span = provisional
+        region.apply(edit)
+        if (span != null) {
+            if (requestedPreview != null && overlapsSpan(span, edit)) previewDirty = true
+            provisional = span.apply(edit).takeIf { it.start < it.end }
+        }
+        onWoken?.invoke()
+    }
+
+    /** An edit strictly inside the span. One at either edge is outside it, as it is for [Span]. */
+    private fun overlapsSpan(span: Span, edit: Edit): Boolean =
+        if (edit.deleted == 0) edit.at > span.start && edit.at < span.end
+        else edit.at < span.end && edit.at + edit.deleted > span.start
 
     /** Where the take's own words begin and end in the document, after any opener. */
     val textStart: Int get() = region.start + lead
@@ -157,10 +184,59 @@ class TakeEngine(
     fun writesHeld(): Boolean = !stopping && document.writesHeld()
 
     /**
+     * Preview words the streaming model has that no decode has covered. Only a field take writes them, as one span
+     * directly after the region, led as a slice would be. Rewritten at most every [PROVISIONAL_MS], and not while
+     * [writesHeld] or stopped; a pending update waits for [flushProvisional].
+     */
+    fun setProvisional(text: String) {
+        if (document !is FieldDocument) return
+        requestedPreview = text
+        previewDirty = true
+        flushProvisional()
+    }
+
+    /** Writes a pending preview when the hold and the throttle allow it. The driver's tick calls this. */
+    fun flushProvisional() {
+        if (stopping || document !is FieldDocument) return
+        val preview = requestedPreview ?: return
+        if (!previewDirty) return
+        if (writesHeld()) return
+        val text = readText()
+        if (stopping || document !is FieldDocument) return
+        val span = provisional
+        val from = (span?.start ?: region.end).coerceIn(0, text.length)
+        val to = (span?.end ?: from).coerceIn(from, text.length)
+        val written = leadProvisional(preview, text)
+        if (text.substring(from, to) == written) {
+            previewDirty = false
+            if (written.isEmpty()) provisional = null
+            return
+        }
+        val at = provisionalAt
+        if (from < to && written.isNotEmpty() && at != null && nowMs() - at < PROVISIONAL_MS) return
+        if (!replaceDocument(from, to, written)) {
+            detach()
+            return
+        }
+        provisionalAt = nowMs()
+        provisionalWrites++
+        provisional = if (written.isEmpty()) null else Span(from, from + written.length)
+        previewDirty = false
+    }
+
+    /** A write into the field the engine did not make itself, such as the stop's final shaping of the text. */
+    fun markFieldWrite() {
+        if (firstWriteMs == null && document is FieldDocument) firstWriteMs = nowMs()
+    }
+
+    /**
      * The document is gone: what the take hears from here on collects in memory, as the text of a take with no field,
-     * and what it already wrote stays where it is.
+     * and the text it already committed stays where it is. A provisional span still in reach is removed.
      */
     fun detach() {
+        if (detaching) return
+        detaching = true
+        dropProvisional()
         document = BufferDocument()
         hookEdits()
         region = TakeRegion()
@@ -173,6 +249,7 @@ class TakeEngine(
         kept.clear()
         onDetached?.invoke()
         onText?.invoke(regionText())
+        detaching = false
     }
 
     private fun readText(): String = document.read()?.text ?: run {
@@ -206,7 +283,10 @@ class TakeEngine(
         if (stopping) return
         stopping = true
         region.close()
-        val tail = slicer.consume() ?: return
+        val tail = slicer.consume() ?: run {
+            if (slicer.closedSlices(decoded).isEmpty()) dropProvisional()
+            return
+        }
         val at = nowMs()
         synchronized(timing) { closedAtMs.putIfAbsent(tail[1], at) }
     }
@@ -218,6 +298,7 @@ class TakeEngine(
         region.reopen()
         region.abandonFlight()
         silenceFrom = slicer.sampleCount
+        flushProvisional()
     }
 
     fun next(): Job? {
@@ -404,18 +485,17 @@ class TakeEngine(
         if (first) sliceText = Pipeline.continuing(sliceText, text.substring(0, region.start) + opener, region.start + opener.length)
         var written = prefix + opener + sliceText
         if (sliceText.isNotEmpty()) texts += sliceText
-        val wrote = written.isNotEmpty() || from != region.end
+        val through = provisional?.let { if (it.start > region.end) region.end else maxOf(region.end, it.end) } ?: region.end
+        val wrote = written.isNotEmpty() || from != through || provisional?.start?.let { it > region.end } == true
         if (wrote) {
-            if (!document.replace(from, region.end, written)) {
+            if (!writeSlice(from, written)) {
                 detach()
                 attachedFrom = texts.size - 1
                 first = false
                 from = 0
                 written = sliceText
-                document.replace(0, 0, written)
+                replaceDocument(0, 0, written)
                 region.appended(written.length)
-            } else {
-                region.appended(written.length - (region.end - from))
             }
         }
         if (first) {
@@ -503,7 +583,7 @@ class TakeEngine(
     private fun applyLocal(plan: CleanPlan) {
         region.flightOver(plan.from, plan.to)
         val text = Spoken.convert(plan.target)
-        document.replace(plan.from, plan.to, text)
+        replaceDocument(plan.from, plan.to, text)
         region.flightReplaced(text.length)
         onText?.invoke(regionText())
     }
@@ -513,7 +593,7 @@ class TakeEngine(
         val text = readText()
         if (plan.region) {
             val opened = Pipeline.continuing(output, text, from)
-            document.replace(from, to, opened)
+            replaceDocument(from, to, opened)
             region.flightReplaced(opened.length)
             cleans = 1
             editsInside = 0
@@ -529,13 +609,69 @@ class TakeEngine(
         outputs += output
         cleans++
         val written = separator + Pipeline.continuing(output, text.substring(0, from) + separator, from + separator.length)
-        document.replace(from, to, written)
+        replaceDocument(from, to, written)
         region.flightReplaced(written.length)
         onText?.invoke(regionText())
     }
 
     private fun completeLoad(job: Job, loaded: Loaded) {
         jobs(JobRecord("load", job.moment.name.lowercase(), loaded.ms, null, null, "applied"))
+    }
+
+    /** The opener a slice would take: a space once the take has words, otherwise [Pipeline.takeOpener]. */
+    private fun leadProvisional(preview: String, text: String): String {
+        if (preview.isEmpty()) return ""
+        val opener = if (texts.drop(attachedFrom).any { it.isNotEmpty() }) " " else Pipeline.takeOpener(text, region.start)
+        return opener + preview
+    }
+
+    /**
+     * Writes the slice over [from, region end) and the provisional span. One replacement when the span sits on
+     * the region's end; text the user put between them, while the region was closed, stays.
+     */
+    private fun writeSlice(from: Int, written: String): Boolean {
+        val span = provisional
+        if (span != null && span.start > region.end) {
+            val growth = written.length - (region.end - from)
+            if (!replaceDocument(from, region.end, written)) return false
+            region.appended(growth)
+            dropProvisional()
+            return true
+        }
+        val through = span?.end ?: region.end
+        val growth = written.length - (region.end - from)
+        if (!replaceDocument(from, maxOf(through, region.end), written)) return false
+        clearProvisional()
+        region.appended(growth)
+        return true
+    }
+
+    private fun replaceDocument(from: Int, to: Int, text: String): Boolean {
+        if (!document.replace(from, to, text)) return false
+        if (document is FieldDocument && firstWriteMs == null) firstWriteMs = nowMs()
+        shiftProvisional(from, to, text.length)
+        return true
+    }
+
+    private fun shiftProvisional(from: Int, to: Int, inserted: Int) {
+        val span = provisional ?: return
+        if (to > span.start) return
+        val delta = inserted - (to - from)
+        if (delta == 0) return
+        provisional = Span(span.start + delta, span.end + delta).takeIf { it.start < it.end }
+    }
+
+    private fun dropProvisional() {
+        val span = provisional
+        clearProvisional()
+        if (span == null) return
+        replaceDocument(span.start, span.end, "")
+    }
+
+    private fun clearProvisional() {
+        provisional = null
+        requestedPreview = null
+        previewDirty = false
     }
 
     private fun noteTiming() {
@@ -562,4 +698,8 @@ class TakeEngine(
     private fun samplesToMs(samples: Int) = samples.toLong() / (Slicer.SAMPLE_RATE / 1000)
 
     private fun elapsedMs(since: Long) = (System.nanoTime() - since) / 1_000_000
+
+    companion object {
+        const val PROVISIONAL_MS = 250L
+    }
 }

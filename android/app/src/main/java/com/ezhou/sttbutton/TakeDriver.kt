@@ -7,10 +7,10 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Runs a [TakeEngine] on the main thread: asks it for a job, hands [Job.run] to [worker], applies the
- * result and asks again. Woken by slices landing, a tick while the take is open (pauses and the silence
- * stop; [onTick] runs on it), a document edit and [stop]; [onDone] gets the result once the engine has
- * nothing left after the stop. A result that would write while the engine says writes are held waits for a
- * later tick; the stop does not wait.
+ * result and asks again. Woken by slices landing, a tick while the take is open (pauses, the silence
+ * stop and a provisional preview the engine has not written yet; [onTick] runs on it), a document edit
+ * and [stop]; [onDone] gets the result once the engine has nothing left after the stop. A result that
+ * would write while the engine says writes are held waits for a later tick; the stop does not wait.
  */
 class TakeDriver(
     private val engine: TakeEngine,
@@ -28,6 +28,10 @@ class TakeDriver(
     private var settled: (() -> Unit)? = null
     private var waiting: Pair<Job, Result<JobResult>>? = null
     private var heldSince = 0L
+    private var writesHeldNoted: Boolean? = null
+
+    /** Main thread, when [TakeEngine.writesHeld] changes. */
+    var onWritesHeld: ((Boolean) -> Unit)? = null
 
     /** Results that waited for the user's typing, and the longest wait. */
     var heldWrites = 0
@@ -38,6 +42,8 @@ class TakeDriver(
         override fun run() {
             if (ended) return
             onTick()
+            engine.flushProvisional()
+            noteWritesHeld()
             pump()
             main.postDelayed(this, tickMs)
         }
@@ -105,9 +111,18 @@ class TakeDriver(
         pump()
     }
 
+    private fun noteWritesHeld() {
+        val held = engine.writesHeld()
+        if (held == writesHeldNoted) return
+        writesHeldNoted = held
+        onWritesHeld?.invoke(held)
+    }
+
     private fun pump() {
         if (ended || running) return
         try {
+            engine.flushProvisional()
+            noteWritesHeld()
             waiting?.let { (job, outcome) ->
                 if (engine.writesHeld()) {
                     if (heldSince == 0L) heldSince = SystemClock.uptimeMillis()

@@ -311,6 +311,118 @@ class RevisePolicyTest {
     }
 
     @Test
+    fun given_provisional_words_past_the_region_when_a_clean_runs_then_its_target_never_contains_them() {
+        val editor = FakeEditor("")
+        val cleaner = Upper()
+        val (_, rig) = rigOver(editor, config(), cleaner, labelled("a", 1))
+        rig.engine.setProvisional("zzzz")
+        rig.slicer.feed(audio(3.0, 3.0))
+        rig.engine.onAudio()
+
+        while (true) {
+            val job = rig.engine.next() ?: break
+            job.plan?.let { assertFalse(it.target, it.target.contains("zzzz")) }
+            rig.engine.complete(job, job.run())
+            rig.engine.setProvisional("zzzz")
+        }
+
+        assertTrue(cleaner.targets.isNotEmpty())
+        assertTrue(cleaner.targets.none { it.contains("zzzz") })
+        assertTrue(editor.text, editor.text.contains("zzzz"))
+        assertTrue(rig.engine.textEnd <= editor.text.indexOf("zzzz"))
+        assertTrue(rig.records.none { it.kind == "asr" && (it.input?.contains("zzzz") == true || it.output?.contains("zzzz") == true) })
+    }
+
+    @Test
+    fun given_provisional_words_when_the_take_stops_then_the_final_slice_replaces_the_span() {
+        val editor = FakeEditor("")
+        val (doc, rig) = rigOver(editor, config(), Upper(), "the real sentence.")
+        rig.engine.setProvisional("raw preview")
+        rig.feed(audio(3.0, 0.0))
+        assertTrue(editor.text, editor.text.contains("raw preview"))
+        editor.type(editor.text.length, 0, " KEEP")
+        doc.sync()
+
+        rig.finish()
+
+        assertFalse(editor.text, editor.text.contains("raw preview"))
+        assertTrue(editor.text, editor.text.endsWith(" KEEP"))
+        assertTrue(editor.text, editor.text.contains("real sentence"))
+    }
+
+    @Test
+    fun given_a_stopped_take_when_it_resumes_then_provisional_words_are_written_again() {
+        val editor = FakeEditor("")
+        val (_, rig) = rigOver(editor, config(), Upper(), "the real sentence.")
+        rig.engine.setProvisional("rawone")
+        rig.slicer.feed(audio(3.0, 0.0))
+        rig.engine.onAudio()
+        assertTrue(editor.text, editor.text.contains("rawone"))
+
+        rig.engine.stop()
+        rig.engine.setProvisional("rawtwo")
+
+        assertTrue(editor.text, editor.text.contains("rawone"))
+        assertFalse(editor.text, editor.text.contains("rawtwo"))
+        rig.driver.drain()
+
+        assertFalse(editor.text, editor.text.contains("rawone"))
+        assertFalse(editor.text, editor.text.contains("rawtwo"))
+        rig.engine.resume()
+        rig.engine.setProvisional("rawtwo")
+
+        assertTrue(editor.text, editor.text.contains("rawtwo"))
+        assertTrue(rig.engine.provisionalWrites >= 2)
+    }
+
+    @Test
+    fun given_a_buffer_document_when_provisional_text_is_offered_then_nothing_is_written() {
+        val doc = BufferDocument("seed")
+        val rig = Rig(config(), Upper(), doc, Heard(labelled("a", 1)))
+        rig.engine.setProvisional("raw preview")
+        rig.engine.flushProvisional()
+
+        assertEquals("seed", doc.read()!!.text)
+        assertEquals(0, rig.engine.provisionalWrites)
+        assertNull(rig.engine.firstWriteMs)
+
+        rig.feed(audio(3.0, 0.0))
+        rig.finish()
+
+        assertFalse(doc.read()!!.text, doc.read()!!.text.contains("raw preview"))
+        assertEquals(0, rig.engine.provisionalWrites)
+    }
+
+    @Test
+    fun given_provisional_writes_and_an_edit_inside_them_when_the_take_finishes_then_the_region_is_still_revised() {
+        val editor = FakeEditor("")
+        var now = 0L
+        val doc = FieldDocument(editor) { now }.also { check(it.sync()) }
+        val cleaner = Upper()
+        val rig = Rig(config(), cleaner, doc, Heard(labelled("a", 3)))
+        rig.engine.setProvisional("zzzz")
+        val at = editor.text.indexOf("zzzz")
+        assertTrue(editor.text, at >= rig.engine.textEnd)
+        editor.type(at + 1, 0, "Q")
+        doc.sync()
+        editor.selectionStart = 0
+        editor.selectionEnd = 0
+        doc.sync()
+        now = FieldDocument.TYPING_QUIET_MS
+
+        rig.feed(audio(3.0, 0.0))
+        rig.finish()
+
+        val revision = rig.clean.single { it.scope == "region" }
+        assertEquals("applied", revision.outcome)
+        assertFalse(revision.input!!, revision.input!!.contains("zzzz"))
+        assertFalse(revision.input!!, revision.input!!.contains("Q"))
+        assertFalse(editor.text, editor.text.contains("zzzz"))
+        assertFalse(editor.text, editor.text.contains("Q"))
+        assertTrue(cleaner.targets.none { it.contains("zzzz") || it.contains("Q") })
+    }
+
+    @Test
     fun given_a_revision_in_flight_when_the_take_resumes_then_it_is_dropped_and_the_next_stop_revises_the_whole_region() {
         val editor = FakeEditor("")
         val heardA = labelled("a", 3)

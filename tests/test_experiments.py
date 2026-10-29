@@ -292,6 +292,18 @@ class TestPhoneUsage:
         assert "load ms: median 1000 over 2" in report
         assert "lag_ms:" not in phone_usage.summarize([self.insert(1)])
 
+    def test_the_preview_table_reports_first_text_and_provisional_writes_per_insert_path(self):
+        from experiments import phone_usage
+        lines = [
+            self.insert(1, insert_path="field", first_text_ms=400, provisional_writes=3),
+            self.insert(2, insert_path="field", first_text_ms=800, provisional_writes=5),
+            self.insert(3, insert_path="ladder", first_text_ms=2000, provisional_writes=0),
+        ]
+        report = phone_usage.summarize(lines)
+        assert "field: first_text_ms median 600 p90 800 over 2, median provisional_writes 4" in report
+        assert "ladder: first_text_ms median 2000 p90 2000 over 1, median provisional_writes 0" in report
+        assert "preview:" not in phone_usage.summarize([self.insert(1, insert_path="field")])
+
     def test_a_report_of_takes_from_before_the_field_path_has_no_field_path_table(self):
         from experiments import phone_usage
         assert "field path" not in phone_usage.summarize([self.insert(1)])

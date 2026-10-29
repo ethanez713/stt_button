@@ -208,6 +208,24 @@ def lag_table(lines: list[dict]) -> list[str]:
     return out
 
 
+def preview_timing(lines: list[dict]) -> list[str]:
+    """How soon the first words reached the field, and how often the streaming preview was written there:
+    per `insert_path`, the median and p90 of `first_text_ms` and the median `provisional_writes`."""
+    inserts = [r for r in lines if r.get("event") == "insert" and r.get("insert_path")
+               and (_number(r.get("first_text_ms")) or _number(r.get("provisional_writes")))]
+    if not inserts:
+        return []
+    out = ["\npreview:"]
+    for path in sorted({r["insert_path"] for r in inserts}, key=str):
+        rows = [r for r in inserts if r["insert_path"] == path]
+        first = [r["first_text_ms"] for r in rows if _number(r.get("first_text_ms"))]
+        writes = [r["provisional_writes"] for r in rows if _number(r.get("provisional_writes"))]
+        out.append(f"  {path}: first_text_ms median {fmt(median(first))} "
+                   f"p90 {fmt(percentile(first, 0.9))} over {len(first)}, "
+                   f"median provisional_writes {fmt(median(writes))}")
+    return out
+
+
 def field_path(lines: list[dict]) -> list[str]:
     """Takes written into their field as they were heard: per `insert_path`, how many, the median writes and how
     many waited for typing; takes the field ended; and the revisions at the stop from the `job` lines."""
@@ -301,6 +319,7 @@ def summarize(lines: list[dict], capacity_mah: float = 5000) -> str:
     out.extend(swap_table(lines))
     out.extend(field_reads(lines))
     out.extend(field_path(lines))
+    out.extend(preview_timing(lines))
     out.extend(lag_table(lines))
 
     exits = Counter(line.get("reason") for line in lines if line.get("event") == "exit")

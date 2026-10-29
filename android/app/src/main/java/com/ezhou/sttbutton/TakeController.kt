@@ -193,7 +193,10 @@ class TakeController(
             TakeEffect.StopRecorder -> run?.let(::stopRecorder)
             TakeEffect.StopEngine -> run?.let { stopEngine(current, it) }
             TakeEffect.StartRecorder -> run?.let { startRecorder(current, it) }
-            TakeEffect.ResumeEngine -> run?.driver?.resume()
+            TakeEffect.ResumeEngine -> run?.let {
+                it.driver.resume()
+                postProvisional(it)
+            }
             TakeEffect.CancelCleaner -> run?.models?.cleaner()?.cancel()
             is TakeEffect.ReturnKeyboard -> {
                 val method = service.swapper.returnKeyboard()
@@ -272,6 +275,7 @@ class TakeController(
             },
             onTick = { runs[current]?.let { if (cfg.stopSilenceS?.let { limit -> engine.silenceS() >= limit } == true) dispatch(current, TakeEvent.Silence) } },
         )
+        driver.onWritesHeld = { held -> dispatch(current, TakeEvent.WritesHeld(held)) }
         models.onCleanerLoaded = driver::wake
         val preview = PreviewRecognizer(models::awaitPreview, bubbleText::preview)
         val pcm = File(takesDir, "${take.id}.pcm")
@@ -303,6 +307,7 @@ class TakeController(
         }
         pruneTakeAudio(pcm.name)
         Log.i(tag, "take start pkg=${take.pkg}")
+        if (fieldDoc != null) dispatch(current, TakeEvent.FieldTake)
         driver.start()
         dispatch(current, TakeEvent.RecorderStarted)
     }
@@ -380,7 +385,10 @@ class TakeController(
         val field = targetField(run)
         val dictated = state.text.substring(start, end)
         val body = Documents.finalText(dictated, run.textBefore, state.text, FieldPolicy.multiLine(field?.isMultiLine ?: true, field?.inputType ?: 0), cfg)
-        if (body != dictated) doc.replace(start, end, body)
+        if (body != dictated) {
+            doc.replace(start, end, body)
+            run.engine.markFieldWrite()
+        }
         run.writtenSpan = Span(start, start + body.length)
         run.placement = Placement(field, state.text, body.trim())
         dispatch(current, TakeEvent.EngineFinished(if (body.isBlank()) Delivery.BLANK else Delivery.INSERT))
@@ -423,6 +431,7 @@ class TakeController(
         }
         run.sampler.stop()
         val caretAfter = inserter.readCaret(field)
+        stampTextTiming(current, run, writingNow = true)
         log.write("insert", take.id,
             "pkg" to take.pkg, "raw" to result.raw, "cleaned" to body, "text_before" to outcome.textBefore,
             "insert_path" to outcome.path, "landed" to outcome.landed,
@@ -448,6 +457,7 @@ class TakeController(
         val result = checkNotNull(run.result)
         val placement = checkNotNull(run.placement)
         run.sampler.stop()
+        stampTextTiming(current, run, writingNow = false)
         log.write("insert", take.id,
             "pkg" to take.pkg, "raw" to result.raw, "cleaned" to placement.body, "text_before" to run.textBefore,
             "insert_path" to "field", "field_read" to run.fieldRead, "readback" to null, "landed_count" to null, "attempts" to null,
@@ -485,6 +495,7 @@ class TakeController(
             false
         }
         if (copied) Toast.makeText(service, R.string.copied_to_clipboard, Toast.LENGTH_LONG).show()
+        stampTextTiming(current, run, writingNow = false)
         log.write("clipboard", run.take.id,
             "pkg" to run.take.pkg, "reason" to reason.logName, *current.endingFields(trigger), "copied" to copied,
             "raw" to result.raw, "text" to clip, "unwritten_chars" to clip.length.takeIf { run.detached },
@@ -494,6 +505,7 @@ class TakeController(
     }
 
     private fun logDiscard(current: TakeSession, run: Run, reason: DiscardReason, trigger: String?) {
+        stampTextTiming(current, run, writingNow = false)
         log.write(
             "discard", run.take.id, "reason" to reason.logName, *current.endingFields(trigger), "clean_policy" to run.engine.policyName,
             "audio_ms" to run.level.audioMs, "zero_ms" to run.level.zeroMs, "peak_dbfs" to run.level.peakDbfs,
@@ -507,6 +519,12 @@ class TakeController(
             "in_tokens" to record.inTokens, "out_tokens" to record.outTokens,
             "from_ms" to record.fromMs, "to_ms" to record.toMs, "context" to record.context, "scope" to record.scope,
             "reason" to record.reason, "wait_ms" to record.waitMs, "lag_ms" to record.lagMs)
+    }
+
+    private fun stampTextTiming(current: TakeSession, run: Run, writingNow: Boolean) {
+        val first = run.engine.firstWriteMs?.let { it - current.take.startedAtMs }
+            ?: if (writingNow) SystemClock.elapsedRealtime() - current.take.startedAtMs else null
+        current.noteTextTiming(run.engine.provisionalWrites, first)
     }
 
     private fun swapFields(current: TakeSession): Array<Pair<String, Any?>> =
@@ -551,11 +569,18 @@ class TakeController(
 
     /** Redraws the bubble from the engine's and the preview thread's latest text, at most every [BUBBLE_MS]. */
     private fun scheduleBubble() {
+        handler.post { open?.let { runs[it] }?.let(::postProvisional) }
         if (!bubbleQueued.compareAndSet(false, true)) return
         handler.postDelayed({
             bubbleQueued.set(false)
             open?.let { runs[it] }?.let { bubble.update(it.bubbleText.text()) }
         }, BUBBLE_MS)
+    }
+
+    /** The preview words no decode has covered. A field take writes them; the post keeps that on the main thread. */
+    private fun postProvisional(run: Run) {
+        if (run.fieldDoc == null || run.detached) return
+        run.engine.setProvisional(run.bubbleText.text().preview)
     }
 
     fun onTrimMemory(level: Int) {
