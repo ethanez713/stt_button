@@ -15,6 +15,10 @@ class PipelineConfig(json: JSONObject) {
     val sliceMinS = json.getDouble("slice_min_s")
     val contextS = json.getDouble("context_s")
     val junctionSqueezeS: Double? = if (json.isNull("junction_squeeze_s")) null else json.getDouble("junction_squeeze_s")
+    val tailFillerMaxS = json.getDouble("tail_filler_max_s")
+    val tailFillerWords: Set<String> = json.getJSONArray("tail_filler_words").let { a ->
+        List(a.length()) { a.getString(it).lowercase() }.toSet()
+    }
     val pauseMarginDb = json.getDouble("pause_margin_db")
     val chunkMinTokens = json.getInt("chunk_min_tokens")
     val chunkMaxTokens = json.getInt("chunk_max_tokens")
@@ -76,6 +80,14 @@ object Pipeline {
         (cfg.maxNewTokensRatio * inputTokens + cfg.maxNewTokensPad).toInt()
 
     fun joinSlices(texts: List<String>): String = texts.filter { it.isNotEmpty() }.joinToString(" ")
+
+    private val TAIL_FILLER_WORD = Regex("[\\p{L}\\p{N}]+(?:[-'][\\p{L}\\p{N}]+)*")
+
+    /** Mirrors `stt_button.live.only_tail_fillers`. */
+    fun onlyTailFillers(text: String, words: Set<String>): Boolean {
+        val tokens = TAIL_FILLER_WORD.findAll(text.lowercase()).map { it.value }.toList()
+        return tokens.isNotEmpty() && tokens.all { it in words }
+    }
 
     /** Mirrors `stt_button.asr.continue_fragment`. */
     fun continueFragment(previous: String, next: String): Pair<String, String> {

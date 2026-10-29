@@ -114,6 +114,10 @@ class TakeEngineTest {
         put("skip_max_words", 5)
     })
 
+    private val tailCfg = scriptConfig(JSONObject().put("pause_s", 0.8).put("chunk_min_tokens", 15).put("skip_max_words", 40))
+
+    private fun segments(json: String) = Fixtures.signal(JSONArray(json))
+
     private fun labelled(prefix: String, count: Int) =
         (1..count).joinToString(" ") { i -> List(9) { "$prefix$i" }.joinToString(" ") + "." }
 
@@ -152,7 +156,7 @@ class TakeEngineTest {
     @Test
     fun given_every_take_script_when_run_then_the_engine_inserts_what_the_host_library_does() {
         val scripts = Fixtures.objects(Fixtures.vectors.getJSONArray("takes"))
-        assertEquals(12, scripts.size)
+        assertEquals(16, scripts.size)
         for (script in scripts) {
             val expected = script.getJSONObject("result")
             val result = runScript(script)
@@ -209,12 +213,75 @@ class TakeEngineTest {
     }
 
     @Test
-    fun given_a_finish_tail_without_context_when_joined_then_a_provisional_stop_is_not_kept() {
-        val rig = Rig(cfg, ScriptedRecognizer("store it in.", "Mom and dad's house."))
-        rig.feedInPieces(audio(2.5, 2.0))
+    fun given_a_two_second_yeah_tail_after_speech_when_the_take_stops_then_it_is_kept() {
+        val rig = Rig(tailCfg, ScriptedRecognizer("Meet me at noon.", "Yeah."))
+        rig.feedInPieces(segments("""[["silence",0.3],["noise",3,8000],["silence",1.2],["noise",0.9,8000]]"""))
         val result = rig.finish()
 
-        assertEquals("store it in mom and dad's house.", result.raw)
+        assertEquals("Meet me at noon. Yeah.", result.raw)
+        assertEquals(listOf("applied", "applied"), rig.records.filter { it.kind == "asr" }.map { it.outcome })
+    }
+
+    @Test
+    fun given_a_short_yeah_tail_after_speech_when_the_take_stops_then_it_is_dropped_and_the_earlier_mark_stays() {
+        val rig = Rig(tailCfg, ScriptedRecognizer(listOf("Meet me at noon." to ".", "Yeah." to "?")))
+        rig.feedInPieces(segments("""[["silence",0.3],["noise",3,8000],["silence",1.2],["noise",0.3,8000]]"""))
+        val result = rig.finish()
+
+        assertEquals("Meet me at noon.", result.raw)
+        val tail = rig.records.last { it.kind == "asr" }
+        assertEquals("filler", tail.outcome)
+        assertEquals("Yeah.", tail.output)
+        assertEquals("finish", tail.moment)
+    }
+
+    @Test
+    fun given_a_short_whole_take_okay_when_the_take_stops_then_the_reply_is_kept() {
+        val rig = Rig(tailCfg, ScriptedRecognizer("Okay."))
+        rig.feedInPieces(segments("""[["silence",0.2],["noise",1.0,8000]]"""))
+        val result = rig.finish()
+
+        assertEquals("Okay.", result.raw)
+        assertEquals("applied", rig.records.single { it.kind == "asr" }.outcome)
+    }
+
+    @Test
+    fun given_a_short_tail_with_real_words_when_the_take_stops_then_the_words_are_kept() {
+        val rig = Rig(tailCfg, ScriptedRecognizer("Meet me at noon.", "See you tomorrow."))
+        rig.feedInPieces(segments("""[["silence",0.3],["noise",3,8000],["silence",1.2],["noise",0.3,8000]]"""))
+        val result = rig.finish()
+
+        assertEquals("Meet me at noon. See you tomorrow.", result.raw)
+        assertEquals(listOf("applied", "applied"), rig.records.filter { it.kind == "asr" }.map { it.outcome })
+    }
+
+    @Test
+    fun given_a_resumed_take_when_the_second_stop_decodes_okay_then_it_is_dropped() {
+        val rig = Rig(tailCfg, ScriptedRecognizer(listOf("Meet me at noon." to ".", "Okay." to "?")))
+        rig.feedInPieces(segments("""[["silence",0.3],["noise",3,8000]]"""))
+        rig.finish()
+        rig.engine.resume()
+        rig.feedInPieces(segments("""[["noise",0.3,8000]]"""))
+        rig.finish()
+
+        assertEquals("Meet me at noon.", rig.engine.raw)
+        val tail = rig.records.last { it.kind == "asr" }
+        assertEquals("filler", tail.outcome)
+        assertEquals("Okay.", tail.output)
+        assertEquals("finish", tail.moment)
+    }
+
+    @Test
+    fun given_filler_words_with_punctuation_when_checked_then_only_the_list_matches() {
+        val words = Fixtures.config.tailFillerWords
+        assertTrue(Pipeline.onlyTailFillers("Yeah.", words))
+        assertTrue(Pipeline.onlyTailFillers("Mm-hmm.", words))
+        assertTrue(Pipeline.onlyTailFillers("Uh-huh,", words))
+        assertTrue(Pipeline.onlyTailFillers("OK!", words))
+        assertTrue(Pipeline.onlyTailFillers("Yeah, okay.", words))
+        assertFalse(Pipeline.onlyTailFillers("Yeah, sure.", words))
+        assertFalse(Pipeline.onlyTailFillers("...", words))
+        assertFalse(Pipeline.onlyTailFillers("", words))
     }
 
     @Test

@@ -1485,6 +1485,197 @@
    }
   },
   {
+   "name": "yeah_tail_after_speech_is_dropped",
+   "steps": [
+    [
+     "audio",
+     [
+      [
+       "silence",
+       0.3
+      ],
+      [
+       "noise",
+       3,
+       8000
+      ],
+      [
+       "silence",
+       1.2
+      ],
+      [
+       "noise",
+       0.3,
+       8000
+      ]
+     ]
+    ]
+   ],
+   "slices": [
+    [
+     "Meet me at noon.",
+     "."
+    ],
+    [
+     "Yeah.",
+     "?"
+    ]
+   ],
+   "cfg": {
+    "chunk_min_tokens": 15,
+    "chunk_max_tokens": 1000,
+    "skip_max_words": 5,
+    "pause_s": 0.8,
+    "slice_min_s": 2
+   },
+   "result": {
+    "raw": "Meet me at noon.",
+    "cleaned": "Meet me at noon",
+    "clean_mode": "raw",
+    "chunks": 0
+   }
+  },
+  {
+   "name": "short_whole_take_okay_is_kept",
+   "steps": [
+    [
+     "audio",
+     [
+      [
+       "silence",
+       0.2
+      ],
+      [
+       "noise",
+       1.0,
+       8000
+      ]
+     ]
+    ]
+   ],
+   "slices": [
+    [
+     "Okay.",
+     "."
+    ]
+   ],
+   "cfg": {
+    "chunk_min_tokens": 15,
+    "chunk_max_tokens": 1000,
+    "skip_max_words": 5,
+    "pause_s": 0.8,
+    "slice_min_s": 2
+   },
+   "result": {
+    "raw": "Okay.",
+    "cleaned": "Okay",
+    "clean_mode": "raw",
+    "chunks": 0
+   }
+  },
+  {
+   "name": "short_tail_with_real_words_is_kept",
+   "steps": [
+    [
+     "audio",
+     [
+      [
+       "silence",
+       0.3
+      ],
+      [
+       "noise",
+       3,
+       8000
+      ],
+      [
+       "silence",
+       1.2
+      ],
+      [
+       "noise",
+       0.3,
+       8000
+      ]
+     ]
+    ]
+   ],
+   "slices": [
+    [
+     "Meet me at noon.",
+     "."
+    ],
+    [
+     "See you tomorrow.",
+     "."
+    ]
+   ],
+   "cfg": {
+    "chunk_min_tokens": 15,
+    "chunk_max_tokens": 1000,
+    "skip_max_words": 5,
+    "pause_s": 0.8,
+    "slice_min_s": 2
+   },
+   "result": {
+    "raw": "Meet me at noon. See you tomorrow.",
+    "cleaned": "MEET ME AT NOON. SEE YOU TOMORROW",
+    "clean_mode": "chunks",
+    "chunks": 1
+   }
+  },
+  {
+   "name": "yeah_tail_of_two_seconds_is_kept",
+   "steps": [
+    [
+     "audio",
+     [
+      [
+       "silence",
+       0.3
+      ],
+      [
+       "noise",
+       3,
+       8000
+      ],
+      [
+       "silence",
+       1.2
+      ],
+      [
+       "noise",
+       0.9,
+       8000
+      ]
+     ]
+    ]
+   ],
+   "slices": [
+    [
+     "Meet me at noon.",
+     "."
+    ],
+    [
+     "Yeah.",
+     "."
+    ]
+   ],
+   "cfg": {
+    "chunk_min_tokens": 15,
+    "chunk_max_tokens": 1000,
+    "skip_max_words": 5,
+    "pause_s": 0.8,
+    "slice_min_s": 2
+   },
+   "result": {
+    "raw": "Meet me at noon. Yeah.",
+    "cleaned": "Meet me at noon",
+    "clean_mode": "raw",
+    "chunks": 0
+   }
+  },
+  {
    "name": "pause_clean_completes_before_more_speech",
    "steps": [
     [

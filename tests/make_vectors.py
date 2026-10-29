@@ -286,6 +286,18 @@ TAKE_SCRIPTS = [
     {"name": "pause_clean_completes_and_is_reused",
      "steps": [["audio", [LEAD, SPEECH, PAUSE_1S, SPEECH, PAUSE_1S]], ["idle", []]],
      "slices": [[labelled("a", 1) + " " + labelled("b", 1), "."], [labelled("c", 2), "."], ["", "."]]},
+    {"name": "yeah_tail_after_speech_is_dropped",
+     "steps": [["audio", [LEAD, SPEECH, PAUSE_1S, ["noise", 0.3, 8000]]]],
+     "slices": [["Meet me at noon.", "."], ["Yeah.", "?"]]},
+    {"name": "short_whole_take_okay_is_kept",
+     "steps": [["audio", [["silence", 0.2], ["noise", 1.0, 8000]]]],
+     "slices": [["Okay.", "."]]},
+    {"name": "short_tail_with_real_words_is_kept",
+     "steps": [["audio", [LEAD, SPEECH, PAUSE_1S, ["noise", 0.3, 8000]]]],
+     "slices": [["Meet me at noon.", "."], ["See you tomorrow.", "."]]},
+    {"name": "yeah_tail_of_two_seconds_is_kept",
+     "steps": [["audio", [LEAD, SPEECH, PAUSE_1S, ["noise", 0.9, 8000]]]],
+     "slices": [["Meet me at noon.", "."], ["Yeah.", "."]]},
     {"name": "pause_clean_completes_before_more_speech",
      "steps": [["audio", [LEAD, SPEECH, PAUSE_1S]], ["idle", []], ["audio", [SPEECH, PAUSE_1S, SPEECH]]],
      "slices": [["one nine word sentence sits right here.", "."], [labelled("b", 2), "."], [labelled("c", 2), "."]]},
@@ -368,6 +380,10 @@ def take_vectors() -> list[dict]:
     assert by_name["fact_drift_falls_back_to_the_chunk_as_heard"]["result"]["cleaned"].startswith("Put it on the S20")
     assert by_name["spoken_question_mark_at_a_chunks_end"]["result"]["cleaned"].endswith("?")
     assert "X.IO" not in by_name["a_clean_that_adds_a_link_falls_back_to_the_chunk_as_heard"]["result"]["cleaned"]
+    assert by_name["yeah_tail_after_speech_is_dropped"]["result"]["raw"] == "Meet me at noon."
+    assert by_name["short_whole_take_okay_is_kept"]["result"]["raw"] == "Okay."
+    assert by_name["short_tail_with_real_words_is_kept"]["result"]["raw"] == "Meet me at noon. See you tomorrow."
+    assert by_name["yeah_tail_of_two_seconds_is_kept"]["result"]["raw"] == "Meet me at noon. Yeah."
     return out
 
 

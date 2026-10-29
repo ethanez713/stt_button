@@ -46,7 +46,14 @@ class JobRecord(
 )
 
 sealed interface JobResult
-class Decoded(val text: String, val mark: String?, val usedContext: Boolean, val fellBack: Boolean, val ms: Long, val waitMs: Long?) : JobResult
+class Decoded(
+    val text: String,
+    val mark: String?,
+    val usedContext: Boolean,
+    val fellBack: Boolean,
+    val ms: Long,
+    val waitMs: Long?,
+) : JobResult
 class Cleaned(val text: String?, val rejected: String?, val inTokens: Int, val outTokens: Int, val ms: Long) : JobResult
 class Loaded(val ms: Long) : JobResult
 
@@ -133,6 +140,9 @@ class TakeEngine(
     private var seenClosed = 0
     private var recordingStartMs: Long? = null
     private var silenceFrom = 0
+
+    /** End samples of tails [stop] closed. A later stop can run before an earlier tail's job does. */
+    private val stopTailEnds = mutableSetOf<Int>()
 
     /** Preview words no decode has covered, written after the region. Not part of the region. */
     private var requestedPreview: String? = null
@@ -289,6 +299,7 @@ class TakeEngine(
         }
         val at = nowMs()
         synchronized(timing) { closedAtMs.putIfAbsent(tail[1], at) }
+        stopTailEnds.add(tail[1])
     }
 
     /** The mic is open on this take again. A clean already in flight is not written when it returns. */
@@ -412,6 +423,13 @@ class TakeEngine(
 
     private fun samples(from: Int, to: Int): FloatArray = slicer.copy(from, to).let { pcm -> FloatArray(pcm.size) { pcm[it] / 32768f } }
 
+    /** The tail's own words, before they are joined onto the slice before them. */
+    private fun fillerTail(slice: IntArray, own: String): Boolean {
+        if (slice[1] !in stopTailEnds || texts.none { it.isNotEmpty() }) return false
+        if ((slice[1] - slice[0]).toDouble() / Slicer.SAMPLE_RATE >= cfg.tailFillerMaxS) return false
+        return Pipeline.onlyTailFillers(own, cfg.tailFillerWords)
+    }
+
     private fun decodeJob(slice: IntArray): Job {
         val before = slicer.speechBefore(slice[0])
         val after = slicer.speechAfter(slice[0])
@@ -443,6 +461,16 @@ class TakeEngine(
 
     private fun completeDecode(job: Job, decoded: Decoded) {
         val slice = job.slice!!
+        if (fillerTail(slice, decoded.text)) {
+            asrMs += decoded.ms
+            if (decoded.usedContext) contextDecodes++
+            if (decoded.fellBack) contextFallbacks++
+            logAsr(job, slice, decoded, "filler", decoded.text, null)
+            if (stopping) dropProvisional()
+            onCovered?.invoke(slice[1].toDouble() / Slicer.SAMPLE_RATE)
+            onText?.invoke(regionText())
+            return
+        }
         asrMs += decoded.ms
         if (decoded.usedContext) contextDecodes++
         if (decoded.fellBack) contextFallbacks++
@@ -502,13 +530,17 @@ class TakeEngine(
             lead = opener.length
             region.skipLead(lead)
         }
-        jobs(JobRecord("asr", job.moment.name.lowercase(), decoded.ms, null, decoded.text, if (decoded.fellBack) "fallback" else "applied",
-            fromMs = samplesToMs(slice[0]), toMs = samplesToMs(slice[1]), context = decoded.usedContext,
-            waitMs = decoded.waitMs, lagMs = lagMs(slice[1], wrote)))
+        logAsr(job, slice, decoded, if (decoded.fellBack) "fallback" else "applied", decoded.text, lagMs(slice[1], wrote))
         sliceLanded = true
         if (!Pipeline.skipsCleaner(raw, cfg)) prepareCleaner("text")
         onCovered?.invoke(slice[1].toDouble() / Slicer.SAMPLE_RATE)
         onText?.invoke(regionText())
+    }
+
+    private fun logAsr(job: Job, slice: IntArray, decoded: Decoded, outcome: String, output: String?, lagMs: Long?) {
+        jobs(JobRecord("asr", job.moment.name.lowercase(), decoded.ms, null, output, outcome,
+            fromMs = samplesToMs(slice[0]), toMs = samplesToMs(slice[1]), context = decoded.usedContext,
+            waitMs = decoded.waitMs, lagMs = lagMs))
     }
 
     private fun cleanJob(plan: CleanPlan, moment: Moment): Job {

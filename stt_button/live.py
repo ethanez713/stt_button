@@ -3,6 +3,7 @@ chunks that close are cleaned straight away, so only the last slice and the last
 the stop.
 """
 
+import re
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -36,6 +37,13 @@ class LiveResult:
 
 
 IDLE_POLL_S = 0.05
+_TAIL_FILLER_WORD = re.compile(r"[^\W_]+(?:[-'][^\W_]+)*")
+
+
+def only_tail_fillers(text: str, words) -> bool:
+    allowed = {word.lower() for word in words}
+    tokens = _TAIL_FILLER_WORD.findall(text.lower())
+    return bool(tokens) and all(token in allowed for token in tokens)
 
 
 def _ms(since: float) -> int:
@@ -124,10 +132,18 @@ class LiveTake:
     def mark_stop(self) -> None:
         self._stop_asr_ms, self._stop_clean_ms = self.asr_ms, self.clean_ms
 
-    def finish(self) -> LiveResult:
-        for start, end in self._pending + self.slicer.finish():
+    def stop(self) -> None:
+        """Recognize or drop the open tail and close it, so audio after a resume is a new tail."""
+        pending, self._pending = self._pending, []
+        tail = self.slicer.finish()
+        for start, end in pending:
             self._recognize(start, end)
-        self._pending = []
+        for start, end in tail:
+            self._recognize(start, end, stop_tail=True)
+        self.slicer.start = len(self.slicer.samples)
+
+    def finish(self) -> LiveResult:
+        self.stop()
         raw = self.raw
         if skips_cleaner(raw, self.cfg):
             return LiveResult(raw, trim_message_end(casual(without_sign_off(spoken_punctuation(raw)), self.cfg)), 0, "raw", self.asr_ms - self._stop_asr_ms, 0,
@@ -142,32 +158,47 @@ class LiveTake:
                           *unresolved_corrections(chunks, outputs, self.cfg["self_correction_cues"]),
                           rejects=self.rejects)
 
-    def _recognize(self, start: int, end: int) -> None:
+    def _recognize(self, start: int, end: int, stop_tail: bool = False) -> None:
         started = time.monotonic()
-        self.texts.append(strip_hidden(self._slice_text(start, end)))
+        text, mark = self._slice_own(start, end)
         self.asr_ms += _ms(started)
-        if self.bubble:
-            self.bubble.slice_landed(end / SAMPLE_RATE, self.texts[-1])
+        if stop_tail and self._filler_tail(start, end, text):
+            self._land(end, "")
+            return
+        if mark is None:
+            text = self._without_context(text)
+        elif self.texts and self.texts[-1]:
+            own = TRAILING_MARK.search(self.texts[-1])
+            self.texts[-1] = TRAILING_MARK.sub("", self.texts[-1]) + settled_mark(own.group() if own else "", mark)
+            text = continuing(text, self.texts[-1])
+        self.texts.append(strip_hidden(text))
+        self._land(end, self.texts[-1])
 
-    def _slice_text(self, start: int, end: int) -> str:
-        """A slice after a pause is decoded with the speech before it, so the recognizer judges the
-        sentence break and the capital from the words around it; the previous slice's closing
-        punctuation is then the one the context decode gave it."""
+    def _slice_own(self, start: int, end: int) -> tuple[str, str | None]:
+        """The slice's own text after context removal, and the context mark when that decode was kept.
+        A missing mark is a plain decode, joined afterwards by `_without_context`."""
         before, after = self.slicer.speech_before(start), self.slicer.speech_after(start)
         if not self.texts or before is None or after is None or after >= end:
-            return self._without_context(self.recognizer.recognize(self.slicer.samples[start:end]))
+            return self.recognizer.recognize(self.slicer.samples[start:end]), None
         audio, junction_s = context_audio(self.slicer.samples, before, after, end, self.cfg["context_s"],
                                           self.cfg["junction_squeeze_s"])
         self.context_decodes += 1
         mark, text = self.recognizer.recognize_after(audio, junction_s)
         if not text:
             self.context_fallbacks += 1
-            return self._without_context(self.recognizer.recognize(self.slicer.samples[start:end]))
-        if self.texts[-1]:
-            own = TRAILING_MARK.search(self.texts[-1])
-            self.texts[-1] = TRAILING_MARK.sub("", self.texts[-1]) + settled_mark(own.group() if own else "", mark)
-            text = continuing(text, self.texts[-1])
-        return text
+            return self.recognizer.recognize(self.slicer.samples[start:end]), None
+        return text, mark
+
+    def _filler_tail(self, start: int, end: int, text: str) -> bool:
+        if not any(self.texts):
+            return False
+        if (end - start) / SAMPLE_RATE >= self.cfg["tail_filler_max_s"]:
+            return False
+        return only_tail_fillers(text, self.cfg["tail_filler_words"])
+
+    def _land(self, end: int, text: str) -> None:
+        if self.bubble:
+            self.bubble.slice_landed(end / SAMPLE_RATE, text)
 
     def _without_context(self, text: str) -> str:
         if not text:
