@@ -12,7 +12,7 @@ from pathlib import Path
 import numpy as np
 
 from stt_button import asr, config
-from stt_button.asr import context_audio, settled_mark, split_at_junction
+from stt_button.asr import context_audio, continuing, settled_mark, split_at_junction
 from stt_button.bubble import Bubble
 from stt_button.live import LiveTake
 from stt_button.cleaner import (casual, fact_drift, join_cleaned, live_chunks, opens_with_cue, matched_cue, skips_cleaner,
@@ -104,6 +104,13 @@ SKIP_TEXTS = ["", "Yes.", "meet Tuesday, actually no, Wednesday", "Dinner is at 
               "a " * 41, "a " * 40, "this is a cannot be rather odd", "the knot was nothing", "Okay. Wait, what?",
               "Not apples, pears?", "555-010 no 555-010-7896", "Tuesday? Actually make that Wednesday"]
 
+
+CONTINUING_CASES = [
+    ("buffer", "Text for way too long."), ("a whitelisted", "Configuration."), ("with.", "Activate it"),
+    ("so", "I'm here"), ("got the", "iPhone"), ("the", "NASA launch"), ("asked?", "Then"), ("list:\n", "Pack"),
+    ("- ", "Milk"), ("(", "Note"), ("said \u201chi\u201d", "Then"), ("", "Hello"), ("send", "\"Quote\" here"),
+    ("costs", "92515 dollars"), ("ends here", ""),
+]
 
 CASUAL_TEXTS = ["Okay, I'm down.", "I'm down, I think I'm free tomorrow", "Is it the full release?", "It cost 1,000 dollars, I think.",
                 "Wait...", "Okay. Wait, what?", "Hi, there!", "ok.  ", "a, " * 41, "", "Version 2.5."]
@@ -267,6 +274,10 @@ TAKE_SCRIPTS = [
      "slices": [["Meet Tuesday, actually Wednesday.", "."]]},
     {"name": "mark_change_at_the_junction", "steps": [["audio", [LEAD, SPEECH, PAUSE_1S, SPEECH]]],
      "slices": [["Update the plan.", "."], ["have some monitoring now", "?"]]},
+    {"name": "no_mark_at_the_junction_lowercases_the_slice", "steps": [["audio", [LEAD, SPEECH, PAUSE_1S, SPEECH]]],
+     "slices": [["It seems to buffer.", "."], ["Text for way too long.", ""]]},
+    {"name": "period_at_the_junction_keeps_the_capital", "steps": [["audio", [LEAD, SPEECH, PAUSE_1S, SPEECH]]],
+     "slices": [["Update the plan.", "."], ["Have some monitoring.", "."]]},
     {"name": "two_chunks_close_before_the_stop", "steps": [["audio", [LEAD, SPEECH, PAUSE_1S, SPEECH, PAUSE_1S, SPEECH]]],
      "slices": [[labelled("a", 3), "."], [labelled("b", 3), "."], [labelled("c", 1), "."]]},
     {"name": "pause_clean_interrupted_by_speech",
@@ -398,6 +409,7 @@ def vectors() -> dict:
                           "joined": join_cleaned(c, o, cfg["self_correction_cues"])} for c, o in JOIN_CLEANED_CASES],
         "sign_off": [{"text": t, "without": without_sign_off(t)} for t in SIGN_OFF_TEXTS],
         "casual": [{"text": t, "casual": casual(t, cfg)} for t in CASUAL_TEXTS],
+        "continuing": [{"before": b, "body": t, "continued": continuing(t, b)} for b, t in CONTINUING_CASES],
         "junction": [{**c, "split": list(split_at_junction(c["tokens"], c["times"], c["junction_s"]))} for c in JUNCTION_CASES],
         "context_audio": [context_audio_vector(c) for c in CONTEXT_AUDIO_CASES],
         "settled_mark": [{"slice": s, "context": c, "mark": settled_mark(s, c)}

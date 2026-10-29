@@ -111,6 +111,14 @@ class PipelineVectorsTest {
     }
 
     @Test
+    fun given_continuing_vectors_when_joined_then_case_matches_the_host() {
+        for (case in Fixtures.objects(Fixtures.vectors.getJSONArray("continuing"))) {
+            val before = case.getString("before")
+            assertEquals(before + "|" + case.getString("body"), case.getString("continued"), Pipeline.continuing(case.getString("body"), before, before.length))
+        }
+    }
+
+    @Test
     fun given_spoken_vectors_when_converted_then_text_matches_the_host() {
         for (case in Fixtures.objects(Fixtures.vectors.getJSONArray("spoken"))) {
             assertEquals(case.getString("text"), case.getString("spoken"), Spoken.convert(case.getString("text")))
@@ -241,12 +249,12 @@ class PipelineVectorsTest {
 
     @Test
     fun given_a_slice_decoded_on_its_own_when_joined_then_the_boundary_is_not_a_new_sentence() {
-        assertEquals("store it in" to "Mom and dad's", Pipeline.continueFragment("store it in.", "Mom and dad's"))
+        assertEquals("store it in" to "mom and dad's", Pipeline.continueFragment("store it in.", "Mom and dad's"))
         assertEquals("the world?" to "Where do we put it", Pipeline.continueFragment("the world?", "Where do we put it"))
         assertEquals("call" to "both of them", Pipeline.continueFragment("call", "Call both of them"))
         assertEquals("call" to "me", Pipeline.continueFragment("call.", "Call me"))
         assertEquals("See you" to "and then we left", Pipeline.continueFragment("See you.", "And then we left"))
-        assertEquals("Wait..." to "and more", Pipeline.continueFragment("Wait...", "And more"))
+        assertEquals("Wait..." to "And more", Pipeline.continueFragment("Wait...", "And more"))
         assertEquals("hello." to "", Pipeline.continueFragment("hello.", "hello"))
     }
 

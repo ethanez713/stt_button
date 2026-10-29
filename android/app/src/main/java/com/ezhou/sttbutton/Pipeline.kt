@@ -77,15 +77,6 @@ object Pipeline {
 
     fun joinSlices(texts: List<String>): String = texts.filter { it.isNotEmpty() }.joinToString(" ")
 
-    private val CONTINUE_LOWER = setOf(
-        "a", "an", "the", "and", "or", "but", "to", "of", "in", "on", "for", "with", "it", "that", "this",
-        "is", "was", "are", "were", "where", "when", "if", "so", "because", "which", "who", "what", "how",
-        "we", "they", "he", "she", "you", "there", "then", "than", "as", "at", "from", "by", "not", "also",
-        "just", "its", "be", "been", "have", "has", "had", "do", "does", "did", "can", "could", "would",
-        "should", "will", "about", "into", "over", "after", "before", "out", "up", "my", "your",
-    )
-    private val CONTINUATION_WORD = Regex("^([^\\p{L}\\p{N}_']*)([\\p{L}\\p{N}_']+)")
-
     /** Mirrors `stt_button.asr.continue_fragment`. */
     fun continueFragment(previous: String, next: String): Pair<String, String> {
         var prev = previous.trimEnd()
@@ -100,18 +91,11 @@ object Pipeline {
             if (nxt.isEmpty()) return prev to ""
         }
         if (prev.endsWith(".") && !prev.endsWith("..")) prev = prev.dropLast(1).trimEnd()
-        if (prev.isNotEmpty() && prev.last() !in "?!") nxt = lowercaseContinuation(nxt)
+        nxt = continuing(nxt, prev, prev.length)
         return prev to nxt
     }
 
     private fun wordCore(word: String): String = NOT_WORD_EDGE.replace(word, "").lowercase()
-
-    private fun lowercaseContinuation(text: String): String {
-        val match = CONTINUATION_WORD.find(text) ?: return text
-        val core = match.groupValues[2]
-        if (core.lowercase() !in CONTINUE_LOWER) return text
-        return match.groupValues[1] + core.lowercase() + text.substring(match.range.last + 1)
-    }
 
     fun splitSentences(text: String): List<String> = SENTENCE_BREAK.split(text.trim()).filter { it.isNotEmpty() }
 
@@ -303,7 +287,7 @@ object Pipeline {
         return ending !in ".?!" && ending !in OPENING_MARKS
     }
 
-    /** [body] as written after [before] at [caret]: a take that carries on a sentence opens in lower case, except for "I" words and names with a capital inside. */
+    /** Mirrors `stt_button.asr.continuing`: [body] written after [before] at [caret] opens in lower case when it carries on a sentence, except for "I" words and words with a capital inside. */
     fun continuing(body: String, before: String, caret: Int): String {
         if (!continuesSentence(before, caret)) return body
         val token = body.takeWhile { !it.isWhitespace() }
@@ -410,7 +394,9 @@ object Pipeline {
         var inline = false
         for ((chunk, output) in chunks.zip(outputs)) {
             val unit = isCorrectionUnit(chunk, cues)
-            text.append(joinSeparator(text.toString(), output, inline, unit)).append(output)
+            val separator = joinSeparator(text.toString(), output, inline, unit)
+            val joined = text.toString() + separator
+            text.append(separator).append(continuing(output, joined, joined.length))
             inline = unit
         }
         return text.toString()

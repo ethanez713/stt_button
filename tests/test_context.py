@@ -104,12 +104,15 @@ def test_given_a_context_decode_with_no_words_after_the_junction_when_decoded_th
 
 
 def test_given_a_slice_decoded_on_its_own_when_joined_then_the_boundary_is_not_a_new_sentence():
-    assert continue_fragment("store it in.", "Mom and dad's") == ("store it in", "Mom and dad's")
+    assert continue_fragment("store it in.", "Mom and dad's") == ("store it in", "mom and dad's")
+    assert continue_fragment("seems to buffer.", "Text for way too long.") == ("seems to buffer", "text for way too long.")
+    assert continue_fragment("so.", "I'm late") == ("so", "I'm late")
+    assert continue_fragment("bought an.", "iPhone") == ("bought an", "iPhone")
     assert continue_fragment("the world?", "Where do we put it") == ("the world?", "Where do we put it")
     assert continue_fragment("call", "Call both of them") == ("call", "both of them")
     assert continue_fragment("call.", "Call me") == ("call", "me")
     assert continue_fragment("See you.", "And then we left") == ("See you", "and then we left")
-    assert continue_fragment("Wait...", "And more") == ("Wait...", "and more")
+    assert continue_fragment("Wait...", "And more") == ("Wait...", "And more")
     assert continue_fragment("hello.", "hello") == ("hello.", "")
 
 

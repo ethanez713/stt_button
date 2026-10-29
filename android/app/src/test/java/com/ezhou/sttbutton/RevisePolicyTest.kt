@@ -9,9 +9,10 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class RevisePolicyTest {
-    private class Heard(vararg texts: String) : Recognizer {
+    /** A decode with the speech before it settles the junction with [mark]. */
+    private class Heard(vararg texts: String, private val mark: String = ".") : Recognizer {
         private val queue = ArrayDeque(texts.toList())
-        override fun recognize(request: RecognizeRequest) = Recognized(queue.removeFirst(), if (request.junctionS == null) null else ".")
+        override fun recognize(request: RecognizeRequest) = Recognized(queue.removeFirst(), if (request.junctionS == null) null else mark)
     }
 
     /** Upper-cases; a text of several chunks (which holds a paragraph break) gets ` REVISED` after it. */
@@ -32,6 +33,13 @@ class RevisePolicyTest {
         override fun cancel() {
             cancelled = true
         }
+    }
+
+    /** Cleans as the cleaner does a short chunk on its own: as a sentence, opening with a capital. */
+    private class SentenceCase : Cleaner {
+        override fun countTokens(text: String) = Pipeline.wordCount(text)
+        override fun clean(request: CleanRequest) = CleanResult(request.target.replaceFirstChar { it.uppercaseChar() }, 1)
+        override fun cancel() = Unit
     }
 
     private class Rig(
@@ -92,6 +100,38 @@ class RevisePolicyTest {
         assertEquals(labelled("a", 1).uppercase() + " " + labelled("b", 2).uppercase(), editor.text)
         assertFalse(editor.text.contains("\n\n"))
         assertTrue(rig.clean.all { it.outcome == "applied" })
+    }
+
+    @Test
+    fun given_a_pause_clean_of_a_section_that_carries_on_a_sentence_when_written_then_it_opens_in_lower_case() {
+        val editor = FakeEditor("")
+        val rig = Rig(config(), SentenceCase(), FieldDocument(editor), Heard("it should not stop the take when the user is", "Typing into the field again today.", mark = ""))
+
+        rig.feed(audio(3.0, 3.0))
+        rig.feed(audio(3.0, 3.0))
+
+        assertEquals("It should not stop the take when the user is typing into the field again today.", editor.text)
+    }
+
+    @Test
+    fun given_dictation_into_the_middle_of_a_sentence_when_the_first_slice_lands_then_it_opens_in_lower_case() {
+        val editor = FakeEditor("as soon as it starts ")
+        val (_, rig) = rigOver(editor, config(), SentenceCase(), "Hearing words now.")
+
+        rig.feed(audio(3.0, 3.0))
+
+        assertEquals("as soon as it starts hearing words now.", editor.text)
+    }
+
+    @Test
+    fun given_a_pause_clean_after_a_sentence_end_when_written_then_it_keeps_its_capital() {
+        val editor = FakeEditor("")
+        val (_, rig) = rigOver(editor, config(), SentenceCase(), "it should not stop the take when the user is typing.", "activate the system pop-up when we connect.")
+
+        rig.feed(audio(3.0, 3.0))
+        rig.feed(audio(3.0, 3.0))
+
+        assertEquals("It should not stop the take when the user is typing. Activate the system pop-up when we connect.", editor.text)
     }
 
     @Test
@@ -245,7 +285,7 @@ class RevisePolicyTest {
         val result = rig.finish()
 
         assertTrue(doc.read()!!.text, doc.read()!!.text.startsWith("seed "))
-        assertEquals(" " + labelled("a", 3).uppercase(), result.cleaned)
+        assertEquals(" " + labelled("a", 3).uppercase().replaceFirstChar { it.lowercaseChar() }, result.cleaned)
         assertEquals("seed" + result.cleaned, doc.read()!!.text)
     }
 }

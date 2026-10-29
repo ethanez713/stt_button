@@ -152,7 +152,7 @@ class TakeEngineTest {
     @Test
     fun given_every_take_script_when_run_then_the_engine_inserts_what_the_host_library_does() {
         val scripts = Fixtures.objects(Fixtures.vectors.getJSONArray("takes"))
-        assertEquals(10, scripts.size)
+        assertEquals(12, scripts.size)
         for (script in scripts) {
             val expected = script.getJSONObject("result")
             val result = runScript(script)
@@ -214,7 +214,7 @@ class TakeEngineTest {
         rig.feedInPieces(audio(2.5, 2.0))
         val result = rig.finish()
 
-        assertEquals("store it in Mom and dad's house.", result.raw)
+        assertEquals("store it in mom and dad's house.", result.raw)
     }
 
     @Test

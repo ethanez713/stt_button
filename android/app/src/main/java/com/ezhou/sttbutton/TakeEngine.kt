@@ -373,6 +373,7 @@ class TakeEngine(
             val old = Pipeline.trailingMark(previous)
             val settled = Pipeline.settledMark(old, decoded.mark)
             texts[texts.lastIndex] = Pipeline.withoutTrailingMark(previous) + settled
+            sliceText = Pipeline.continuing(sliceText, texts.last(), texts.last().length)
             val markStart = region.end - old.length
             if (old != settled && markStart >= region.cleanEnd && text.startsWith(old, markStart)) {
                 from = markStart
@@ -397,8 +398,9 @@ class TakeEngine(
             replacing || texts.drop(attachedFrom).any { it.isNotEmpty() } -> " "
             else -> Pipeline.takeOpener(text, region.start)
         }
-        var written = prefix + opener + sliceText
         var first = texts.drop(attachedFrom).none { it.isNotEmpty() } && sliceText.isNotEmpty()
+        if (first) sliceText = Pipeline.continuing(sliceText, text.substring(0, region.start) + opener, region.start + opener.length)
+        var written = prefix + opener + sliceText
         if (sliceText.isNotEmpty()) texts += sliceText
         val wrote = written.isNotEmpty() || from != region.end
         if (wrote) {
@@ -502,8 +504,9 @@ class TakeEngine(
     private fun apply(from: Int, to: Int, output: String, plan: CleanPlan) {
         val text = readText()
         if (plan.region) {
-            document.replace(from, to, output)
-            region.flightReplaced(output.length)
+            val opened = Pipeline.continuing(output, text, from)
+            document.replace(from, to, opened)
+            region.flightReplaced(opened.length)
             cleans = 1
             editsInside = 0
             onText?.invoke(regionText())
@@ -517,8 +520,9 @@ class TakeEngine(
         chunks += target
         outputs += output
         cleans++
-        document.replace(from, to, separator + output)
-        region.flightReplaced((separator + output).length)
+        val written = separator + Pipeline.continuing(output, text.substring(0, from) + separator, from + separator.length)
+        document.replace(from, to, written)
+        region.flightReplaced(written.length)
         onText?.invoke(regionText())
     }
 

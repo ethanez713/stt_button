@@ -9,8 +9,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from stt_button.asr import (SAMPLE_RATE, TRAILING_MARK, Slicer, context_audio, continue_fragment, join_slices,
-                            settled_mark)
+from stt_button.asr import (SAMPLE_RATE, TRAILING_MARK, Slicer, context_audio, continue_fragment, continuing,
+                            join_slices, settled_mark)
 from stt_button.cleaner import (casual, join_cleaned, live_chunks, matched_cue, skips_cleaner, strip_hidden,
                                 trim_message_end, unresolved_corrections, untrusted_clean, without_sign_off)
 from stt_button.spoken import keep_spoken_ending, spoken_punctuation
@@ -166,6 +166,7 @@ class LiveTake:
         if self.texts[-1]:
             own = TRAILING_MARK.search(self.texts[-1])
             self.texts[-1] = TRAILING_MARK.sub("", self.texts[-1]) + settled_mark(own.group() if own else "", mark)
+            text = continuing(text, self.texts[-1])
         return text
 
     def _without_context(self, text: str) -> str:

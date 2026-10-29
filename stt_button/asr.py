@@ -243,17 +243,10 @@ def join_slices(texts: list[str]) -> str:
     return " ".join(t for t in texts if t)
 
 
-# A short slice decoded on its own capitalizes a function word and ends the previous one with a period.
-# Those are not sentence boundaries; a name is left capitalized.
-_CONTINUE_LOWER = {
-    "a", "an", "the", "and", "or", "but", "to", "of", "in", "on", "for", "with", "it", "that", "this",
-    "is", "was", "are", "were", "where", "when", "if", "so", "because", "which", "who", "what", "how",
-    "we", "they", "he", "she", "you", "there", "then", "than", "as", "at", "from", "by", "not", "also",
-    "just", "its", "be", "been", "have", "has", "had", "do", "does", "did", "can", "could", "would",
-    "should", "will", "about", "into", "over", "after", "before", "out", "up", "my", "your",
-}
+_FIRST_PERSON = {"i", "i'm", "i'll", "i've", "i'd"}
+_OPENING_MARKS = "([{\u201c\u2018"
+_CLOSING_MARKS = "\")]}\u201d\u2019'"
 _WORD_CORE = re.compile(r"^[^\w']+|[^\w']+$")
-_CONTINUATION_WORD = re.compile(r"^([^\w']*)([\w']+)")
 
 
 def _word_core(word: str) -> str:
@@ -262,8 +255,8 @@ def _word_core(word: str) -> str:
 
 def continue_fragment(previous: str, nxt: str) -> tuple[str, str]:
     """(previous, next) once a slice decoded without the speech around it is joined to the one before.
-    A repeated boundary word is dropped, a full stop on the previous slice is not kept, and a function
-    word that opens the next slice is lower-cased. A question or exclamation mark stays."""
+    A repeated boundary word is dropped, a full stop on the previous slice is not kept, and the next
+    slice carries on the sentence (`continuing`). A question or exclamation mark stays."""
     previous, nxt = previous.rstrip(), nxt.strip()
     if not previous or not nxt:
         return previous, nxt
@@ -274,16 +267,40 @@ def continue_fragment(previous: str, nxt: str) -> tuple[str, str]:
             return previous, ""
     if previous.endswith(".") and not previous.endswith(".."):
         previous = previous[:-1].rstrip()
-    if previous and previous[-1] not in "?!":
-        nxt = _lowercase_continuation(nxt)
-    return previous, nxt
+    return previous, continuing(nxt, previous)
 
 
-def _lowercase_continuation(text: str) -> str:
-    match = _CONTINUATION_WORD.match(text)
-    if match is None or match.group(2).lower() not in _CONTINUE_LOWER:
-        return text
-    return match.group(1) + match.group(2).lower() + text[match.end():]
+def continues_sentence(before: str) -> bool:
+    """True when `before` ends in the middle of a sentence: its last word is not a bare symbol such as a
+    bullet, and what ends it is neither a sentence end, an opening mark nor a line break."""
+    text = before.rstrip()
+    if "\n" in before[len(text):]:
+        return False
+    word = text.split()[-1] if text.split() else ""
+    if not any(c.isalnum() for c in word):
+        return False
+    ending = text.rstrip(_CLOSING_MARKS)[-1:]
+    return bool(ending) and ending not in ".?!" and ending not in _OPENING_MARKS
+
+
+def continuing(body: str, before: str) -> str:
+    """`body` written after `before`. A slice or chunk opens with a capital because it was recognized or
+    cleaned on its own, so where it carries on a sentence its first word is lower-cased, except for "I"
+    words and words with a capital inside. A name there loses its capital, the price of no mid-sentence
+    capitals. Mirrors `Pipeline.continuing`."""
+    if not continues_sentence(before):
+        return body
+    token = body.split(None, 1)[0] if body[:1] and not body[0].isspace() else ""
+    lead = 0
+    while lead < len(token) and not token[lead].isalnum():
+        lead += 1
+    word = token[lead:]
+    while word and not (word[-1].isalnum() or word[-1] in "'\u2019"):
+        word = word[:-1]
+    word = word.replace("\u2019", "'")
+    if not word or word.lower() in _FIRST_PERSON or word[1:] != word[1:].lower():
+        return body
+    return body[:lead] + body[lead].lower() + body[lead + 1:]
 
 
 def _one(model: Path, pattern: str) -> Path:

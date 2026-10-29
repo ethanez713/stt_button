@@ -1177,6 +1177,108 @@
    }
   },
   {
+   "name": "no_mark_at_the_junction_lowercases_the_slice",
+   "steps": [
+    [
+     "audio",
+     [
+      [
+       "silence",
+       0.3
+      ],
+      [
+       "noise",
+       3,
+       8000
+      ],
+      [
+       "silence",
+       1.2
+      ],
+      [
+       "noise",
+       3,
+       8000
+      ]
+     ]
+    ]
+   ],
+   "slices": [
+    [
+     "It seems to buffer.",
+     "."
+    ],
+    [
+     "Text for way too long.",
+     ""
+    ]
+   ],
+   "cfg": {
+    "chunk_min_tokens": 15,
+    "chunk_max_tokens": 1000,
+    "skip_max_words": 5,
+    "pause_s": 0.8,
+    "slice_min_s": 2
+   },
+   "result": {
+    "raw": "It seems to buffer text for way too long.",
+    "cleaned": "IT SEEMS TO BUFFER TEXT FOR WAY TOO LONG",
+    "clean_mode": "chunks",
+    "chunks": 1
+   }
+  },
+  {
+   "name": "period_at_the_junction_keeps_the_capital",
+   "steps": [
+    [
+     "audio",
+     [
+      [
+       "silence",
+       0.3
+      ],
+      [
+       "noise",
+       3,
+       8000
+      ],
+      [
+       "silence",
+       1.2
+      ],
+      [
+       "noise",
+       3,
+       8000
+      ]
+     ]
+    ]
+   ],
+   "slices": [
+    [
+     "Update the plan.",
+     "."
+    ],
+    [
+     "Have some monitoring.",
+     "."
+    ]
+   ],
+   "cfg": {
+    "chunk_min_tokens": 15,
+    "chunk_max_tokens": 1000,
+    "skip_max_words": 5,
+    "pause_s": 0.8,
+    "slice_min_s": 2
+   },
+   "result": {
+    "raw": "Update the plan. Have some monitoring.",
+    "cleaned": "UPDATE THE PLAN. HAVE SOME MONITORING",
+    "clean_mode": "chunks",
+    "chunks": 1
+   }
+  },
+  {
    "name": "two_chunks_close_before_the_stop",
    "steps": [
     [
@@ -8189,6 +8291,83 @@
   {
    "text": "Version 2.5.",
    "casual": "Version 2.5"
+  }
+ ],
+ "continuing": [
+  {
+   "before": "buffer",
+   "body": "Text for way too long.",
+   "continued": "text for way too long."
+  },
+  {
+   "before": "a whitelisted",
+   "body": "Configuration.",
+   "continued": "configuration."
+  },
+  {
+   "before": "with.",
+   "body": "Activate it",
+   "continued": "Activate it"
+  },
+  {
+   "before": "so",
+   "body": "I'm here",
+   "continued": "I'm here"
+  },
+  {
+   "before": "got the",
+   "body": "iPhone",
+   "continued": "iPhone"
+  },
+  {
+   "before": "the",
+   "body": "NASA launch",
+   "continued": "NASA launch"
+  },
+  {
+   "before": "asked?",
+   "body": "Then",
+   "continued": "Then"
+  },
+  {
+   "before": "list:\n",
+   "body": "Pack",
+   "continued": "Pack"
+  },
+  {
+   "before": "- ",
+   "body": "Milk",
+   "continued": "Milk"
+  },
+  {
+   "before": "(",
+   "body": "Note",
+   "continued": "Note"
+  },
+  {
+   "before": "said “hi”",
+   "body": "Then",
+   "continued": "then"
+  },
+  {
+   "before": "",
+   "body": "Hello",
+   "continued": "Hello"
+  },
+  {
+   "before": "send",
+   "body": "\"Quote\" here",
+   "continued": "\"quote\" here"
+  },
+  {
+   "before": "costs",
+   "body": "92515 dollars",
+   "continued": "92515 dollars"
+  },
+  {
+   "before": "ends here",
+   "body": "",
+   "continued": ""
   }
  ],
  "junction": [

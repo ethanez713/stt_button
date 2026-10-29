@@ -8,6 +8,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from stt_button import config
+from stt_button.asr import continuing
 from stt_button.spoken import spoken_punctuation
 
 # What Qwen3's chat template emits for an assistant turn with enable_thinking=False. Rendering it
@@ -146,7 +147,8 @@ def join_cleaned(chunks: list[str], outputs: list[str], cues: list[str]) -> str:
         unit = is_correction_unit(chunk, cues)
         if output:
             after_list = text.rsplit("\n", 1)[-1].startswith("- ")
-            text += ("" if not text else " " if (inline or unit) and not after_list else "\n\n") + output
+            text += ("" if not text else " " if (inline or unit) and not after_list else "\n\n")
+            text += continuing(output, text)
         inline = unit
     return text
 
