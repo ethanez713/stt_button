@@ -1,7 +1,7 @@
 package com.ezhou.sttbutton
 
-/** The stretch [from, to) of the region handed to the cleaner; [dirty] once the user has edited inside it. */
-class Flight(val from: Int, val to: Int, val dirty: Boolean = false)
+/** The stretch [from, to) of the region handed to the cleaner; [dirty] once the user has edited inside it, [abandoned] when the take resumed over it. */
+class Flight(val from: Int, val to: Int, val dirty: Boolean = false, val abandoned: Boolean = false)
 
 /**
  * Where a take's text sits in its document, as offsets: `start <= cleanEnd <= end`. `[start, cleanEnd)`
@@ -52,6 +52,17 @@ class TakeRegion(start: Int = 0, cleanEnd: Int = start, end: Int = cleanEnd) {
         closed = true
     }
 
+    /** The take resumed: dictation at the end is the take's again. Text typed while it was closed stays outside. */
+    fun reopen() {
+        closed = false
+    }
+
+    /** The clean in flight will not be written when it returns. An edit that dirtied it still counts. */
+    fun abandonFlight() {
+        val current = flight ?: return
+        flight = Flight(current.from, current.to, current.dirty, abandoned = true)
+    }
+
     fun apply(edit: Edit) {
         val dirtied = flight?.let { touches(it, edit) } == true
         val insertedAtEnd = !closed && edit.deleted == 0 && edit.at == end
@@ -60,7 +71,7 @@ class TakeRegion(start: Int = 0, cleanEnd: Int = start, end: Int = cleanEnd) {
         end = if (insertedAtEnd) end + edit.inserted else movedAsEnd(end, edit)
         cleanEnd = cleanEnd.coerceIn(start, end)
         end = maxOf(end, cleanEnd)
-        flight = flight?.let { Flight(movedAsEnd(it.from, edit), movedAsEnd(it.to, edit), it.dirty || dirtied) }
+        flight = flight?.let { Flight(movedAsEnd(it.from, edit), movedAsEnd(it.to, edit), it.dirty || dirtied, it.abandoned) }
     }
 
     private fun touches(flight: Flight, edit: Edit) =

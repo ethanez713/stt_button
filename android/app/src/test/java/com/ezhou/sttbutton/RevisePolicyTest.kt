@@ -309,4 +309,51 @@ class RevisePolicyTest {
         assertEquals(" " + labelled("a", 3).uppercase().replaceFirstChar { it.lowercaseChar() }, result.cleaned)
         assertEquals("seed" + result.cleaned, doc.read()!!.text)
     }
+
+    @Test
+    fun given_a_revision_in_flight_when_the_take_resumes_then_it_is_dropped_and_the_next_stop_revises_the_whole_region() {
+        val editor = FakeEditor("")
+        val heardA = labelled("a", 3)
+        val heardB = labelled("b", 3)
+        var nullRevision = false
+        val cleaner = object : Cleaner {
+            override fun countTokens(text: String) = Pipeline.wordCount(text)
+            override fun clean(request: CleanRequest): CleanResult? {
+                if (nullRevision) return null
+                return CleanResult(request.target.uppercase() + if (request.target.contains("\n\n")) " REVISED" else "", 1)
+            }
+            override fun cancel() = Unit
+        }
+        val (_, rig) = rigOver(editor, config(), cleaner, heardA, heardB)
+        rig.feed(audio(3.0, 0.0))
+        rig.engine.markStop()
+        rig.engine.stop()
+        var revision: Job? = null
+        while (revision == null) {
+            val job = rig.engine.next() ?: error("region revision was not planned")
+            if (job.plan?.region == true) revision = job else rig.engine.complete(job, job.run())
+        }
+        val before = editor.text
+        nullRevision = true
+
+        rig.engine.resume()
+        assertFalse(rig.engine.stopping)
+        rig.engine.complete(revision, revision.run())
+
+        assertEquals(before, editor.text)
+        assertEquals("abandoned", rig.clean.single { it.scope == "region" }.outcome)
+        assertTrue(rig.clean.none { it.scope == "region" && it.outcome == "fallback" })
+        nullRevision = false
+        rig.feed(audio(3.0, 0.0))
+        rig.finish()
+
+        val asrs = rig.records.filter { it.kind == "asr" }
+        assertEquals(2, asrs.size)
+        assertTrue(asrs[1].fromMs!! >= asrs[0].toMs!!)
+        val whole = rig.clean.last { it.scope == "region" }
+        assertTrue(whole.input, whole.input!!.contains("a1") && whole.input!!.contains("b1"))
+        assertEquals("applied", whole.outcome)
+        assertTrue(editor.text, editor.text.contains("A1") && editor.text.contains("B1"))
+        assertFalse(editor.text.contains("\n\n"))
+    }
 }

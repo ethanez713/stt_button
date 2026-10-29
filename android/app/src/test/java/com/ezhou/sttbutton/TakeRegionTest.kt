@@ -87,6 +87,26 @@ class TakeRegionTest {
     }
 
     @Test
+    fun given_a_closed_region_when_text_is_inserted_at_the_end_then_it_stays_outside_until_reopened() {
+        val r = region()
+        r.close()
+        r.apply(Edit(30, 0, 3))
+        assertEquals(Triple(10, 20, 30), offsets(r))
+        r.reopen()
+        r.apply(Edit(30, 0, 3))
+        assertEquals(Triple(10, 20, 33), offsets(r))
+    }
+
+    @Test
+    fun given_a_flight_when_abandoned_and_then_edited_then_both_marks_stay() {
+        val r = region().also { it.flightOver(20, 28); it.abandonFlight() }
+        assertTrue(r.flight!!.abandoned)
+        r.apply(Edit(24, 0, 2))
+        assertTrue(r.flight!!.abandoned)
+        assertTrue(r.flight!!.dirty)
+    }
+
+    @Test
     fun given_text_appended_by_the_take_when_recorded_then_the_end_grows() {
         val r = region().also { it.appended(4) }
         assertEquals(Triple(10, 20, 34), offsets(r))

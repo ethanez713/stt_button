@@ -600,6 +600,44 @@ class TakeEngineTest {
     }
 
     @Test
+    fun given_a_stopped_take_when_resumed_then_new_audio_is_appended_and_the_tail_is_not_decoded_again() {
+        val first = "alpha words here today."
+        val second = "beta words follow after."
+        val rig = Rig(cfg, ScriptedRecognizer(first, second))
+        rig.feed(audio(3.0, 0.0))
+        rig.engine.markStop()
+        rig.engine.stop()
+        val decode = rig.engine.next()!!
+        assertEquals(Job.Kind.DECODE, decode.kind)
+        rig.engine.complete(decode, decode.run())
+        assertTrue(rig.doc.read()!!.text.contains("alpha"))
+
+        rig.engine.resume()
+
+        assertFalse(rig.engine.stopping)
+        rig.feed(audio(3.0, 0.0))
+        rig.engine.markStop()
+        rig.engine.stop()
+        rig.driver.drain()
+        val asrs = rig.records.filter { it.kind == "asr" }
+        assertEquals(2, asrs.size)
+        assertTrue(asrs[1].fromMs!! >= asrs[0].toMs!!)
+        val text = rig.doc.read()!!.text
+        assertTrue(text, text.contains("ALPHA"))
+        assertTrue(text, text.contains("BETA"))
+    }
+
+    @Test
+    fun given_silence_before_the_stop_when_the_take_resumes_then_the_silence_clock_starts_again() {
+        val rig = Rig(cfg, ScriptedRecognizer("one two three four five"))
+        rig.feed(audio(3.0, 3.0))
+        rig.engine.stop()
+        assertTrue(rig.engine.silenceS() >= 2)
+        rig.engine.resume()
+        assertEquals(0.0, rig.engine.silenceS(), 0.05)
+    }
+
+    @Test
     fun given_the_tail_when_the_take_stops_then_wait_runs_from_the_stop_and_lag_from_the_last_sample() {
         val clock = Clock(1_000)
         val rig = Rig(cfg, ScriptedRecognizer("one two three four five"), nowMs = { clock.now })

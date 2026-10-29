@@ -24,6 +24,7 @@ class TakeDriver(
     private val queued = AtomicBoolean(false)
     @Volatile private var running = false
     private var ended = false
+    private var parked = false
     private var settled: (() -> Unit)? = null
     private var waiting: Pair<Job, Result<JobResult>>? = null
     private var heldSince = 0L
@@ -80,13 +81,28 @@ class TakeDriver(
         }
     }
 
+    /** Any thread. Undoes [stop] so the open take keeps going; a clean already in flight is dropped when it returns. */
+    fun resume() {
+        if (Looper.myLooper() == main.looper) applyResume() else main.post(::applyResume)
+    }
+
     /** Nothing more is asked of the engine; [onSettled] runs on the main thread once no job is in flight. */
     fun abandon(onSettled: () -> Unit) {
-        main.post {
-            ended = true
-            main.removeCallbacks(tick)
-            if (running) settled = onSettled else onSettled()
-        }
+        if (Looper.myLooper() == main.looper) park(onSettled) else main.post { park(onSettled) }
+    }
+
+    private fun park(onSettled: () -> Unit) {
+        if (parked) return
+        parked = true
+        ended = true
+        main.removeCallbacks(tick)
+        if (running) settled = onSettled else onSettled()
+    }
+
+    private fun applyResume() {
+        if (ended) return
+        engine.resume()
+        pump()
     }
 
     private fun pump() {
@@ -104,6 +120,7 @@ class TakeDriver(
                 }
                 waiting = null
                 engine.complete(job, outcome.getOrThrow())
+                if (ended) return
             }
             val job = engine.next()
             if (job == null) {
@@ -132,6 +149,7 @@ class TakeDriver(
     }
 
     private fun finishNow() {
+        if (ended) return
         ended = true
         main.removeCallbacks(tick)
         onDone(engine.result())

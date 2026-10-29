@@ -40,6 +40,8 @@ class ButtonStyleTest {
         assertEquals(0x66445566, style.color(ButtonMode.RECORDING))
         assertEquals(0xFF112233.toInt(), style.color(ButtonMode.IDLE, pressed = true))
         assertEquals(0x669E9E9E, style.color(ButtonMode.BUSY))
+        assertEquals(style.color(ButtonMode.BUSY), style.color(ButtonMode.CLEANING))
+        assertEquals(style.color(ButtonMode.BUSY, pressed = true), style.color(ButtonMode.CLEANING, pressed = true))
     }
 
     @Test

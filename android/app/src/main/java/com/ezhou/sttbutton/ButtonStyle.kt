@@ -29,7 +29,7 @@ data class ButtonStyle(
         val rgb = when (mode) {
             ButtonMode.IDLE -> idleRgb
             ButtonMode.RECORDING -> recordingRgb
-            ButtonMode.BUSY -> BUSY_RGB
+            ButtonMode.BUSY, ButtonMode.CLEANING -> BUSY_RGB
             ButtonMode.FAILED -> FAILED_RGB
         }
         val alpha = if (pressed || mode == ButtonMode.FAILED) 255 else 255 * opacityPct / 100

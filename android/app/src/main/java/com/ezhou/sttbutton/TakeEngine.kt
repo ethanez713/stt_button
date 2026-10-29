@@ -111,8 +111,6 @@ class TakeEngine(
     private val chunks = mutableListOf<String>()
     private val outputs = mutableListOf<String>()
     private var decoded = 0
-    private var finalSlice: IntArray? = null
-    private var finalTaken = false
     private var sliceLanded = false
     private var running: Job? = null
     private var asrMs = 0L
@@ -134,6 +132,7 @@ class TakeEngine(
     private val closedAtMs = HashMap<Int, Long>()
     private var seenClosed = 0
     private var recordingStartMs: Long? = null
+    private var silenceFrom = 0
 
     var stopping = false
         private set
@@ -183,8 +182,8 @@ class TakeEngine(
 
     val raw: String get() = Pipeline.joinSlices(texts)
 
-    /** Seconds since the last window at or above `stop_silence_dbfs`, or since the take opened when there has been none. */
-    fun silenceS(): Double = (slicer.sampleCount - maxOf(slicer.lastLoudEnd, 0)).toDouble() / Slicer.SAMPLE_RATE
+    /** Seconds since the last window at or above `stop_silence_dbfs`, or since the take opened or last resumed when there has been none. */
+    fun silenceS(): Double = (slicer.sampleCount - maxOf(slicer.lastLoudEnd, silenceFrom, 0)).toDouble() / Slicer.SAMPLE_RATE
 
     /** Recorder thread, after each feed of the slicer. */
     fun onAudio() {
@@ -202,15 +201,23 @@ class TakeEngine(
         stopCleanMs = cleanMs
     }
 
-    /** No more audio will arrive: what is left is recognized and cleaned for good. */
+    /** No more audio will arrive until [resume]: what is open is recognized and cleaned. */
     fun stop() {
         if (stopping) return
         stopping = true
         region.close()
-        finalSlice = slicer.finish().firstOrNull()
-        val tail = finalSlice ?: return
+        val tail = slicer.consume() ?: return
         val at = nowMs()
         synchronized(timing) { closedAtMs.putIfAbsent(tail[1], at) }
+    }
+
+    /** The mic is open on this take again. A clean already in flight is not written when it returns. */
+    fun resume() {
+        if (!stopping) return
+        stopping = false
+        region.reopen()
+        region.abandonFlight()
+        silenceFrom = slicer.sampleCount
     }
 
     fun next(): Job? {
@@ -259,15 +266,9 @@ class TakeEngine(
     private fun regionText(): String = readText().let { it.substring(region.start, region.end.coerceAtMost(it.length)) }
 
     private fun nextSlice(): IntArray? {
-        slicer.closedSlices(decoded).firstOrNull()?.let {
-            decoded++
-            return it
-        }
-        if (stopping && !finalTaken) {
-            finalTaken = true
-            return finalSlice
-        }
-        return null
+        val slice = slicer.closedSlices(decoded).firstOrNull() ?: return null
+        decoded++
+        return slice
     }
 
     private fun momentNow(): Moment? = when {
@@ -465,6 +466,12 @@ class TakeEngine(
             if (cleaned.rejected == "drift") drifts++ else if (cleaned.rejected != null) rejects++
         }
         when {
+            flight?.abandoned == true -> {
+                val dirty = flight.dirty
+                region.dropFlight()
+                if (plan.region && dirty) revisionDropped = true
+                record("abandoned", cleaned.text)
+            }
             cleaned.text == null && (plan.abandonable || plan.speculative) -> {
                 region.dropFlight()
                 record("abandoned", null)

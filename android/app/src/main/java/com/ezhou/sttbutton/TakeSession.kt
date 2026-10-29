@@ -1,5 +1,7 @@
 package com.ezhou.sttbutton
 
+import org.json.JSONArray
+
 /** Where the text of a finished take can go, as the controller found the field when the engine finished. */
 enum class Delivery { INSERT, BLANK, NO_FIELD, OTHER_PACKAGE }
 
@@ -35,6 +37,12 @@ sealed interface TakeEffect {
     data object AskSwap : TakeEffect
     data object StopRecorder : TakeEffect
     data object StopEngine : TakeEffect
+
+    /** The recorder starts again on the take that is already open. */
+    data object StartRecorder : TakeEffect
+
+    /** The engine leaves the stop and keeps the same slicer, document and region. */
+    data object ResumeEngine : TakeEffect
     data object CancelCleaner : TakeEffect
     data class ReturnKeyboard(val stranded: Boolean) : TakeEffect
     data object WriteImeLine : TakeEffect
@@ -74,6 +82,23 @@ class TakeSession(val take: Take, private val capMs: Long, private val clock: ()
         private set
     var stoppedAtMs = 0L
         private set
+    private val stopTriggers = mutableListOf<String>()
+
+    /** One entry per stop, in order. [stopTrigger] is the last. */
+    val triggers: List<String> get() = stopTriggers
+    var resumes = 0
+        private set
+
+    /** "done" once the engine finishes; "abandoned" when the take ends without that. */
+    var cleanup = "abandoned"
+        private set
+
+    fun endingFields(trigger: String?): Array<Pair<String, Any?>> = arrayOf(
+        "trigger" to trigger,
+        "triggers" to JSONArray(triggers),
+        "resumes" to resumes,
+        "cleanup" to cleanup,
+    )
 
     /** The take has ended and no flash is left on the button; a tap now starts another take. */
     val finished: Boolean get() = phase == Phase.ENDED && !flashing
@@ -86,7 +111,7 @@ class TakeSession(val take: Take, private val capMs: Long, private val clock: ()
     val buttonMode: ButtonMode get() = when {
         flashing -> ButtonMode.FAILED
         phase == Phase.OPEN && take.state == TakeState.OPEN -> ButtonMode.RECORDING
-        phase == Phase.OPEN -> ButtonMode.BUSY
+        phase == Phase.OPEN -> ButtonMode.CLEANING
         else -> ButtonMode.IDLE
     }
 
@@ -140,6 +165,7 @@ class TakeSession(val take: Take, private val capMs: Long, private val clock: ()
                 out += TakeEffect.StartTake
             }
             isOpen && take.state == TakeState.OPEN -> stop(TRIGGER_STOP, out)
+            isOpen && take.state == TakeState.STOPPING && stopTrigger != TRIGGER_CAP && tap.micGranted -> resume(out)
         }
     }
 
@@ -179,6 +205,7 @@ class TakeSession(val take: Take, private val capMs: Long, private val clock: ()
 
     private fun stop(trigger: String, out: MutableList<TakeEffect>) {
         if (!isOpen || !take.requestStop()) return
+        stopTriggers += trigger
         stopTrigger = trigger
         if (trigger == TRIGGER_MIC) flash(out) else out += TakeEffect.SetButton(buttonMode)
         stoppedAtMs = clock()
@@ -192,8 +219,23 @@ class TakeSession(val take: Take, private val capMs: Long, private val clock: ()
         out += TakeEffect.Recheck
     }
 
+    private fun resume(out: MutableList<TakeEffect>) {
+        if (!take.resume()) return
+        resumes++
+        out += TakeEffect.CancelCleaner
+        out += TakeEffect.ResumeEngine
+        out += TakeEffect.StartRecorder
+        out += TakeEffect.PanelBusy(false)
+        if (!bubbleShown) {
+            bubbleShown = true
+            out += TakeEffect.ShowBubble
+        }
+        out += TakeEffect.SetButton(buttonMode)
+    }
+
     private fun onEngineFinished(delivery: Delivery, out: MutableList<TakeEffect>) {
         if (!isOpen || take.state != TakeState.STOPPING) return
+        cleanup = "done"
         when (delivery) {
             Delivery.BLANK -> discard(DiscardReason.EMPTY, stopTrigger, out)
             Delivery.NO_FIELD -> unplaced(DiscardReason.NO_FIELD, out)

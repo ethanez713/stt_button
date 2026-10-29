@@ -41,13 +41,16 @@ class TakeSessionTest {
             listOf(TakeEffect.PanelBusy(true), TakeEffect.StopRecorder, TakeEffect.StopEngine),
             stopping.filter { it is TakeEffect.PanelBusy || it === TakeEffect.StopRecorder || it === TakeEffect.StopEngine },
         )
-        assertEquals(ButtonMode.BUSY, s.buttonMode)
+        assertEquals(ButtonMode.CLEANING, s.buttonMode)
+        assertTrue(stopping.contains(TakeEffect.SetButton(ButtonMode.CLEANING)))
 
         val ending = s.on(TakeEvent.EngineFinished(Delivery.INSERT))
         assertEquals(listOf(TakeEffect.Insert("stop"), TakeEffect.Release), ending.take(2))
         assertEquals(TakeEffect.ParkModels, ending.last())
         assertTrue(s.finished)
         assertEquals(TakeState.INSERTED, s.take.state)
+        assertEquals(ButtonMode.IDLE, s.buttonMode)
+        assertEquals("done", s.cleanup)
     }
 
     @Test
@@ -87,9 +90,10 @@ class TakeSessionTest {
         val effects = s.on(TakeEvent.FieldGone)
 
         assertEquals("field", s.stopTrigger)
+        assertEquals(ButtonMode.CLEANING, s.buttonMode)
         assertTrue(effects.contains(TakeEffect.StopRecorder))
         assertTrue(effects.contains(TakeEffect.StopEngine))
-        assertEquals(emptyList<TakeEffect>(), s.on(TakeEvent.FieldGone))
+        assertEquals(listOf("field"), s.triggers)
     }
 
     @Test
@@ -102,7 +106,7 @@ class TakeSessionTest {
         assertTrue(effects.contains(TakeEffect.SetButton(ButtonMode.FAILED)))
         assertTrue(effects.contains(TakeEffect.Schedule(TakeSession.FAILED_HOLD_MS, TakeEvent.FlashEnded)))
         assertEquals(ButtonMode.FAILED, s.buttonMode)
-        assertEquals(listOf(TakeEffect.SetButton(ButtonMode.BUSY)), s.on(TakeEvent.FlashEnded))
+        assertEquals(listOf(TakeEffect.SetButton(ButtonMode.CLEANING)), s.on(TakeEvent.FlashEnded))
     }
 
     @Test
@@ -119,12 +123,78 @@ class TakeSessionTest {
     }
 
     @Test
-    fun given_a_second_tap_while_stopping_when_it_arrives_then_nothing_happens() {
+    fun given_a_tap_while_cleaning_when_the_stop_was_not_the_cap_then_the_recorder_restarts_on_the_same_take() {
         val s = session()
         s.open()
         s.on(TakeEvent.Tap(true))
+        assertEquals(ButtonMode.CLEANING, s.buttonMode)
+
+        val resuming = s.on(TakeEvent.Tap(true))
+
+        assertEquals(ButtonMode.RECORDING, s.buttonMode)
+        assertEquals(TakeState.OPEN, s.take.state)
+        assertEquals(
+            listOf(TakeEffect.ResumeEngine, TakeEffect.StartRecorder),
+            resuming.filter { it === TakeEffect.ResumeEngine || it === TakeEffect.StartRecorder },
+        )
+        assertTrue(resuming.contains(TakeEffect.PanelBusy(false)))
+        assertEquals(1, s.resumes)
+        s.on(TakeEvent.Silence)
+        s.on(TakeEvent.EngineFinished(Delivery.INSERT))
+        assertEquals(ButtonMode.IDLE, s.buttonMode)
+        val fields = s.endingFields(s.stopTrigger).toMap()
+        assertEquals("silence", fields["trigger"])
+        assertEquals(1, fields["resumes"])
+        assertEquals("done", fields["cleanup"])
+        val named = fields["triggers"] as org.json.JSONArray
+        assertEquals(listOf("stop", "silence"), List(named.length()) { named.getString(it) })
+    }
+
+    @Test
+    fun given_a_cap_stop_when_tapped_while_cleaning_then_the_tap_is_ignored() {
+        val s = session()
+        s.open()
+        s.on(TakeEvent.Cap)
+        assertEquals(ButtonMode.CLEANING, s.buttonMode)
 
         assertEquals(emptyList<TakeEffect>(), s.on(TakeEvent.Tap(true)))
+
+        assertEquals(TakeState.STOPPING, s.take.state)
+        assertEquals(0, s.resumes)
+        assertEquals(listOf("cap"), s.triggers)
+    }
+
+    @Test
+    fun given_a_keyboard_stop_when_tapped_while_cleaning_then_the_bubble_returns_with_the_recording() {
+        val s = session()
+        s.open(liveSwap())
+        val stopping = s.on(TakeEvent.ExcludedField)
+        assertTrue(stopping.contains(TakeEffect.HideBubble))
+
+        val resuming = s.on(TakeEvent.Tap(true))
+
+        assertTrue(resuming.contains(TakeEffect.ShowBubble))
+        assertEquals(ButtonMode.RECORDING, s.buttonMode)
+    }
+
+    @Test
+    fun given_the_field_leaving_while_cleaning_when_the_engine_finishes_then_the_take_ends_with_cleanup_done() {
+        val s = session()
+        s.open()
+        s.on(TakeEvent.Tap(true))
+        s.on(TakeEvent.Tap(true))
+        s.on(TakeEvent.Silence)
+
+        val effects = s.on(TakeEvent.FieldGone)
+        s.on(TakeEvent.EngineFinished(Delivery.NO_FIELD))
+
+        assertEquals(emptyList<TakeEffect>(), effects)
+        assertTrue(s.finished)
+        val fields = s.endingFields("silence").toMap()
+        assertEquals("done", fields["cleanup"])
+        assertEquals(1, fields["resumes"])
+        val named = fields["triggers"] as org.json.JSONArray
+        assertEquals(listOf("stop", "silence"), List(named.length()) { named.getString(it) })
     }
 
     @Test
@@ -380,6 +450,7 @@ class TakeSessionTest {
                     now = 800L * (i + 1)
                     for (effect in s.on(event)) {
                         if (effect === TakeEffect.StopRecorder) recorderOn = false
+                        if (effect === TakeEffect.StartRecorder) recorderOn = true
                         if (effect == TakeEffect.ReturnKeyboard(stranded = false)) returns++
                     }
                 }

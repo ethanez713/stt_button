@@ -192,6 +192,8 @@ class TakeController(
             TakeEffect.AskSwap -> askSwap(current)
             TakeEffect.StopRecorder -> run?.let(::stopRecorder)
             TakeEffect.StopEngine -> run?.let { stopEngine(current, it) }
+            TakeEffect.StartRecorder -> run?.let { startRecorder(current, it) }
+            TakeEffect.ResumeEngine -> run?.driver?.resume()
             TakeEffect.CancelCleaner -> run?.models?.cleaner()?.cancel()
             is TakeEffect.ReturnKeyboard -> {
                 val method = service.swapper.returnKeyboard()
@@ -336,6 +338,16 @@ class TakeController(
         }
     }
 
+    private fun startRecorder(current: TakeSession, run: Run) {
+        media.pause()
+        try {
+            run.recorder.start()
+        } catch (e: Exception) {
+            Log.e(tag, "recording failed to start", e)
+            dispatch(current, TakeEvent.MicFailed)
+        }
+    }
+
     private fun stopEngine(current: TakeSession, run: Run) {
         Log.i(tag, "take stop trigger=${current.stopTrigger}")
         run.stoppedAtMs = SystemClock.elapsedRealtime()
@@ -424,7 +436,7 @@ class TakeController(
             "idle_cleans" to result.idleCleans, "idle_hits" to result.idleHits, "cue" to result.cue,
             "context_decodes" to result.contextDecodes, "context_fallbacks" to result.contextFallbacks, "drifts" to result.drifts, "rejects" to result.rejects,
             "corrections" to result.corrections, "corrections_kept" to result.correctionsKept,
-            "trigger" to trigger, *swapFields(current), "a11y_conn" to service.a11yConnection(),
+            *current.endingFields(trigger), *swapFields(current), "a11y_conn" to service.a11yConnection(),
             "asr_ms_after_stop" to result.asrMsAfterStop, "clean_ms_after_stop" to result.cleanMsAfterStop,
             "stop_to_insert_ms" to SystemClock.elapsedRealtime() - run.stoppedAtMs,
             *run.cost.lap().toTypedArray())
@@ -449,7 +461,7 @@ class TakeController(
             "idle_cleans" to result.idleCleans, "idle_hits" to result.idleHits, "cue" to result.cue,
             "context_decodes" to result.contextDecodes, "context_fallbacks" to result.contextFallbacks, "drifts" to result.drifts, "rejects" to result.rejects,
             "corrections" to result.corrections, "corrections_kept" to result.correctionsKept,
-            "trigger" to trigger, *swapFields(current), "a11y_conn" to service.a11yConnection(),
+            *current.endingFields(trigger), *swapFields(current), "a11y_conn" to service.a11yConnection(),
             "asr_ms_after_stop" to result.asrMsAfterStop, "clean_ms_after_stop" to result.cleanMsAfterStop,
             "stop_to_insert_ms" to SystemClock.elapsedRealtime() - run.stoppedAtMs,
             *run.cost.lap().toTypedArray())
@@ -474,7 +486,7 @@ class TakeController(
         }
         if (copied) Toast.makeText(service, R.string.copied_to_clipboard, Toast.LENGTH_LONG).show()
         log.write("clipboard", run.take.id,
-            "pkg" to run.take.pkg, "reason" to reason.logName, "trigger" to trigger, "copied" to copied,
+            "pkg" to run.take.pkg, "reason" to reason.logName, *current.endingFields(trigger), "copied" to copied,
             "raw" to result.raw, "text" to clip, "unwritten_chars" to clip.length.takeIf { run.detached },
             "clean_mode" to result.cleanMode, "clean_policy" to run.engine.policyName,
             "audio_ms" to result.audioMs, "zero_ms" to run.level.zeroMs, "peak_dbfs" to run.level.peakDbfs,
@@ -483,7 +495,7 @@ class TakeController(
 
     private fun logDiscard(current: TakeSession, run: Run, reason: DiscardReason, trigger: String?) {
         log.write(
-            "discard", run.take.id, "reason" to reason.logName, "trigger" to trigger, "clean_policy" to run.engine.policyName,
+            "discard", run.take.id, "reason" to reason.logName, *current.endingFields(trigger), "clean_policy" to run.engine.policyName,
             "audio_ms" to run.level.audioMs, "zero_ms" to run.level.zeroMs, "peak_dbfs" to run.level.peakDbfs,
             *swapFields(current), *run.cost.lap().toTypedArray(),
         )

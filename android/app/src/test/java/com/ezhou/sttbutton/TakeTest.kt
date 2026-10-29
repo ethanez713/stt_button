@@ -20,6 +20,21 @@ class TakeTest {
     }
 
     @Test
+    fun given_a_stopping_take_when_resumed_then_it_is_open_and_can_stop_again() {
+        val take = take()
+        take.requestStop()
+        assertTrue(take.resume())
+        assertEquals(TakeState.OPEN, take.state)
+        assertFalse(take.busy)
+        assertFalse(take.resume())
+        assertTrue(take.requestStop())
+        assertTrue(take.resume())
+        assertTrue(take.requestStop())
+        take.markInserted()
+        assertFalse(take.resume())
+    }
+
+    @Test
     fun given_a_stopping_take_when_stopped_again_then_the_second_tap_is_ignored() {
         val take = take()
         take.requestStop()

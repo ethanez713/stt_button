@@ -19,7 +19,7 @@ import kotlin.math.hypot
  * so it has no FLAG_ALT_FOCUSABLE_IM: combined with FLAG_NOT_FOCUSABLE that flag would put it
  * behind the keyboard.
  */
-enum class ButtonMode { IDLE, RECORDING, BUSY, FAILED }
+enum class ButtonMode { IDLE, RECORDING, BUSY, CLEANING, FAILED }
 
 class Overlay(
     private val context: Context,
@@ -37,7 +37,10 @@ class Overlay(
     private val styleListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
         if (key in ButtonStyle.KEYS) {
             style = ButtonStyle.load(prefs)
-            view?.background = oval(style.color(mode))
+            view?.let {
+                it.setArcColor(arcColor())
+                it.background = oval(style.color(mode))
+            }
             onPlacementChanged()
         }
     }.also(prefs::registerOnSharedPreferenceChangeListener)
@@ -91,6 +94,7 @@ class Overlay(
         else params.flags or WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
         view?.let {
             it.setMode(mode)
+            it.setArcColor(arcColor())
             it.background = oval(style.color(mode))
             windowManager.updateViewLayout(it, params)
         }
@@ -149,7 +153,10 @@ class Overlay(
     }
 
     @SuppressLint("ClickableViewAccessibility")
+    private fun arcColor() = style.recordingRgb or (0xFF shl 24)
+
     private fun createView(): WaveButtonView = WaveButtonView(context, level, mode).apply {
+        setArcColor(arcColor())
         background = oval(style.color(mode))
         val slop = ViewConfiguration.get(context).scaledTouchSlop
         var downX = 0f

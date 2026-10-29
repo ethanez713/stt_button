@@ -68,6 +68,18 @@ class Slicer(
 
     fun finish(): List<IntArray> = synchronized(this) { if (size > start) listOf(intArrayOf(start, size)) else emptyList() }
 
+    /**
+     * Marks [start, size) closed and moves past it. [finish] leaves that range open, so the next cut after a
+     * resume would decode it again.
+     */
+    fun consume(): IntArray? = synchronized(this) {
+        if (size <= start) return null
+        val slice = intArrayOf(start, size)
+        closed.add(slice)
+        start = size
+        slice
+    }
+
     /** Where the last non-silent window that ends at or before [sample] ends, or null. */
     fun speechBefore(sample: Int): Int? = synchronized(this) {
         var last = min(sample / WIN, speech.size) - 1

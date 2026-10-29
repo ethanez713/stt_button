@@ -12,8 +12,8 @@ enum class DiscardReason(val logName: String) {
 
 /**
  * One take's lifecycle (design § Phone app): open from the start tap, stopping from the stop tap or the
- * cap until the text is inserted, then inserted or discarded. Every transition says whether it applied,
- * so a late event (a second tap, a language change after the insert) is ignored by the caller.
+ * cap until the text is inserted or the take resumes, then inserted or discarded. Every transition says
+ * whether it applied, so a late event (a second stop, a language change after the insert) is ignored.
  */
 class Take(val id: String, val pkg: String, val startedAtMs: Long) {
     var state = TakeState.OPEN
@@ -21,12 +21,14 @@ class Take(val id: String, val pkg: String, val startedAtMs: Long) {
     var discardReason: DiscardReason? = null
         private set
 
-    /** The button ignores taps from the stop until the insert. */
+    /** True while a stop is in progress, until the take resumes or finishes. */
     val busy: Boolean get() = state == TakeState.STOPPING
 
     val finished: Boolean get() = state == TakeState.INSERTED || state == TakeState.DISCARDED
 
     fun requestStop(): Boolean = move(TakeState.OPEN, TakeState.STOPPING)
+
+    fun resume(): Boolean = move(TakeState.STOPPING, TakeState.OPEN)
 
     fun markInserted(): Boolean = move(TakeState.STOPPING, TakeState.INSERTED)
 

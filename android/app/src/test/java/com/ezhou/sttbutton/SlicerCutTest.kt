@@ -4,6 +4,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -110,5 +111,22 @@ class SlicerCutTest {
         assertEquals(reference[0][1], got[0][1])
         assertTrue(got[0][1] > 8 * Slicer.SAMPLE_RATE)
         assertTrue(got[0][1] <= 30 * Slicer.SAMPLE_RATE)
+    }
+
+    @Test
+    fun given_an_open_tail_when_consumed_then_later_audio_is_cut_after_it() {
+        val slicer = Slicer(30.0, 5.0, 1.6)
+        val head = ShortArray(Slicer.SAMPLE_RATE) { 1000 }
+        assertTrue(slicer.feed(head).isEmpty())
+
+        val tail = slicer.consume()
+
+        assertEquals(listOf(0, head.size), tail!!.toList())
+        assertEquals(head.size, slicer.start)
+        assertEquals(listOf(0, head.size), slicer.closedSlices(0).single().toList())
+        assertNull(slicer.consume())
+        slicer.feed(ShortArray(31 * Slicer.SAMPLE_RATE))
+        val next = slicer.closedSlices(1).first()
+        assertEquals(head.size, next[0])
     }
 }
