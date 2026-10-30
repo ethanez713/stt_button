@@ -54,12 +54,13 @@ class LiveTake:
     """recognizer.recognize(samples) -> text; get_cleaner() -> a cleaner with count_tokens and
     clean_chunk, called at the first clean so the caller can still be loading it."""
 
-    def __init__(self, recognizer, get_cleaner: Callable[[], object], cfg: dict, bubble=None):
+    def __init__(self, recognizer, get_cleaner: Callable[[], object], cfg: dict, bubble=None,
+                 slicer: Slicer | None = None):
         self.bubble = bubble
         self.recognizer = recognizer
         self.get_cleaner = get_cleaner
         self.cfg = cfg
-        self.slicer = Slicer.from_config(cfg)
+        self.slicer = slicer or Slicer.from_config(cfg)
         self.texts: list[str] = []
         self.cleaned_chunks: dict[str, str] = {}
         self.idle_chunks: set[str] = set()

@@ -453,6 +453,46 @@ class TestPhoneReplay:
         assert phone_replay.replay(Recognizer(), np.zeros(4000, dtype=np.float32), config.load()) == "4000 samples"
 
 
+class TestJunctionReplay:
+    def test_field_takes_are_those_since_the_cutover_with_audio_a_decode_and_a_field_ending(self, tmp_path):
+        from experiments import junction_replay
+        for name in ("field", "buffer", "dropped", "old", "silent"):
+            (tmp_path / f"{name}.pcm").write_bytes(b"")
+        asr = {"event": "job", "kind": "asr"}
+        lines = [
+            {**asr, "id": "old", "ts": "2026-10-01"}, {"event": "insert", "id": "old", "ts": "2026-10-01", "insert_path": "field"},
+            {**asr, "id": "field", "ts": "2026-10-22"}, {"event": "insert", "id": "field", "ts": "2026-10-22", "insert_path": "field"},
+            {**asr, "id": "buffer", "ts": "2026-10-22"}, {"event": "insert", "id": "buffer", "ts": "2026-10-22", "insert_path": "ladder"},
+            {**asr, "id": "dropped", "ts": "2026-10-22"}, {"event": "discard", "id": "dropped", "ts": "2026-10-22", "reason": "empty"},
+            {"event": "discard", "id": "silent", "ts": "2026-10-22", "reason": "empty"},
+            {**asr, "id": "pruned", "ts": "2026-10-22"}, {"event": "insert", "id": "pruned", "ts": "2026-10-22", "insert_path": "field"},
+        ]
+        assert junction_replay.field_takes(lines, tmp_path, since="2026-10-21") == ["field", "dropped"]
+
+    def test_given_a_repeated_and_a_lost_word_when_counted_then_each_side_is_named(self):
+        from experiments import junction_replay
+        whole = "What are the pros and cons of using an MIT license versus a license"
+        assert junction_replay.errors("What are the pros and cons of using using MIT license? license?", whole) == {
+            "extra": 0, "missing": 2, "subst": 1, "words": 14}
+
+    def test_given_a_doubled_word_when_counted_then_it_is_extra(self):
+        from experiments import junction_replay
+        assert junction_replay.errors("of of using", "of using") == {"extra": 1, "missing": 0, "subst": 0, "words": 2}
+
+    def test_settle_windows_cut_only_at_the_hard_cut_where_field_slices_cut_at_pauses(self):
+        import numpy as np
+
+        from experiments import junction_replay
+        from stt_button import config
+        cfg = config.load()
+        speech = np.sin(np.arange(16000) / 3).astype(np.float32) * 0.3
+        audio = np.concatenate([speech, np.zeros(32000, dtype=np.float32)] * 3 + [speech])
+        settle = junction_replay.slicer_for(cfg, settle=True)
+        field = junction_replay.slicer_for(cfg, settle=False)
+        assert (settle.feed(audio), len(settle.finish())) == ([], 1)
+        assert len(field.feed(audio)) >= 2
+
+
 class TestTakeTails:
     @staticmethod
     def samples(*parts, extra=0):
