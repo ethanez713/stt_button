@@ -246,3 +246,21 @@ class LiveTake:
     def _announce(self, chunk: str) -> None:
         if self.bubble:
             self.bubble.chunk_cleaned(chunk, self.cleaned_chunks[chunk])
+
+
+class _NoopCleaner:
+    """Keeps a settle pass from loading a model. The text settle returns is the raw decode."""
+
+    def count_tokens(self, text: str) -> int:
+        return len(text.split())
+
+    def clean_chunk(self, chunk: str, cancelled=None):
+        return chunk, 0
+
+
+def settle(recognizer, samples: np.ndarray, cfg: dict) -> str:
+    """The text of `samples` decoded in settle windows: no pause cut, only the hard cut at slice_max_s."""
+    take = LiveTake(recognizer, lambda: _NoopCleaner(), cfg, slicer=Slicer.for_settle(cfg))
+    take.feed(samples)
+    take.stop()
+    return take.raw

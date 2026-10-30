@@ -447,6 +447,7 @@ class TakeController(
             "corrections" to result.corrections, "corrections_kept" to result.correctionsKept,
             *current.endingFields(trigger), *swapFields(current), "a11y_conn" to service.a11yConnection(),
             "asr_ms_after_stop" to result.asrMsAfterStop, "clean_ms_after_stop" to result.cleanMsAfterStop,
+            "settle" to result.settle, "settle_ms" to result.settleMs, "settle_windows" to result.settleWindows,
             "stop_to_insert_ms" to SystemClock.elapsedRealtime() - run.stoppedAtMs,
             *run.cost.lap().toTypedArray())
         track(take, field, if (outcome.readback == "landed") written else null, caretAfter.end.takeIf { caretAfter.known })
@@ -473,6 +474,7 @@ class TakeController(
             "corrections" to result.corrections, "corrections_kept" to result.correctionsKept,
             *current.endingFields(trigger), *swapFields(current), "a11y_conn" to service.a11yConnection(),
             "asr_ms_after_stop" to result.asrMsAfterStop, "clean_ms_after_stop" to result.cleanMsAfterStop,
+            "settle" to result.settle, "settle_ms" to result.settleMs, "settle_windows" to result.settleWindows,
             "stop_to_insert_ms" to SystemClock.elapsedRealtime() - run.stoppedAtMs,
             *run.cost.lap().toTypedArray())
         val field = placement.field ?: return

@@ -86,14 +86,18 @@ def errors(heard: str, reference: str) -> dict:
 
 def slicer_for(cfg: dict, settle: bool) -> Slicer:
     if settle:
-        return Slicer(cfg["slice_max_s"], cfg["slice_search_s"], None, cfg["slice_min_s"], cfg["pause_margin_db"])
+        return Slicer.for_settle(cfg)
     return Slicer.from_config_for_field(cfg)
 
 
 def replay(recognizer, samples: np.ndarray, cfg: dict, settle: bool = False) -> str:
+    if settle:
+        from stt_button.live import settle as settle_take
+
+        return settle_take(recognizer, samples, cfg)
     from stt_button.live import LiveTake
 
-    take = LiveTake(recognizer, Uncleaned, cfg, slicer=slicer_for(cfg, settle))
+    take = LiveTake(recognizer, Uncleaned, cfg, slicer=slicer_for(cfg, False))
     piece = int(FEED_S * SAMPLE_RATE)
     for start in range(0, len(samples), piece):
         take.feed(samples[start:start + piece])

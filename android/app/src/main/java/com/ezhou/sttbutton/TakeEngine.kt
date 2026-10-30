@@ -23,6 +23,10 @@ class LiveResult(
     val correctionsKept: Int = 0,
     /** Cleans `Pipeline.untrustedClean` rejected for anything but drift, each inserted as heard instead. */
     val rejects: Int = 0,
+    /** The stop's whole-take decode: applied, same, edited, detached, or abandoned. Null when the take did not settle. */
+    val settle: String? = null,
+    val settleMs: Long = 0,
+    val settleWindows: Int = 0,
 )
 
 /** One line of the job log. */
@@ -57,6 +61,26 @@ class Decoded(
 class Cleaned(val text: String?, val rejected: String?, val inTokens: Int, val outTokens: Int, val ms: Long) : JobResult
 class Loaded(val ms: Long) : JobResult
 
+private class SettleWindow(
+    val fromSample: Int,
+    val toSample: Int,
+    val text: String,
+    val ms: Long,
+    val usedContext: Boolean,
+    val fellBack: Boolean,
+)
+
+private class Settled(val text: String, val windows: List<SettleWindow>, val generation: Int) : JobResult
+
+/** Prior slices after one slice is joined on, the slice's own words, and an edit of the previous slice's end. */
+private class SliceJoin(
+    val taken: List<String>,
+    val sliceText: String,
+    val endChanged: Boolean,
+    val endRemoved: Int,
+    val endPrefix: String,
+)
+
 /** Work the engine wants done. [run] is the only part that waits on a model, and is safe on another thread. */
 class Job internal constructor(
     internal val kind: Kind,
@@ -65,7 +89,7 @@ class Job internal constructor(
     internal val plan: CleanPlan? = null,
     private val body: () -> JobResult,
 ) {
-    internal enum class Kind { DECODE, CLEAN, LOAD }
+    internal enum class Kind { DECODE, CLEAN, LOAD, SETTLE }
 
     fun run(): JobResult = body()
 }
@@ -132,6 +156,11 @@ class TakeEngine(
     private var rejects = 0
     private var contextDecodes = 0
     private var contextFallbacks = 0
+    private var settleGeneration = 0
+    private var settleQueued = false
+    private var settleResult: String? = null
+    private var settleMs = 0L
+    private var settleWindows = 0
 
     @Volatile private var abandonSpoken: Int? = null
     private var timedLoadRequested = false
@@ -302,19 +331,25 @@ class TakeEngine(
         stopTailEnds.add(tail[1])
     }
 
-    /** The mic is open on this take again. A clean already in flight is not written when it returns. */
+    /** The mic is open on this take again. A clean in flight is not written when it returns, and a settle in flight is discarded when it returns. */
     fun resume() {
         if (!stopping) return
         stopping = false
         region.reopen()
         region.abandonFlight()
         silenceFrom = slicer.sampleCount
+        settleGeneration++
+        settleQueued = false
         flushProvisional()
     }
 
     fun next(): Job? {
         check(running == null) { "a job is still running" }
         nextSlice()?.let { return start(decodeJob(it)) }
+        if (stopping && !settleQueued && document is FieldDocument) {
+            settleQueued = true
+            return start(settleJob())
+        }
         return planJob()?.let(::start)
     }
 
@@ -325,6 +360,7 @@ class TakeEngine(
             Job.Kind.DECODE -> completeDecode(job, result as Decoded)
             Job.Kind.CLEAN -> completeClean(job, result as Cleaned)
             Job.Kind.LOAD -> completeLoad(job, result as Loaded)
+            Job.Kind.SETTLE -> completeSettle(result as Settled)
         }
     }
 
@@ -347,6 +383,7 @@ class TakeEngine(
             asrMs - stopAsrMs, cleanMs - stopCleanMs, inTokens, outTokens, idleCleans, idleHits,
             Pipeline.matchedCue(raw, cfg.selfCorrectionCues), slicer.sampleCount / (Slicer.SAMPLE_RATE / 1000).toLong(),
             contextDecodes, contextFallbacks, drifts, corrections, correctionsKept, rejects,
+            settleResult, settleMs, settleWindows,
         )
     }
 
@@ -430,31 +467,117 @@ class TakeEngine(
         return Pipeline.onlyTailFillers(own, cfg.tailFillerWords)
     }
 
+    private data class HeardSlice(val text: String, val mark: String?, val usedContext: Boolean, val fellBack: Boolean)
+
+    private fun hear(read: (Int, Int) -> FloatArray, start: Int, end: Int, withContext: Boolean, settle: Boolean): HeardSlice {
+        fun plain() = recognizer.recognize(RecognizeRequest(read(start, end), settle = settle)).text
+        if (!withContext) return HeardSlice(Pipeline.stripHidden(plain()), null, false, false)
+        val (audio, junctionS) = Pipeline.contextAudio(read, start, end, cfg.contextS)
+        val heard = recognizer.recognize(RecognizeRequest(audio, junctionS, settle))
+        if (heard.text.isEmpty()) return HeardSlice(Pipeline.stripHidden(plain()), null, true, true)
+        return HeardSlice(Pipeline.stripHidden(heard.text), heard.mark.orEmpty(), true, false)
+    }
+
     private fun decodeJob(slice: IntArray): Job {
         val withContext = texts.isNotEmpty()
         val moment = if (stopping) Moment.FINISH else Moment.SLICE
         return Job(Job.Kind.DECODE, moment, slice = slice) {
             val waited = waitMs(slice[1])
             val started = System.nanoTime()
-            fun plain() = recognizer.recognize(RecognizeRequest(samples(slice[0], slice[1]))).text
-            var text: String
-            var mark: String? = null
-            var fellBack = false
-            if (!withContext) {
-                text = plain()
-            } else {
-                val (audio, junctionS) = Pipeline.contextAudio(::samples, slice[0], slice[1], cfg.contextS)
-                val heard = recognizer.recognize(RecognizeRequest(audio, junctionS))
-                if (heard.text.isEmpty()) {
-                    fellBack = true
-                    text = plain()
-                } else {
-                    text = heard.text
-                    mark = heard.mark.orEmpty()
-                }
-            }
-            Decoded(Pipeline.stripHidden(text), mark, withContext, fellBack, elapsedMs(started), waited)
+            val heard = hear(::samples, slice[0], slice[1], withContext, settle = false)
+            Decoded(heard.text, heard.mark, heard.usedContext, heard.fellBack, elapsedMs(started), waited)
         }
+    }
+
+    private fun joinSlice(taken: List<String>, heard: String, incoming: String, mark: String?): SliceJoin {
+        val updated = taken.toMutableList()
+        val previous = updated.lastOrNull().orEmpty()
+        var sliceText = incoming
+        if (mark != null && previous.isNotEmpty()) {
+            val old = Pipeline.trailingMark(previous)
+            val settled = Pipeline.settledMark(old, mark)
+            updated[updated.lastIndex] = Pipeline.withoutTrailingMark(previous) + settled
+            sliceText = Pipeline.dropOverlap(heard, sliceText)
+            if (sliceText.isNotEmpty()) sliceText = Pipeline.continuing(sliceText, updated.last(), updated.last().length)
+            val changed = old != settled
+            return SliceJoin(updated, sliceText, changed, if (changed) old.length else 0, if (changed) settled else "")
+        }
+        if (previous.isNotEmpty() && sliceText.isNotEmpty()) {
+            val continued = Pipeline.continueFragment(previous, sliceText, heard)
+            sliceText = continued.second
+            if (continued.first != previous && previous.startsWith(continued.first)) {
+                updated[updated.lastIndex] = continued.first
+                return SliceJoin(updated, sliceText, true, previous.removePrefix(continued.first).length, "")
+            }
+        }
+        return SliceJoin(updated, sliceText, false, 0, "")
+    }
+
+    private fun settleJob(): Job {
+        val generation = settleGeneration
+        val pcm = slicer.copy(0, slicer.sampleCount)
+        return Job(Job.Kind.SETTLE, Moment.FINISH) {
+            val read = { from: Int, to: Int -> FloatArray(to - from) { pcm[from + it] / 32768f } }
+            val cutter = Slicer.forSettle(cfg)
+            val cuts = cutter.feed(pcm) + cutter.finish()
+            var taken = emptyList<String>()
+            val windows = mutableListOf<SettleWindow>()
+            for (cut in cuts) {
+                val started = System.nanoTime()
+                val heard = hear(read, cut[0], cut[1], taken.isNotEmpty(), settle = true)
+                val join = joinSlice(taken, Pipeline.joinSlices(taken), heard.text, heard.mark)
+                taken = join.taken
+                if (join.sliceText.isNotEmpty()) taken = taken + join.sliceText
+                windows += SettleWindow(cut[0], cut[1], heard.text, elapsedMs(started), heard.usedContext, heard.fellBack)
+            }
+            Settled(Pipeline.joinSlices(taken), windows, generation)
+        }
+    }
+
+    private fun completeSettle(settled: Settled) {
+        for (window in settled.windows) {
+            asrMs += window.ms
+            if (window.usedContext) contextDecodes++
+            if (window.fellBack) contextFallbacks++
+        }
+        val outcome = writeSettled(settled)
+        val logged = if (outcome == "abandoned") "abandoned" else "applied"
+        for (window in settled.windows) {
+            jobs(JobRecord(
+                "asr", "settle", window.ms, null, window.text, logged,
+                fromMs = samplesToMs(window.fromSample), toMs = samplesToMs(window.toSample),
+                context = window.usedContext,
+            ))
+        }
+        settleResult = outcome
+        settleMs = settled.windows.sumOf { it.ms }
+        settleWindows = settled.windows.size
+    }
+
+    private fun writeSettled(settled: Settled): String {
+        if (settled.generation != settleGeneration) return "abandoned"
+        if (document !is FieldDocument) return "detached"
+        if (editsInside > 0) return "edited"
+        val text = readText()
+        if (document !is FieldDocument) return "detached"
+        val from = textStart
+        val to = region.end
+        val before = if (from in 0..text.length) text.substring(0, from) else ""
+        val body = Pipeline.continuing(Pipeline.stripHidden(settled.text), before, from)
+        val current = if (from in 0..to && to <= text.length) text.substring(from, to) else null
+        if (body == current) return "same"
+        if (!replaceDocument(from, to, body)) {
+            detach()
+            return "detached"
+        }
+        region.appended(body.length - (to - from))
+        region.cleanedUntil(textStart)
+        val head = texts.take(attachedFrom)
+        texts.clear()
+        texts.addAll(head)
+        if (body.isNotEmpty()) texts += body
+        onText?.invoke(regionText())
+        return "applied"
     }
 
     private fun completeDecode(job: Job, decoded: Decoded) {
@@ -475,33 +598,26 @@ class TakeEngine(
         val text = readText()
         var from = region.end
         val heard = raw
-        val previous = texts.drop(attachedFrom).lastOrNull().orEmpty()
-        var sliceText = decoded.text
+        val owned = texts.drop(attachedFrom)
+        val previous = owned.lastOrNull().orEmpty()
+        val join = joinSlice(owned, heard, decoded.text, decoded.mark)
+        if (texts.size > attachedFrom) texts.subList(attachedFrom, texts.size).clear()
+        texts.addAll(join.taken)
+        var sliceText = join.sliceText
         var prefix = ""
         var replacing = false
-        if (decoded.mark != null && previous.isNotEmpty()) {
-            val old = Pipeline.trailingMark(previous)
-            val settled = Pipeline.settledMark(old, decoded.mark)
-            texts[texts.lastIndex] = Pipeline.withoutTrailingMark(previous) + settled
-            sliceText = Pipeline.dropOverlap(heard, sliceText)
-            if (sliceText.isNotEmpty()) sliceText = Pipeline.continuing(sliceText, texts.last(), texts.last().length)
-            val markStart = region.end - old.length
-            if (old != settled && markStart >= region.cleanEnd && text.startsWith(old, markStart)) {
-                from = markStart
-                prefix = settled
-                replacing = true
-            }
-        } else if (previous.isNotEmpty() && sliceText.isNotEmpty()) {
-            val continued = Pipeline.continueFragment(previous, sliceText, heard)
-            sliceText = continued.second
-            if (continued.first != previous && previous.startsWith(continued.first)) {
-                texts[texts.lastIndex] = continued.first
-                val removed = previous.removePrefix(continued.first)
-                val at = region.end - removed.length
-                if (at >= region.cleanEnd && at <= text.length && text.startsWith(removed, at)) {
+        if (join.endChanged) {
+            val at = region.end - join.endRemoved
+            val removed = previous.takeLast(join.endRemoved)
+            if (decoded.mark != null && previous.isNotEmpty()) {
+                if (at >= region.cleanEnd && text.startsWith(removed, at)) {
                     from = at
+                    prefix = join.endPrefix
                     replacing = true
                 }
+            } else if (at >= region.cleanEnd && at <= text.length && text.startsWith(removed, at)) {
+                from = at
+                replacing = true
             }
         }
         val opener = when {

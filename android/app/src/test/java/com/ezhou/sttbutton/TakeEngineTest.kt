@@ -82,7 +82,7 @@ class TakeEngineTest {
         val cfg: PipelineConfig,
         recognizer: Recognizer,
         val cleaner: Cleaner = MarkingCleaner(),
-        val doc: BufferDocument = BufferDocument(),
+        val doc: Document = BufferDocument(),
         val slicer: Slicer = Slicer.fromConfig(cfg),
         prepare: (String) -> Unit = {},
         pauseOpen: Boolean = true,
@@ -505,7 +505,7 @@ class TakeEngineTest {
         rig.engine.complete(decode, decode.run())
         val job = rig.engine.next()!!
 
-        rig.doc.userEdit(0, 2, "xx")
+        (rig.doc as BufferDocument).userEdit(0, 2, "xx")
         rig.engine.complete(job, job.run())
         rig.driver.drain()
         val result = rig.engine.result()
@@ -522,7 +522,7 @@ class TakeEngineTest {
         val clean = rig.engine.next()!!
         rig.engine.complete(clean, clean.run())
 
-        rig.doc.userEdit(0, 2, "Q")
+        (rig.doc as BufferDocument).userEdit(0, 2, "Q")
         rig.driver.drain()
         val result = rig.engine.result()
 
@@ -536,7 +536,7 @@ class TakeEngineTest {
         rig.slicer.feed(audio(3.0, 3.0))
         val decode = rig.engine.next()!!
         rig.engine.complete(decode, decode.run())
-        rig.doc.userEdit(rig.doc.read()!!.text.length, rig.doc.read()!!.text.length, " typed words here")
+        (rig.doc as BufferDocument).userEdit(rig.doc.read()!!.text.length, rig.doc.read()!!.text.length, " typed words here")
         rig.engine.stop()
         rig.driver.drain()
         val result = rig.engine.result()
@@ -888,5 +888,158 @@ class TakeEngineTest {
             release.countDown()
             models.close()
         }
+    }
+
+    @Test
+    fun given_a_draft_that_repeats_a_word_at_a_join_when_the_take_stops_then_the_field_ends_as_the_settled_text() {
+        val editor = FakeEditor("")
+        val doc = FieldDocument(editor).also { check(it.sync()) }
+        var plain = 0
+        val recognizer = object : Recognizer {
+            override fun recognize(request: RecognizeRequest): Recognized {
+                if (request.settle) return Recognized("one two three four five rest", null)
+                if (request.junctionS != null) return Recognized("", null)
+                plain++
+                val text = if (plain == 1) "one two three four five" else if (plain == 2) "one two three four five rest" else ""
+                return Recognized(text, null)
+            }
+        }
+        val rig = Rig(scriptConfig(JSONObject().put("chunk_min_tokens", 15).put("skip_max_words", 40)), recognizer, doc = doc)
+        rig.feed(audio(3.0, 2.0))
+        rig.engine.setProvisional("preview words")
+        assertTrue(editor.text, editor.text.contains("preview"))
+        rig.feed(audio(3.0, 0.0))
+
+        val result = rig.finish()
+
+        assertEquals("one two three four five rest", result.raw)
+        assertEquals("one two three four five rest", editor.text)
+        assertFalse(editor.text, editor.text.contains("five five"))
+        assertFalse(editor.text, editor.text.contains("preview"))
+        assertEquals("applied", result.settle)
+    }
+
+    @Test
+    fun given_a_45_s_take_when_it_stops_then_it_settles_in_two_windows() {
+        val editor = FakeEditor("")
+        val doc = FieldDocument(editor).also { check(it.sync()) }
+        val recognizer = object : Recognizer {
+            override fun recognize(request: RecognizeRequest): Recognized {
+                if (request.settle) Thread.sleep(2)
+                return Recognized("word", if (request.junctionS == null) null else ".")
+            }
+        }
+        val rig = Rig(cfg, recognizer, doc = doc)
+        rig.feed(ShortArray(45 * Slicer.SAMPLE_RATE))
+
+        val result = rig.finish()
+
+        val windows = rig.records.filter { it.moment == "settle" }
+        assertEquals(2, windows.size)
+        assertEquals(0L, windows[0].fromMs)
+        assertEquals(25050L, windows[0].toMs)
+        assertEquals(false, windows[0].context)
+        assertEquals(windows[0].toMs, windows[1].fromMs)
+        assertEquals(45000L, windows[1].toMs)
+        assertEquals(true, windows[1].context)
+        assertTrue(windows.all { it.outcome == "applied" })
+        assertEquals("same", result.settle)
+        assertEquals(2, result.settleWindows)
+        assertEquals(windows.sumOf { it.ms }, result.settleMs)
+        assertTrue(result.settleMs >= 2)
+        assertTrue(result.asrMsAfterStop >= result.settleMs)
+    }
+
+    @Test
+    fun given_an_edit_inside_the_region_before_the_stop_when_the_take_settles_then_the_field_stays_as_typed() {
+        val editor = FakeEditor("")
+        val doc = FieldDocument(editor).also { check(it.sync()) }
+        var plain = 0
+        val recognizer = object : Recognizer {
+            override fun recognize(request: RecognizeRequest): Recognized {
+                if (request.settle) return Recognized("SETTLED PHRASE HERE NOW", null)
+                if (request.junctionS == null && plain++ == 0) return Recognized("draft words today", null)
+                return Recognized("", null)
+            }
+        }
+        val rig = Rig(cfg, recognizer, doc = doc)
+        rig.feed(audio(3.0, 2.0))
+        val at = editor.text.indexOf("words")
+        assertTrue(editor.text, at > 0)
+        editor.type(at, 0, "Q")
+        doc.sync()
+
+        val result = rig.finish()
+
+        assertTrue(editor.text, editor.text.contains("Q"))
+        assertFalse(editor.text, editor.text.contains("SETTLED"))
+        assertEquals("edited", result.settle)
+        val windows = rig.records.filter { it.moment == "settle" }
+        assertTrue(windows.isNotEmpty())
+        assertTrue(windows.all { it.outcome == "applied" })
+    }
+
+    @Test
+    fun given_a_resume_during_the_settle_when_the_take_stops_again_then_the_whole_take_settles() {
+        val editor = FakeEditor("")
+        val doc = FieldDocument(editor).also { check(it.sync()) }
+        val recognizer = object : Recognizer {
+            override fun recognize(request: RecognizeRequest): Recognized {
+                if (request.settle) {
+                    Thread.sleep(2)
+                    return Recognized("settled ${request.samples.size}", null)
+                }
+                return Recognized("hi there", if (request.junctionS == null) null else "")
+            }
+        }
+        val rig = Rig(cfg, recognizer, doc = doc)
+        rig.feed(audio(3.0, 0.0))
+        rig.engine.markStop()
+        rig.engine.stop()
+        var settling: Job? = null
+        while (settling == null) {
+            val job = rig.engine.next() ?: error("settle was not planned")
+            if (job.kind == Job.Kind.SETTLE) settling = job else rig.engine.complete(job, job.run())
+        }
+        val before = editor.text
+        rig.engine.resume()
+        rig.engine.complete(settling, settling.run())
+
+        assertEquals(before, editor.text)
+        assertEquals("abandoned", rig.engine.result().settle)
+        val abandoned = rig.records.single { it.moment == "settle" }
+        assertEquals("abandoned", abandoned.outcome)
+        rig.feed(audio(3.0, 0.0))
+        val result = rig.finish()
+
+        val applied = rig.records.filter { it.moment == "settle" && it.outcome == "applied" }
+        assertEquals(1, applied.size)
+        assertTrue(applied[0].toMs!! > abandoned.toMs!!)
+        assertEquals(rig.slicer.sampleCount.toLong() / (Slicer.SAMPLE_RATE / 1000), applied[0].toMs)
+        assertEquals("applied", result.settle)
+        assertTrue(editor.text, editor.text.contains("settled"))
+        assertTrue(result.asrMsAfterStop >= result.settleMs)
+    }
+
+    @Test
+    fun given_a_detached_take_or_a_buffer_take_when_it_stops_then_it_does_not_settle() {
+        val editor = FakeEditor("")
+        val doc = FieldDocument(editor).also { check(it.sync()) }
+        val field = Rig(cfg, object : Recognizer {
+            override fun recognize(request: RecognizeRequest) = Recognized("hello there", null)
+        }, doc = doc)
+        field.feed(audio(3.0, 0.0))
+        field.engine.detach()
+        val detached = field.finish()
+        assertNull(detached.settle)
+        assertEquals(0, detached.settleWindows)
+        assertTrue(field.records.none { it.moment == "settle" })
+
+        val buffer = Rig(cfg, ScriptedRecognizer("hello there"))
+        buffer.feed(audio(3.0, 0.0))
+        val held = buffer.finish()
+        assertNull(held.settle)
+        assertEquals(0, held.settleWindows)
+        assertTrue(buffer.records.none { it.moment == "settle" })
     }
 }

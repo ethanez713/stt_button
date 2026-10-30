@@ -9,10 +9,17 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class RevisePolicyTest {
-    /** A decode with the speech before it settles the junction with [mark]. */
+    /** A decode with the speech before it settles the junction with [mark]. A settle window repeats the draft so far. */
     private class Heard(vararg texts: String, private val mark: String = ".") : Recognizer {
         private val queue = ArrayDeque(texts.toList())
-        override fun recognize(request: RecognizeRequest) = Recognized(queue.removeFirst(), if (request.junctionS == null) null else mark)
+        private val drafted = mutableListOf<String>()
+
+        override fun recognize(request: RecognizeRequest): Recognized {
+            if (request.settle) return Recognized(drafted.joinToString(" "), if (request.junctionS == null) null else mark)
+            val text = queue.removeFirst()
+            drafted += text
+            return Recognized(text, if (request.junctionS == null) null else mark)
+        }
     }
 
     /** Upper-cases; a text of several chunks (which holds a paragraph break) gets ` REVISED` after it. */
@@ -459,7 +466,7 @@ class RevisePolicyTest {
         rig.feed(audio(3.0, 0.0))
         rig.finish()
 
-        val asrs = rig.records.filter { it.kind == "asr" }
+        val asrs = rig.records.filter { it.kind == "asr" && it.moment != "settle" }
         assertEquals(2, asrs.size)
         assertTrue(asrs[1].fromMs!! >= asrs[0].toMs!!)
         val whole = rig.clean.last { it.scope == "region" }

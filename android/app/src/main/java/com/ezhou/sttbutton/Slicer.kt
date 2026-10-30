@@ -171,5 +171,9 @@ class Slicer(
             val search = min(cfg.sliceSearchS, hard - 1)
             return Slicer(hard, search, cfg.pauseS, cfg.sliceMinS, cfg.pauseMarginDb, cfg.stopSilenceDbfs, cfg.fieldCutPauseS)
         }
+
+        /** No pause cut: only the hard cut at [PipelineConfig.sliceMaxS], where a stopped take is decoded again. */
+        fun forSettle(cfg: PipelineConfig) =
+            Slicer(cfg.sliceMaxS, cfg.sliceSearchS, null, cfg.sliceMinS, cfg.pauseMarginDb, cfg.stopSilenceDbfs)
     }
 }

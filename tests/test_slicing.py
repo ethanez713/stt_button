@@ -205,3 +205,33 @@ def test_buffer_factory_keeps_pause_s_and_slice_max_s():
     got = asr.Slicer.from_config(cfg)
     assert got.feed(long) + got.finish() == bounds
     assert 8 * SR < bounds[0][1] <= 30 * SR
+
+
+def test_live_settle_on_a_fake_recognizer_cuts_only_at_the_hard_cut():
+    from stt_button import config
+    from stt_button.live import settle
+
+    cfg = config.load()
+    audio = speech_like(45, [(10.0, 12.0)])
+    cutter = asr.Slicer.for_settle(cfg)
+    bounds = cutter.feed(audio) + cutter.finish()
+    seen = []
+
+    class Fake:
+        def recognize(self, samples):
+            seen.append(("plain", len(samples)))
+            return "word"
+
+        def recognize_after(self, samples, junction_s):
+            seen.append(("after", len(samples), junction_s))
+            return ".", "word"
+
+    settle(Fake(), audio, cfg)
+
+    assert len(bounds) == len(seen) == 2
+    assert seen[0] == ("plain", bounds[0][1] - bounds[0][0])
+    context, junction = asr.context_audio(audio, bounds[1][0], bounds[1][1], cfg["context_s"])
+    assert seen[1] == ("after", len(context), junction)
+    assert bounds[0][1] > 12 * SR
+    field = asr.Slicer.from_config_for_field(cfg)
+    assert any(end <= 12 * SR for _, end in field.feed(audio))

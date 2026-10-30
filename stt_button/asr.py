@@ -74,6 +74,11 @@ class Slicer:
         return cls(hard, min(cfg["slice_search_s"], hard - 1), cfg["pause_s"], cfg["slice_min_s"],
                    cfg["pause_margin_db"], cut_pause_s=cfg["field_cut_pause_s"])
 
+    @classmethod
+    def for_settle(cls, cfg: dict) -> "Slicer":
+        """Windows for a stopped take: no pause cut, only the hard cut at slice_max_s."""
+        return cls(cfg["slice_max_s"], cfg["slice_search_s"], None, cfg["slice_min_s"], cfg["pause_margin_db"])
+
     @property
     def paused(self) -> bool:
         """Speech has been heard and the last pause_s of audio is silent."""

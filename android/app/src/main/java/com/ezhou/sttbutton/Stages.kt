@@ -1,7 +1,7 @@
 package com.ezhou.sttbutton
 
-/** One decode: [junctionS] is where the slice starts inside context audio, null for a plain decode. */
-class RecognizeRequest(val samples: FloatArray, val junctionS: Double? = null)
+/** One decode: [junctionS] is where the slice starts inside context audio, null for a plain decode. [settle] is a window of the stop's whole-take pass. */
+class RecognizeRequest(val samples: FloatArray, val junctionS: Double? = null, val settle: Boolean = false)
 
 /** The decoded words; [mark] is the closing punctuation the recognizer gave the context before a junction. */
 class Recognized(val text: String, val mark: String? = null)

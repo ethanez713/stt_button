@@ -29,6 +29,11 @@ class TakeRegion(start: Int = 0, cleanEnd: Int = start, end: Int = cleanEnd) {
         cleanEnd = (start + length).coerceAtMost(end)
     }
 
+    /** Nothing from [at] on has been cleaned. A settle writes the take raw again, and the cleans after it cover that text. */
+    fun cleanedUntil(at: Int) {
+        cleanEnd = at.coerceIn(start, end)
+    }
+
     fun flightOver(from: Int, to: Int) {
         flight = Flight(from, to)
     }
