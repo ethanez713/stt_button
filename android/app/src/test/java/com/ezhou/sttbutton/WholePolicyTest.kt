@@ -136,7 +136,6 @@ class WholePolicyTest {
 
         val clean = rig.clean.single()
         assertEquals("finish", clean.moment)
-        assertEquals("chunk", clean.scope)
         assertEquals("applied", clean.outcome)
         assertTrue(clean.input!!, clean.input!!.contains("settled window"))
         assertFalse(clean.input!!, clean.input!!.contains("draft"))
@@ -158,7 +157,7 @@ class WholePolicyTest {
         rig.finish()
 
         assertEquals(listOf(first, second), rig.clean.map { it.input })
-        assertTrue(rig.clean.all { it.moment == "finish" && it.scope == "chunk" && it.outcome == "applied" })
+        assertTrue(rig.clean.all { it.moment == "finish" && it.outcome == "applied" })
         assertEquals(first.uppercase() + "\n\n" + second.uppercase(), editor.text)
     }
 
@@ -241,7 +240,6 @@ class WholePolicyTest {
         assertTrue(editor.text, editor.text.contains("a1"))
         assertFalse(editor.text, editor.text.contains("A1"))
         assertEquals("dropped", rig.clean.single().outcome)
-        assertEquals("chunk", rig.clean.single().scope)
         assertNull(rig.engine.next())
     }
 }

@@ -519,7 +519,7 @@ class TakeController(
         log.write("job", takeId, "kind" to record.kind, "moment" to record.moment, "ms" to record.ms,
             "in" to record.input, "out" to record.output, "outcome" to record.outcome,
             "in_tokens" to record.inTokens, "out_tokens" to record.outTokens,
-            "from_ms" to record.fromMs, "to_ms" to record.toMs, "context" to record.context, "scope" to record.scope,
+            "from_ms" to record.fromMs, "to_ms" to record.toMs, "context" to record.context,
             "reason" to record.reason, "wait_ms" to record.waitMs, "lag_ms" to record.lagMs)
     }
 

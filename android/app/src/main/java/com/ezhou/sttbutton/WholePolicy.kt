@@ -11,7 +11,7 @@ class WholePolicy(private val cfg: PipelineConfig) : CleanPolicy {
 
     override fun next(view: PolicyView, moment: Moment): CleanPlan? {
         if (moment != Moment.FINISH) return null
-        if (view.region.editsInside > 0) return null
+        if (view.editsInside > 0) return null
         if (!view.cleanedAny && Pipeline.skipsCleaner(view.tail, cfg)) {
             return if (view.tail.isNotBlank()) {
                 CleanPlan(view.tailStart, view.tailStart + view.tail.length, view.tail, local = true)

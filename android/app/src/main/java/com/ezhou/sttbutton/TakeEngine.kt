@@ -42,7 +42,6 @@ class JobRecord(
     val fromMs: Long? = null,
     val toMs: Long? = null,
     val context: Boolean? = null,
-    val scope: String? = null,
     /** Why a clean's output was not trusted, as `Pipeline.untrustedClean` names it. */
     val reason: String? = null,
     val waitMs: Long? = null,
@@ -133,9 +132,7 @@ class TakeEngine(
     private var region = TakeRegion(document.read()?.selectionEnd ?: 0)
     private var attachedFrom = 0
     private var lead = 0
-    private var cleans = 0
     private var editsInside = 0
-    private var revisionDropped = false
     private var previousInline = false
     private val texts = mutableListOf<String>()
     private val kept = HashMap<String, Kept>()
@@ -281,9 +278,7 @@ class TakeEngine(
         region = TakeRegion()
         attachedFrom = texts.size
         lead = 0
-        cleans = 0
         editsInside = 0
-        revisionDropped = false
         previousInline = false
         kept.clear()
         onDetached?.invoke()
@@ -419,7 +414,7 @@ class TakeEngine(
                 policy.next(
                     PolicyView(
                         tail, tailStart, chunks.isNotEmpty() || region.cleanEnd > region.start + lead, kept.keys.toSet(), counter(),
-                        RegionFacts(text.substring(region.start + lead, region.end.coerceAtMost(text.length)), region.start + lead, cleans, editsInside, revisionDropped),
+                        editsInside,
                     ),
                     moment,
                 )
@@ -434,24 +429,15 @@ class TakeEngine(
                 moment = momentNow() ?: return null
                 continue
             }
-            val heard = reviseFromRaw(plan)
             when {
-                heard.local -> applyLocal(heard)
-                !heard.speculative && heard.target in kept -> applyKept(heard)
-                else -> return cleanJob(heard, moment)
+                plan.local -> applyLocal(plan)
+                !plan.speculative && plan.target in kept -> applyKept(plan)
+                else -> return cleanJob(plan, moment)
             }
         }
     }
 
     private fun counter(): (String) -> Int = cleaner.tokenCounter ?: { throw NeedsCleaner() }
-
-    /** A revision cleans the words that were heard. The field already holds each slice's own punctuation. */
-    private fun reviseFromRaw(plan: CleanPlan): CleanPlan {
-        if (!plan.region) return plan
-        val heard = raw.trim()
-        if (heard.isEmpty() || counter()(heard) > cfg.chunkMaxTokens) return plan
-        return CleanPlan(plan.from, plan.to, heard, plan.abandonable, plan.speculative, plan.local, plan.spaceAfter, region = true)
-    }
 
     private fun loadJob(moment: Moment) = start(Job(Job.Kind.LOAD, moment) {
         val started = nowMs()
@@ -687,7 +673,7 @@ class TakeEngine(
         val record = { outcome: String, output: String? ->
             jobs(JobRecord("clean", job.moment.name.lowercase(), cleaned.ms, plan.target, output, outcome,
                 cleaned.inTokens.takeIf { cleaned.text != null }, cleaned.outTokens.takeIf { cleaned.text != null },
-                scope = if (plan.region) "region" else "chunk", reason = cleaned.rejected))
+                reason = cleaned.rejected))
         }
         if (cleaned.text != null) {
             inTokens += cleaned.inTokens
@@ -698,7 +684,6 @@ class TakeEngine(
             flight?.abandoned == true -> {
                 val dirty = flight.dirty
                 region.dropFlight()
-                if (plan.region && dirty) revisionDropped = true
                 record("abandoned", cleaned.text)
             }
             cleaned.text == null && (plan.abandonable || plan.speculative) -> {
@@ -712,7 +697,6 @@ class TakeEngine(
             }
             flight == null || flight.dirty -> {
                 region.dropFlight()
-                if (plan.region) revisionDropped = true
                 record("dropped", cleaned.text)
             }
             else -> {
@@ -740,23 +724,13 @@ class TakeEngine(
     /** Writes [output] over the flight, set off from the cleaned text before it as `Pipeline.joinCleaned` sets chunks off. */
     private fun apply(from: Int, to: Int, output: String, plan: CleanPlan) {
         val text = readText()
-        if (plan.region) {
-            val opened = Pipeline.continuing(output, text, from)
-            replaceDocument(from, to, opened)
-            region.flightReplaced(opened.length)
-            cleans = 1
-            editsInside = 0
-            onText?.invoke(regionText())
-            return
-        }
         val target = plan.target
         val cleanedBefore = text.substring(region.start + lead, region.cleanEnd.coerceAtLeast(region.start + lead))
         val unit = Pipeline.isCorrectionUnit(target, cfg.selfCorrectionCues)
         val separator = Pipeline.joinSeparator(cleanedBefore, output, previousInline, unit)
-        previousInline = unit || plan.spaceAfter
+        previousInline = unit
         chunks += target
         outputs += output
-        cleans++
         val written = separator + Pipeline.continuing(output, text.substring(0, from) + separator, from + separator.length)
         replaceDocument(from, to, written)
         region.flightReplaced(written.length)

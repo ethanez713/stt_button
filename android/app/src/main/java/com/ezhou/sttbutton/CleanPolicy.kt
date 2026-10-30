@@ -6,7 +6,7 @@ enum class Moment { SLICE, PAUSE, FINISH }
 /**
  * What a policy sees of a take's region: the uncleaned [tail] starting at document offset [tailStart],
  * whether any of the region has been cleaned, the [kept] targets a speculative clean has already answered,
- * and a token counter.
+ * a token counter, and how many edits the user made inside the region.
  */
 class PolicyView(
     val tail: String,
@@ -14,32 +14,13 @@ class PolicyView(
     val cleanedAny: Boolean,
     val kept: Set<String>,
     val countTokens: (String) -> Int,
-    val region: RegionFacts = RegionFacts.NONE,
+    val editsInside: Int = 0,
 )
-
-/**
- * What a policy may want to know of the whole region besides its tail: its text from where the take's own
- * words begin, how many cleans wrote it, how many edits the user made inside it, and whether a revision of
- * it was dropped for an edit.
- */
-class RegionFacts(
-    val text: String,
-    val start: Int,
-    val cleans: Int,
-    val editsInside: Int,
-    val revisionDropped: Boolean,
-) {
-    companion object {
-        val NONE = RegionFacts("", 0, 0, 0, false)
-    }
-}
 
 /**
  * A stretch `[from, to)` of the document to clean. A speculative plan's output is set aside under [target]
  * and not written; a later plan over the same text completes from it. An [abandonable] plan is cancelled when
- * speech resumes. A [local] plan needs no model: the stretch becomes `Spoken.convert(target)`. A plan with
- * [spaceAfter] joins what follows its text by a space and not by the paragraph break chunks take; a [region]
- * plan cleans the whole region again, as a revision.
+ * speech resumes. A [local] plan needs no model: the stretch becomes `Spoken.convert(target)`.
  */
 class CleanPlan(
     val from: Int,
@@ -48,8 +29,6 @@ class CleanPlan(
     val abandonable: Boolean = false,
     val speculative: Boolean = false,
     val local: Boolean = false,
-    val spaceAfter: Boolean = false,
-    val region: Boolean = false,
 )
 
 /** Decides what is cleaned when; the engine does the cleaning and the writing. */
