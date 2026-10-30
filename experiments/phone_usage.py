@@ -226,6 +226,25 @@ def preview_timing(lines: list[dict]) -> list[str]:
     return out
 
 
+def settle_table(lines: list[dict]) -> list[str]:
+    """What the stop's settle did to field takes: how many of each `settle` outcome, the median and p90 of
+    `settle_ms` and `stop_to_insert_ms` over the takes that settled, and their median `settle_windows`."""
+    inserts = [r for r in lines if r.get("event") == "insert" and r.get("settle")]
+    if not inserts:
+        return []
+    outcomes = Counter(r["settle"] for r in inserts)
+    settled = [r for r in inserts if r["settle"] in ("applied", "same")]
+    took = [r["settle_ms"] for r in settled if _number(r.get("settle_ms"))]
+    stops = [r["stop_to_insert_ms"] for r in settled if _number(r.get("stop_to_insert_ms"))]
+    windows = [r["settle_windows"] for r in settled if _number(r.get("settle_windows"))]
+    return [
+        "\nsettle: " + ", ".join(f"{k} {n}" for k, n in outcomes.most_common()),
+        f"  settle_ms median {fmt(median(took))} p90 {fmt(percentile(took, 0.9))} over {len(took)}; "
+        f"stop_to_insert_ms median {fmt(median(stops))} p90 {fmt(percentile(stops, 0.9))}; "
+        f"median settle_windows {fmt(median(windows))}",
+    ]
+
+
 def field_path(lines: list[dict]) -> list[str]:
     """Takes written into their field as they were heard: per `insert_path`, how many, the median writes and how
     many waited for typing; takes the field ended; and the revisions at the stop from the `job` lines."""
@@ -320,6 +339,7 @@ def summarize(lines: list[dict], capacity_mah: float = 5000) -> str:
     out.extend(field_reads(lines))
     out.extend(field_path(lines))
     out.extend(preview_timing(lines))
+    out.extend(settle_table(lines))
     out.extend(lag_table(lines))
 
     exits = Counter(line.get("reason") for line in lines if line.get("event") == "exit")

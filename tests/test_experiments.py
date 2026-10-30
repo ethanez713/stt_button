@@ -304,6 +304,22 @@ class TestPhoneUsage:
         assert "ladder: first_text_ms median 2000 p90 2000 over 1, median provisional_writes 0" in report
         assert "preview:" not in phone_usage.summarize([self.insert(1, insert_path="field")])
 
+    def test_the_settle_table_counts_outcomes_and_times_the_takes_that_settled(self):
+        from experiments import phone_usage
+        lines = [
+            self.insert(1, insert_path="field", settle="applied", settle_ms=800, settle_windows=1, stop_to_insert_ms=2000),
+            self.insert(2, insert_path="field", settle="same", settle_ms=1200, settle_windows=2, stop_to_insert_ms=3000),
+            self.insert(3, insert_path="field", settle="edited", settle_ms=None, settle_windows=0, stop_to_insert_ms=100),
+            self.insert(4, insert_path="ladder", settle=None),
+        ]
+        report = phone_usage.summarize(lines)
+        assert "settle: applied 1, same 1, edited 1" in report
+        assert "settle_ms median 1000 p90 1200 over 2; stop_to_insert_ms median 2500 p90 3000; median settle_windows 2" in report
+
+    def test_a_report_of_takes_from_before_the_settle_has_no_settle_table(self):
+        from experiments import phone_usage
+        assert "settle:" not in phone_usage.summarize([self.insert(1, insert_path="field")])
+
     def test_a_report_of_takes_from_before_the_field_path_has_no_field_path_table(self):
         from experiments import phone_usage
         assert "field path" not in phone_usage.summarize([self.insert(1)])
