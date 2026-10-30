@@ -348,7 +348,8 @@ class TakeEngine(
         nextSlice()?.let { return start(decodeJob(it)) }
         if (stopping && !settleQueued && document is FieldDocument) {
             settleQueued = true
-            return start(settleJob())
+            if (editsInside == 0) return start(settleJob())
+            settleResult = "edited"
         }
         return planJob()?.let(::start)
     }
@@ -541,7 +542,7 @@ class TakeEngine(
             if (window.fellBack) contextFallbacks++
         }
         val outcome = writeSettled(settled)
-        val logged = if (outcome == "abandoned") "abandoned" else "applied"
+        val logged = if (outcome == "same") "applied" else outcome
         for (window in settled.windows) {
             jobs(JobRecord(
                 "asr", "settle", window.ms, null, window.text, logged,

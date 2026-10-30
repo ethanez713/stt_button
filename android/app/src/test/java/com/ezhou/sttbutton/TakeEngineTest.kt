@@ -974,9 +974,7 @@ class TakeEngineTest {
         assertTrue(editor.text, editor.text.contains("Q"))
         assertFalse(editor.text, editor.text.contains("SETTLED"))
         assertEquals("edited", result.settle)
-        val windows = rig.records.filter { it.moment == "settle" }
-        assertTrue(windows.isNotEmpty())
-        assertTrue(windows.all { it.outcome == "applied" })
+        assertTrue(rig.records.none { it.moment == "settle" })
     }
 
     @Test
