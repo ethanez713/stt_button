@@ -1468,6 +1468,10 @@
     [
      "",
      "."
+    ],
+    [
+     "",
+     "."
     ]
    ],
    "cfg": {
@@ -8663,35 +8667,19 @@
  "context_audio": [
   {
    "samples": 160000,
-   "speech_before": 64000,
-   "speech_after": 128000,
+   "start": 64000,
    "end": 160000,
    "context_s": 2,
-   "squeeze_s": 0.2,
-   "length": 68800,
-   "first": 32000,
-   "last": 159999,
-   "junction_s": 2.2
-  },
-  {
-   "samples": 160000,
-   "speech_before": 64000,
-   "speech_after": 128000,
-   "end": 160000,
-   "context_s": 2,
-   "squeeze_s": null,
    "length": 128000,
    "first": 32000,
    "last": 159999,
-   "junction_s": 5.9
+   "junction_s": 2.0
   },
   {
    "samples": 160000,
-   "speech_before": 16000,
-   "speech_after": 16800,
+   "start": 16000,
    "end": 96000,
    "context_s": 4,
-   "squeeze_s": 0.2,
    "length": 96000,
    "first": 0,
    "last": 95999,
@@ -8699,15 +8687,55 @@
   },
   {
    "samples": 160000,
-   "speech_before": 64000,
-   "speech_after": 67200,
-   "end": 144000,
+   "start": 0,
+   "end": 80000,
    "context_s": 4,
-   "squeeze_s": 0.2,
-   "length": 144000,
+   "length": 80000,
    "first": 0,
+   "last": 79999,
+   "junction_s": 0.0
+  },
+  {
+   "samples": 160000,
+   "start": 64000,
+   "end": 144000,
+   "context_s": 2.5,
+   "length": 120000,
+   "first": 24000,
    "last": 143999,
-   "junction_s": 4.1
+   "junction_s": 2.5
+  }
+ ],
+ "overlap": [
+  {
+   "previous": "of using",
+   "next": "using an MIT",
+   "text": "an MIT"
+  },
+  {
+   "previous": "from my",
+   "next": "from my work",
+   "text": "work"
+  },
+  {
+   "previous": "call",
+   "next": "Call both of them",
+   "text": "both of them"
+  },
+  {
+   "previous": "hello world",
+   "next": "something else",
+   "text": "something else"
+  },
+  {
+   "previous": "one two three four five",
+   "next": "one two three four five rest",
+   "text": "five rest"
+  },
+  {
+   "previous": "the license?",
+   "next": "License terms",
+   "text": "terms"
   }
  ],
  "settled_mark": [

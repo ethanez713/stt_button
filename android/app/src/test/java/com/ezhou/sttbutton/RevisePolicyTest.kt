@@ -284,7 +284,7 @@ class RevisePolicyTest {
     @Test
     fun given_a_region_cleaned_twice_when_the_user_edits_it_before_the_finish_then_it_is_not_revised() {
         val editor = FakeEditor("")
-        val (doc, rig) = rigOver(editor, config(), Upper(), labelled("a", 3), "")
+        val (doc, rig) = rigOver(editor, config(), Upper(), labelled("a", 3), "", "")
         rig.feed(audio(3.0, 3.0))
 
         editor.type(2, 0, "zz")

@@ -169,10 +169,10 @@ def test_given_a_three_slice_take_when_fed_then_chunks_are_cleaned_before_the_st
     take.mark_stop()
     result = take.finish()
 
-    assert len(cleaner.calls) == 3
-    assert result.chunks == 3 and result.clean_mode == "chunks"
+    assert len(cleaner.calls) == 4
+    assert result.chunks == 4 and result.clean_mode == "chunks"
     assert result.cleaned == trim_message_end("\n\n".join(c.upper() for c in cleaner.calls))
-    assert result.raw == " ".join((slices[0][:-1], slices[1][:-1], slices[2]))
+    assert result.raw == " ".join(slices)
 
 
 def test_given_a_five_word_take_when_finished_then_it_is_raw_and_the_cleaner_is_never_asked_for():
@@ -205,7 +205,7 @@ def idle_take(cleaner, *texts):
 
 def test_given_a_pause_when_idle_then_the_stop_finds_the_remainder_already_cleaned():
     cleaner = UppercaseCleaner()
-    take = idle_take(cleaner, labelled("a", 3), "")
+    take = idle_take(cleaner, labelled("a", 3), "", "")
     assert cleaner.calls == [" ".join(labelled("a", 3).split(" ")[:18])]
 
     assert take.idle_step(lambda: np.zeros(0, dtype=np.float32))

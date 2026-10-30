@@ -90,7 +90,7 @@ class FieldTakeTest {
     @Test
     fun given_the_field_gone_mid_take_when_the_rest_is_heard_then_it_is_kept_apart_and_nothing_more_is_written_to_the_field() {
         val clock = Clock()
-        val rig = Rig(FakeEditor(""), clock, cfg, words("a"), words("b"), "")
+        val rig = Rig(FakeEditor(""), clock, cfg, words("a"), words("b"), "", "")
         rig.decodeFirstSlice()
         val written = rig.editor.text
         val writes = rig.editor.writes

@@ -138,15 +138,24 @@ class PipelineVectorsTest {
     @Test
     fun given_context_audio_vectors_when_built_then_length_ends_and_junction_match_the_host() {
         for (case in Fixtures.objects(Fixtures.vectors.getJSONArray("context_audio"))) {
-            val squeeze = if (case.isNull("squeeze_s")) null else case.getDouble("squeeze_s")
             val (audio, junction) = Pipeline.contextAudio(
-                { from, to -> FloatArray(to - from) { (from + it).toFloat() } }, case.getInt("speech_before"),
-                case.getInt("speech_after"), case.getInt("end"), case.getDouble("context_s"), squeeze,
+                { from, to -> FloatArray(to - from) { (from + it).toFloat() } },
+                case.getInt("start"), case.getInt("end"), case.getDouble("context_s"),
             )
             assertEquals(case.getInt("length"), audio.size)
             assertEquals(case.getInt("first"), audio.first().toInt())
             assertEquals(case.getInt("last"), audio.last().toInt())
             assertEquals(case.getDouble("junction_s"), junction, 1e-9)
+        }
+    }
+
+    @Test
+    fun given_overlap_vectors_when_dropped_then_the_opening_run_matches_the_host() {
+        for (case in Fixtures.objects(Fixtures.vectors.getJSONArray("overlap"))) {
+            assertEquals(
+                case.getString("previous") + "|" + case.getString("next"), case.getString("text"),
+                Pipeline.dropOverlap(case.getString("previous"), case.getString("next")),
+            )
         }
     }
 
@@ -256,6 +265,12 @@ class PipelineVectorsTest {
         assertEquals("See you" to "and then we left", Pipeline.continueFragment("See you.", "And then we left"))
         assertEquals("Wait..." to "And more", Pipeline.continueFragment("Wait...", "And more"))
         assertEquals("hello." to "", Pipeline.continueFragment("hello.", "hello"))
+        assertEquals("of using" to "an MIT", Pipeline.continueFragment("of using", "using an MIT"))
+        assertEquals("from my" to "work", Pipeline.continueFragment("from my", "from my work"))
+        assertEquals("one two three four five" to "five rest", Pipeline.continueFragment(
+            "one two three four five", "one two three four five rest"))
+        assertEquals("the license?" to "terms", Pipeline.continueFragment("the license?", "License terms"))
+        assertEquals("work" to "today", Pipeline.continueFragment("work", "from my work today", "from my work"))
     }
 
     @Test

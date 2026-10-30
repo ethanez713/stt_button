@@ -954,7 +954,7 @@ class TestGrid:
         import sys
 
         from stt_button import config
-        from stt_button.asr import Slicer, context_audio
+        from stt_button.asr import Slicer
 
         from experiments import boundary_punct as bp
 
@@ -996,7 +996,7 @@ class TestGrid:
                         bp.CUT_PAUSES[0], 2, 10)
         bounds = slicer.feed(audio) + slicer.finish()
         start, end = bounds[1]
-        phone, _junction = context_audio(audio, slicer.speech_before(start), slicer.speech_after(start), end, 4, 0.2)
+        phone, _junction = bp._squeezed_context(audio, slicer.speech_before(start), slicer.speech_after(start), end, 4, 0.2)
         assert len(phone) in fake.context
 
     def test_a_ramble_is_left_out_of_read_wer(self):

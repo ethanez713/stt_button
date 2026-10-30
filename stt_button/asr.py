@@ -203,23 +203,16 @@ class Recognizer:
         return RawTranscript(join_slices(texts), int((time.monotonic() - started) * 1000))
 
 
-CONTEXT_LEAD_S = 0.1
 TRAILING_MARK = re.compile(r"[.,?!;:]$")
+_OVERLAP_WORDS = 4
 
 
-def context_audio(samples: np.ndarray, speech_before: int, speech_after: int, end: int, context_s: float,
-                  squeeze_s: float | None) -> tuple[np.ndarray, float]:
-    """The audio to decode for a slice that follows a pause: the last context_s of speech before the
-    pause, the pause (squeezed to squeeze_s of its own audio, or whole when None), then the slice from
-    just before its first speech to end. Returns it with the time at which the slice's own speech begins."""
-    lead = int(CONTEXT_LEAD_S * SAMPLE_RATE)
-    before = samples[max(0, speech_before - int(context_s * SAMPLE_RATE)):speech_before]
-    after_start = max(speech_before, speech_after - lead)
-    gap = samples[speech_before:after_start]
-    if squeeze_s is not None:
-        gap = gap[:int(squeeze_s * SAMPLE_RATE)]
-    audio = np.concatenate([before, gap, samples[after_start:end]])
-    return audio, (len(before) + len(gap)) / SAMPLE_RATE
+def context_audio(samples: np.ndarray, start: int, end: int, context_s: float) -> tuple[np.ndarray, float]:
+    """Audio for a slice that follows earlier text: the take's own samples from context_s before
+    `start` (or the start of the take) through `end`, unbroken. The junction, in seconds, is where
+    `start` falls in that audio. Words timed at or after it are the slice's."""
+    lo = max(0, start - int(context_s * SAMPLE_RATE))
+    return samples[lo:end].copy(), (start - lo) / SAMPLE_RATE
 
 
 def split_at_junction(tokens: list[str], timestamps: list[float], junction_s: float) -> tuple[str, str]:
@@ -253,18 +246,36 @@ def _word_core(word: str) -> str:
     return _WORD_CORE.sub("", word).lower()
 
 
-def continue_fragment(previous: str, nxt: str) -> tuple[str, str]:
-    """(previous, next) once a slice decoded without the speech around it is joined to the one before.
-    A repeated boundary word is dropped, a full stop on the previous slice is not kept, and the next
-    slice carries on the sentence (`continuing`). A question or exclamation mark stays."""
+def drop_overlap(previous: str, nxt: str) -> str:
+    """`nxt` without the longest run of up to 4 opening words that repeats the end of `previous`.
+
+    Compared by word core, so case and punctuation at the edges do not count. A run longer than 4
+    drops only 4. A slice that adds nothing comes back empty."""
+    prev = [_word_core(word) for word in previous.split()]
+    words = nxt.split()
+    cores = [_word_core(word) for word in words]
+    matched = 0
+    for k in range(min(len(prev), len(cores)), 0, -1):
+        opening = cores[:k]
+        if all(opening) and prev[-k:] == opening:
+            matched = k
+            break
+    return " ".join(words[min(matched, _OVERLAP_WORDS):])
+
+
+def continue_fragment(previous: str, nxt: str, heard: str | None = None) -> tuple[str, str]:
+    """(previous, next) once a slice decoded on its own is joined to the one before it.
+
+    Repeated opening words are dropped against `heard` (the take's raw text, when it runs past this
+    slice). A full stop on the previous slice is not kept, and the next slice carries on the
+    sentence. A question or exclamation mark stays. A slice that adds nothing leaves the previous
+    slice as it was."""
     previous, nxt = previous.rstrip(), nxt.strip()
     if not previous or not nxt:
         return previous, nxt
-    prev_words, next_words = previous.split(), nxt.split()
-    if prev_words and next_words and _word_core(prev_words[-1]) == _word_core(next_words[0]) and _word_core(prev_words[-1]):
-        nxt = " ".join(next_words[1:])
-        if not nxt:
-            return previous, ""
+    nxt = drop_overlap(previous if heard is None else heard, nxt)
+    if not nxt:
+        return previous, ""
     if previous.endswith(".") and not previous.endswith(".."):
         previous = previous[:-1].rstrip()
     return previous, continuing(nxt, previous)

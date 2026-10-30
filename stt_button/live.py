@@ -11,7 +11,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from stt_button.asr import (SAMPLE_RATE, TRAILING_MARK, Slicer, context_audio, continue_fragment, continuing,
-                            join_slices, settled_mark)
+                            drop_overlap, join_slices, settled_mark)
 from stt_button.cleaner import (casual, join_cleaned, live_chunks, matched_cue, skips_cleaner, strip_hidden,
                                 trim_message_end, unresolved_corrections, untrusted_clean, without_sign_off)
 from stt_button.spoken import keep_spoken_ending, spoken_punctuation
@@ -168,21 +168,29 @@ class LiveTake:
             return
         if mark is None:
             text = self._without_context(text)
-        elif self.texts and self.texts[-1]:
-            own = TRAILING_MARK.search(self.texts[-1])
-            self.texts[-1] = TRAILING_MARK.sub("", self.texts[-1]) + settled_mark(own.group() if own else "", mark)
-            text = continuing(text, self.texts[-1])
+        elif any(self.texts):
+            index = self._last_text()
+            own = TRAILING_MARK.search(self.texts[index])
+            self.texts[index] = TRAILING_MARK.sub("", self.texts[index]) + settled_mark(own.group() if own else "", mark)
+            text = drop_overlap(self.raw, text)
+            if text:
+                text = continuing(text, self.texts[index])
         self.texts.append(strip_hidden(text))
         self._land(end, self.texts[-1])
 
+    def _last_text(self) -> int:
+        for index in range(len(self.texts) - 1, -1, -1):
+            if self.texts[index]:
+                return index
+        raise RuntimeError("a take with text has no text")
+
     def _slice_own(self, start: int, end: int) -> tuple[str, str | None]:
         """The slice's own text after context removal, and the context mark when that decode was kept.
-        A missing mark is a plain decode, joined afterwards by `_without_context`."""
-        before, after = self.slicer.speech_before(start), self.slicer.speech_after(start)
-        if not self.texts or before is None or after is None or after >= end:
+        A missing mark is a plain decode, joined afterwards by `_without_context`. Every slice after
+        the take's first text is decoded with context, including the stop's final slice."""
+        if not any(self.texts):
             return self.recognizer.recognize(self.slicer.samples[start:end]), None
-        audio, junction_s = context_audio(self.slicer.samples, before, after, end, self.cfg["context_s"],
-                                          self.cfg["junction_squeeze_s"])
+        audio, junction_s = context_audio(self.slicer.samples, start, end, self.cfg["context_s"])
         self.context_decodes += 1
         mark, text = self.recognizer.recognize_after(audio, junction_s)
         if not text:
@@ -202,12 +210,10 @@ class LiveTake:
             self.bubble.slice_landed(end / SAMPLE_RATE, text)
 
     def _without_context(self, text: str) -> str:
-        if not text:
+        if not text or not any(self.texts):
             return text
-        for index in range(len(self.texts) - 1, -1, -1):
-            if self.texts[index]:
-                self.texts[index], text = continue_fragment(self.texts[index], text)
-                break
+        index = self._last_text()
+        self.texts[index], text = continue_fragment(self.texts[index], text, self.raw)
         return text
 
     def _clean_closed(self, final: bool) -> list[str]:

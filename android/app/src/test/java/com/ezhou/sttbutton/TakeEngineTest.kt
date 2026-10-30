@@ -178,11 +178,11 @@ class TakeEngineTest {
         assertEquals(2, cleaner.calls.size)
         val result = rig.finish()
 
-        assertEquals(3, cleaner.calls.size)
-        assertEquals(3, result.chunks)
+        assertEquals(4, cleaner.calls.size)
+        assertEquals(4, result.chunks)
         assertEquals("chunks", result.cleanMode)
         assertEquals(cleaner.calls.joinToString("\n\n") { it.uppercase() }, result.cleaned)
-        assertEquals(slices[0].dropLast(1) + " " + slices[1].dropLast(1) + " " + slices[2], result.raw)
+        assertEquals(slices.joinToString(" "), result.raw)
     }
 
     @Test
@@ -402,7 +402,7 @@ class TakeEngineTest {
     @Test
     fun given_a_pause_when_idle_then_the_stop_finds_the_remainder_already_cleaned() {
         val cleaner = MarkingCleaner()
-        val rig = pausedRig(cleaner, labelled("a", 3), "")
+        val rig = pausedRig(cleaner, labelled("a", 3), "", "")
         assertEquals(1, cleaner.calls.size)
 
         rig.policy.pauseOpen = true
@@ -486,7 +486,7 @@ class TakeEngineTest {
         val result = rig.finish()
 
         assertTrue(result.raw.contains("plain fallback"))
-        assertEquals(1, result.contextFallbacks)
+        assertEquals(2, result.contextFallbacks)
         assertTrue(rig.records.any { it.kind == "asr" && it.outcome == "fallback" })
     }
 
@@ -532,7 +532,7 @@ class TakeEngineTest {
 
     @Test
     fun given_text_typed_at_the_end_during_the_take_when_finished_then_it_is_cleaned_with_the_tail() {
-        val rig = Rig(cfg, ScriptedRecognizer(labelled("a", 1), ""), MarkingCleaner())
+        val rig = Rig(cfg, ScriptedRecognizer(labelled("a", 1), "", ""), MarkingCleaner())
         rig.slicer.feed(audio(3.0, 3.0))
         val decode = rig.engine.next()!!
         rig.engine.complete(decode, decode.run())
@@ -594,7 +594,7 @@ class TakeEngineTest {
         val rig = Rig(cfg, ScriptedRecognizer(labelled("a", 3), labelled("b", 3)), slicer = slicer)
         rig.driver.drain()
 
-        assertEquals(labelled("a", 3).dropLast(1) + " " + labelled("b", 3), rig.engine.raw)
+        assertEquals(labelled("a", 3) + " " + labelled("b", 3), rig.engine.raw)
         assertEquals(2, rig.records.count { it.kind == "asr" })
     }
 

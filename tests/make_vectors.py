@@ -12,7 +12,7 @@ from pathlib import Path
 import numpy as np
 
 from stt_button import asr, config
-from stt_button.asr import context_audio, continuing, settled_mark, split_at_junction
+from stt_button.asr import context_audio, continuing, drop_overlap, settled_mark, split_at_junction
 from stt_button.bubble import Bubble
 from stt_button.live import LiveTake
 from stt_button.cleaner import (casual, fact_drift, join_cleaned, live_chunks, opens_with_cue, matched_cue, skips_cleaner,
@@ -220,17 +220,36 @@ JUNCTION_CASES = [
 ]
 
 CONTEXT_AUDIO_CASES = [
-    {"samples": 10 * SR, "speech_before": 4 * SR, "speech_after": 8 * SR, "end": 10 * SR, "context_s": 2, "squeeze_s": 0.2},
-    {"samples": 10 * SR, "speech_before": 4 * SR, "speech_after": 8 * SR, "end": 10 * SR, "context_s": 2, "squeeze_s": None},
-    {"samples": 10 * SR, "speech_before": 1 * SR, "speech_after": 1 * SR + 800, "end": 6 * SR, "context_s": 4, "squeeze_s": 0.2},
-    {"samples": 10 * SR, "speech_before": 4 * SR, "speech_after": 4 * SR + 3200, "end": 9 * SR, "context_s": 4, "squeeze_s": 0.2},
+    {"samples": 10 * SR, "start": 4 * SR, "end": 10 * SR, "context_s": 2},
+    {"samples": 10 * SR, "start": SR, "end": 6 * SR, "context_s": 4},
+    {"samples": 10 * SR, "start": 0, "end": 5 * SR, "context_s": 4},
+    {"samples": 10 * SR, "start": 4 * SR, "end": 9 * SR, "context_s": 2.5},
+]
+
+# (previous, next, text after the overlap drop). A 5-word repeat drops only the first 4.
+OVERLAP_CASES = [
+    ("of using", "using an MIT", "an MIT"),
+    ("from my", "from my work", "work"),
+    ("call", "Call both of them", "both of them"),
+    ("hello world", "something else", "something else"),
+    ("one two three four five", "one two three four five rest", "five rest"),
+    ("the license?", "License terms", "terms"),
 ]
 
 
 def context_audio_vector(case: dict) -> dict:
-    audio, junction = context_audio(np.arange(case["samples"], dtype=np.float32), case["speech_before"],
-                                    case["speech_after"], case["end"], case["context_s"], case["squeeze_s"])
+    audio, junction = context_audio(np.arange(case["samples"], dtype=np.float32), case["start"], case["end"],
+                                    case["context_s"])
     return {**case, "length": len(audio), "first": int(audio[0]), "last": int(audio[-1]), "junction_s": junction}
+
+
+def overlap_vectors() -> list[dict]:
+    rows = []
+    for previous, nxt, expected in OVERLAP_CASES:
+        text = drop_overlap(previous, nxt)
+        assert text == expected, (previous, nxt, text)
+        rows.append({"previous": previous, "next": nxt, "text": text})
+    return rows
 
 
 BUBBLE_SEQUENCES = {
@@ -264,9 +283,10 @@ LEAD = ["silence", 0.3]
 # A take script drives one take. `steps` run in order and the take then stops. ["audio", segments] feeds
 # `pcm_signal(segments)` in 100 ms pieces; ["idle", segments] runs one pause-time clean step, during which
 # the take reads `pcm_signal(segments)` as the audio that arrived meanwhile. `slices` is what the recognizer
-# returns, in the order the slicer cuts: [text, mark], the mark being what a decode with the speech before it
-# adds. The cleaner returns the chunk upper-cased with each [find, replace] of `replace` applied, and gives
-# up when speech arrives during a pause-time clean. `cfg` overrides the pipeline's configuration.
+# returns, in call order: [text, mark], the mark being what a decode with context adds. A context decode
+# that returns no words is followed by the plain fallback's entry. The cleaner returns the chunk upper-cased
+# with each [find, replace] of `replace` applied, and gives up when speech arrives during a pause-time
+# clean. `cfg` overrides the pipeline's configuration.
 TAKE_SCRIPTS = [
     {"name": "one_slice_under_the_skip_limit", "steps": [["audio", [LEAD, SPEECH]]],
      "slices": [["Meet me at noon.", "."]]},
@@ -285,7 +305,7 @@ TAKE_SCRIPTS = [
      "slices": [[labelled("a", 1) + " " + labelled("b", 1), "."], [labelled("c", 2), "."], ["tail end here.", "."]]},
     {"name": "pause_clean_completes_and_is_reused",
      "steps": [["audio", [LEAD, SPEECH, PAUSE_1S, SPEECH, PAUSE_1S]], ["idle", []]],
-     "slices": [[labelled("a", 1) + " " + labelled("b", 1), "."], [labelled("c", 2), "."], ["", "."]]},
+     "slices": [[labelled("a", 1) + " " + labelled("b", 1), "."], [labelled("c", 2), "."], ["", "."], ["", "."]]},
     {"name": "yeah_tail_after_speech_is_dropped",
      "steps": [["audio", [LEAD, SPEECH, PAUSE_1S, ["noise", 0.3, 8000]]]],
      "slices": [["Meet me at noon.", "."], ["Yeah.", "?"]]},
@@ -428,6 +448,7 @@ def vectors() -> dict:
         "continuing": [{"before": b, "body": t, "continued": continuing(t, b)} for b, t in CONTINUING_CASES],
         "junction": [{**c, "split": list(split_at_junction(c["tokens"], c["times"], c["junction_s"]))} for c in JUNCTION_CASES],
         "context_audio": [context_audio_vector(c) for c in CONTEXT_AUDIO_CASES],
+        "overlap": overlap_vectors(),
         "settled_mark": [{"slice": s, "context": c, "mark": settled_mark(s, c)}
                          for s in ("", ".", ",", "?", "!") for c in ("", ".", ",", "?", "!")],
         "fact_drift": [{"raw": r, "cleaned": c, "drift": [list(p) for p in fact_drift(r, c)]} for r, c in DRIFT_CASES],

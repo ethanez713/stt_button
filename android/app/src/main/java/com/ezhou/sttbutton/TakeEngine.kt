@@ -431,9 +431,7 @@ class TakeEngine(
     }
 
     private fun decodeJob(slice: IntArray): Job {
-        val before = slicer.speechBefore(slice[0])
-        val after = slicer.speechAfter(slice[0])
-        val withContext = texts.isNotEmpty() && before != null && after != null && after < slice[1]
+        val withContext = texts.isNotEmpty()
         val moment = if (stopping) Moment.FINISH else Moment.SLICE
         return Job(Job.Kind.DECODE, moment, slice = slice) {
             val waited = waitMs(slice[1])
@@ -445,7 +443,7 @@ class TakeEngine(
             if (!withContext) {
                 text = plain()
             } else {
-                val (audio, junctionS) = Pipeline.contextAudio(::samples, before!!, after!!, slice[1], cfg.contextS, cfg.junctionSqueezeS)
+                val (audio, junctionS) = Pipeline.contextAudio(::samples, slice[0], slice[1], cfg.contextS)
                 val heard = recognizer.recognize(RecognizeRequest(audio, junctionS))
                 if (heard.text.isEmpty()) {
                     fellBack = true
@@ -476,6 +474,7 @@ class TakeEngine(
         if (decoded.fellBack) contextFallbacks++
         val text = readText()
         var from = region.end
+        val heard = raw
         val previous = texts.drop(attachedFrom).lastOrNull().orEmpty()
         var sliceText = decoded.text
         var prefix = ""
@@ -484,7 +483,8 @@ class TakeEngine(
             val old = Pipeline.trailingMark(previous)
             val settled = Pipeline.settledMark(old, decoded.mark)
             texts[texts.lastIndex] = Pipeline.withoutTrailingMark(previous) + settled
-            sliceText = Pipeline.continuing(sliceText, texts.last(), texts.last().length)
+            sliceText = Pipeline.dropOverlap(heard, sliceText)
+            if (sliceText.isNotEmpty()) sliceText = Pipeline.continuing(sliceText, texts.last(), texts.last().length)
             val markStart = region.end - old.length
             if (old != settled && markStart >= region.cleanEnd && text.startsWith(old, markStart)) {
                 from = markStart
@@ -492,7 +492,7 @@ class TakeEngine(
                 replacing = true
             }
         } else if (previous.isNotEmpty() && sliceText.isNotEmpty()) {
-            val continued = Pipeline.continueFragment(previous, sliceText)
+            val continued = Pipeline.continueFragment(previous, sliceText, heard)
             sliceText = continued.second
             if (continued.first != previous && previous.startsWith(continued.first)) {
                 texts[texts.lastIndex] = continued.first

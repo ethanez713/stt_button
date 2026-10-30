@@ -14,7 +14,6 @@ class PipelineConfig(json: JSONObject) {
     val stopSilenceDbfs = json.getDouble("stop_silence_dbfs")
     val sliceMinS = json.getDouble("slice_min_s")
     val contextS = json.getDouble("context_s")
-    val junctionSqueezeS: Double? = if (json.isNull("junction_squeeze_s")) null else json.getDouble("junction_squeeze_s")
     val tailFillerMaxS = json.getDouble("tail_filler_max_s")
     val tailFillerWords: Set<String> = json.getJSONArray("tail_filler_words").let { a ->
         List(a.length()) { a.getString(it).lowercase() }.toSet()
@@ -51,7 +50,7 @@ object Pipeline {
     // Android's ICU regex rejects the Unicode-class inline flag; \p{Z} gives the JVM the Unicode spaces Python's \S excludes.
     private val NON_SPACE = Regex("[^\\s\\p{Z}]+")
     private val TRAILING_MARK = Regex("[.,?!;:]$")
-    private const val CONTEXT_LEAD_S = 0.1
+    private const val OVERLAP_WORDS = 4
     val SENTENCE_ENDS = listOf(".", "?", "!")
     private const val OPENING_MARKS = "([{\u201C\u2018"
     private val SENTENCE_ENDS_ASKED = listOf("?", "!")
@@ -89,19 +88,29 @@ object Pipeline {
         return tokens.isNotEmpty() && tokens.all { it in words }
     }
 
-    /** Mirrors `stt_button.asr.continue_fragment`. */
-    fun continueFragment(previous: String, next: String): Pair<String, String> {
+    /** Mirrors `stt_button.asr.drop_overlap`. */
+    fun dropOverlap(previous: String, next: String): String {
+        val prev = previous.split(WHITESPACE).filter { it.isNotEmpty() }.map { wordCore(it) }
+        val words = next.split(WHITESPACE).filter { it.isNotEmpty() }
+        val cores = words.map { wordCore(it) }
+        var matched = 0
+        for (k in minOf(prev.size, cores.size) downTo 1) {
+            val opening = cores.take(k)
+            if (opening.all { it.isNotEmpty() } && prev.takeLast(k) == opening) {
+                matched = k
+                break
+            }
+        }
+        return words.drop(minOf(matched, OVERLAP_WORDS)).joinToString(" ")
+    }
+
+    /** Mirrors `stt_button.asr.continue_fragment`. [heard] is the take's raw text when it runs past [previous]. */
+    fun continueFragment(previous: String, next: String, heard: String = previous): Pair<String, String> {
         var prev = previous.trimEnd()
         var nxt = next.trim()
         if (prev.isEmpty() || nxt.isEmpty()) return prev to nxt
-        val prevWords = prev.split(WHITESPACE).filter { it.isNotEmpty() }
-        val nextWords = nxt.split(WHITESPACE).filter { it.isNotEmpty() }
-        if (prevWords.isNotEmpty() && nextWords.isNotEmpty() && wordCore(prevWords.last()) == wordCore(nextWords.first()) &&
-            wordCore(prevWords.last()).isNotEmpty()
-        ) {
-            nxt = nextWords.drop(1).joinToString(" ")
-            if (nxt.isEmpty()) return prev to ""
-        }
+        nxt = dropOverlap(heard, nxt)
+        if (nxt.isEmpty()) return prev to ""
         if (prev.endsWith(".") && !prev.endsWith("..")) prev = prev.dropLast(1).trimEnd()
         nxt = continuing(nxt, prev, prev.length)
         return prev to nxt
@@ -314,16 +323,10 @@ object Pipeline {
         if (sliceMark in SENTENCE_ENDS_ASKED && contextMark in SENTENCE_ENDS) sliceMark else contextMark
 
     /** Mirrors `stt_button.asr.context_audio`; [read] returns the samples in [from, to). */
-    fun contextAudio(
-        read: (Int, Int) -> FloatArray, speechBefore: Int, speechAfter: Int, end: Int, contextS: Double, squeezeS: Double?,
-    ): Pair<FloatArray, Double> {
+    fun contextAudio(read: (Int, Int) -> FloatArray, start: Int, end: Int, contextS: Double): Pair<FloatArray, Double> {
         val rate = Slicer.SAMPLE_RATE
-        val before = read(maxOf(0, speechBefore - (contextS * rate).toInt()), speechBefore)
-        val afterStart = maxOf(speechBefore, speechAfter - (CONTEXT_LEAD_S * rate).toInt())
-        var gap = read(speechBefore, afterStart)
-        if (squeezeS != null) gap = gap.copyOf(minOf(gap.size, (squeezeS * rate).toInt()))
-        val audio = before + gap + read(afterStart, end)
-        return audio to (before.size + gap.size).toDouble() / rate
+        val lo = maxOf(0, start - (contextS * rate).toInt())
+        return read(lo, end) to (start - lo).toDouble() / rate
     }
 
     /** Mirrors `stt_button.asr.split_at_junction`: the context's closing punctuation and the slice's words. */

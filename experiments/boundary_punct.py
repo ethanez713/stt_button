@@ -15,11 +15,11 @@ word gaps of the 30 s decode, and the plain slice decodes (baseline) are compare
 
 With --grid each recording is cut at every cut pause and hard cut, with slice_min_s 2 and pause_margin_db
 10. The search window stays slice_search_s and is never longer than the hard cut minus 1 s. Slices are
-decoded as the phone decodes them: 4 s of context, the junction squeezed to 0.2 s. Against the same 30 s
-plain-decode reference, the table gives read-passage WER, false breaks and false capitals per 100 words,
-cuts per minute and the median slice length. The pick is the smallest cut pause, then the smallest hard
-cut, whose read WER is at most 11.54% and whose false breaks are at most 0.5 per 100 words; otherwise it
-reports that no pair passes.
+decoded with the squeezed-context arm: 4 s of speech before the pause, the junction squeezed to 0.2 s.
+Against the same 30 s plain-decode reference, the table gives read-passage WER, false breaks and false
+capitals per 100 words, cuts per minute and the median slice length. The pick is the smallest cut pause, then
+the smallest hard cut, whose read WER is at most 11.54% and whose false breaks are at most 0.5 per 100
+words; otherwise it reports that no pair passes.
 
 Join repair J lowercases the first letter of a slice's first word when the slice before it does not
 end in . ! or ?, unless the word is I or an I contraction. A J-harm is a word J lowercases that the
@@ -37,8 +37,8 @@ import numpy as np
 
 from experiments import paths, wer
 from stt_button import config
-from stt_button.asr import (CUT_WINDOW_S, SAMPLE_RATE, Recognizer, Slicer, context_audio, join_slices, read_wav,
-                            slice_bounds, split_at_junction)
+from stt_button.asr import (CUT_WINDOW_S, SAMPLE_RATE, Recognizer, Slicer, join_slices, read_wav, slice_bounds,
+                            split_at_junction)
 
 CUT_PAUSES = (0.5, 0.6, 0.8, 1.0, 1.2)
 HARD_CUTS = (8, 10, 15)
@@ -165,6 +165,25 @@ def plain_text(recognizer, samples: np.ndarray, start: int, end: int, cache: dic
     return text
 
 
+_CONTEXT_LEAD_S = 0.1
+_SQUEEZE_S = 0.2
+
+
+def _squeezed_context(samples: np.ndarray, speech_before: int, speech_after: int, end: int, context_s: float,
+                      squeeze_s: float | None) -> tuple[np.ndarray, float]:
+    """The gap-squeezed context this experiment measures: the last context_s of speech before the pause,
+    the pause squeezed to squeeze_s of its own audio (kept whole when None), then the slice from just
+    before its first speech. Returns that audio and the time its own speech begins."""
+    lead = int(_CONTEXT_LEAD_S * SAMPLE_RATE)
+    before = samples[max(0, speech_before - int(context_s * SAMPLE_RATE)):speech_before]
+    after_start = max(speech_before, speech_after - lead)
+    gap = samples[speech_before:after_start]
+    if squeeze_s is not None:
+        gap = gap[:int(squeeze_s * SAMPLE_RATE)]
+    audio = np.concatenate([before, gap, samples[after_start:end]])
+    return audio, (len(before) + len(gap)) / SAMPLE_RATE
+
+
 def context_text(recognizer, samples: np.ndarray, before: int, after: int, end: int, arm, start: int,
                  cache: dict | None) -> tuple[str, str, int]:
     """(mark, slice text, decoded samples). Speech edges follow the audio and the margin, so one
@@ -172,7 +191,7 @@ def context_text(recognizer, samples: np.ndarray, before: int, after: int, end: 
     key = (start, end, (arm[0], arm[1], before, after))
     if cache is not None and key in cache:
         return cache[key]
-    audio, junction = context_audio(samples, before, after, end, arm[0], arm[1])
+    audio, junction = _squeezed_context(samples, before, after, end, arm[0], arm[1])
     result = recognizer.decode(audio)
     mark, text = split_at_junction(result.tokens, result.timestamps, junction)
     value = (mark, text, len(audio))
@@ -299,7 +318,7 @@ def capped_search_s(hard_cut: float, cfg_search: float) -> float:
 
 
 def grid_rows(recognizer, recordings, cfg: dict, cut_pauses, hard_cuts) -> list[dict]:
-    arm = (cfg["context_s"], cfg["junction_squeeze_s"])
+    arm = (cfg["context_s"], _SQUEEZE_S)
     stats = {
         (pause, hard): {"breaks": 0, "caps": 0, "words": 0, "cuts": 0, "minutes": 0.0, "lengths": [],
                         "errors": 0, "ref": 0}
