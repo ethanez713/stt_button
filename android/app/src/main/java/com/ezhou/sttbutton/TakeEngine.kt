@@ -113,6 +113,8 @@ class TakeEngine(
     private val jobs: (JobRecord) -> Unit = {},
     private val prepareCleaner: (trigger: String) -> Unit = {},
     private val nowMs: () -> Long = { System.nanoTime() / 1_000_000 },
+    /** Whether the stop settles the take; a field take does, and the debug replay asks for it in memory. */
+    private val settles: Boolean = document is FieldDocument,
 ) {
     /** The region's text, after every change the take made. */
     var onText: ((String) -> Unit)? = null
@@ -176,6 +178,7 @@ class TakeEngine(
     private var provisional: Span? = null
     private var provisionalAt: Long? = null
     private var detaching = false
+    private var detached = false
 
     /** Rewrites of the preview into the field. Job lines do not record them. */
     var provisionalWrites = 0
@@ -272,6 +275,7 @@ class TakeEngine(
     fun detach() {
         if (detaching) return
         detaching = true
+        detached = true
         dropProvisional()
         document = BufferDocument()
         hookEdits()
@@ -341,7 +345,7 @@ class TakeEngine(
     fun next(): Job? {
         check(running == null) { "a job is still running" }
         nextSlice()?.let { return start(decodeJob(it)) }
-        if (stopping && !settleQueued && document is FieldDocument) {
+        if (stopping && !settleQueued && settles && !detached) {
             settleQueued = true
             if (editsInside == 0) return start(settleJob())
             settleResult = "edited"
@@ -543,10 +547,10 @@ class TakeEngine(
 
     private fun writeSettled(settled: Settled): String {
         if (settled.generation != settleGeneration) return "abandoned"
-        if (document !is FieldDocument) return "detached"
+        if (detached) return "detached"
         if (editsInside > 0) return "edited"
         val text = readText()
-        if (document !is FieldDocument) return "detached"
+        if (detached) return "detached"
         val from = textStart
         val to = region.end
         val before = if (from in 0..text.length) text.substring(0, from) else ""

@@ -87,10 +87,11 @@ class TakeEngineTest {
         prepare: (String) -> Unit = {},
         pauseOpen: Boolean = true,
         nowMs: () -> Long = { System.nanoTime() / 1_000_000 },
+        settles: Boolean = doc is FieldDocument,
     ) {
         val records = mutableListOf<JobRecord>()
         val policy = GatedPolicy(ChunkPolicy(cfg)).also { it.pauseOpen = pauseOpen }
-        val engine = TakeEngine(doc, slicer, recognizer, cleaner, policy, cfg, jobs = { records += it }, prepareCleaner = prepare, nowMs = nowMs)
+        val engine = TakeEngine(doc, slicer, recognizer, cleaner, policy, cfg, jobs = { records += it }, prepareCleaner = prepare, nowMs = nowMs, settles = settles)
         val driver = SerialDriver(engine)
 
         fun feed(samples: ShortArray) {
@@ -1039,5 +1040,20 @@ class TakeEngineTest {
         assertNull(held.settle)
         assertEquals(0, held.settleWindows)
         assertTrue(buffer.records.none { it.moment == "settle" })
+    }
+
+    @Test
+    fun given_a_buffer_take_that_asks_to_settle_when_it_stops_then_the_settled_text_replaces_its_draft() {
+        val recognizer = object : Recognizer {
+            override fun recognize(request: RecognizeRequest) =
+                Recognized(if (request.settle) "settled words" else "draft words", null)
+        }
+        val rig = Rig(cfg, recognizer, settles = true)
+        rig.feed(audio(3.0, 0.0))
+
+        val result = rig.finish()
+
+        assertEquals("applied", result.settle)
+        assertEquals("settled words", result.raw)
     }
 }

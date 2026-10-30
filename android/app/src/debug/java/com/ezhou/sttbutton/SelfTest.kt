@@ -86,7 +86,7 @@ class SelfTest : Service() {
         val chosen = if (policy == "whole") WholePolicy(cfg) else ChunkPolicy(cfg)
         val engine = TakeEngine(BufferDocument(seed), slicer, models.recognizer, models.cleaner(), chosen, cfg, jobs = { r ->
             Log.i(TAG, "selftest job ${r.kind} ${r.moment} ${r.outcome} ms=${r.ms} in=${r.input?.length} out=${r.output?.length}")
-        }, prepareCleaner = models::prepareCleaner)
+        }, prepareCleaner = models::prepareCleaner, settles = policy == "whole")
         engine.onText = bubble::region
         engine.onCovered = bubble::covered
         val executor = java.util.concurrent.Executors.newSingleThreadExecutor { task ->
@@ -178,7 +178,7 @@ class SelfTest : Service() {
                 val line = org.json.JSONObject().put("name", file.name).put("config_id", configId).put("policy", policy)
                     .put("raw", result.raw).put("cleaned", run.inserted).put("clean_mode", result.cleanMode)
                     .put("chunks", result.chunks).put("audio_ms", audio.size / 16)
-                    .put("asr_ms", result.asrMs).put("clean_ms", result.cleanMs).put("stop_to_insert_ms", run.stopToInsertMs)
+                    .put("asr_ms", result.asrMs).put("clean_ms", result.cleanMs).put("stop_to_insert_ms", run.stopToInsertMs).put("settle", result.settle)
                 out.appendText(line.toString() + "\n")
             }
         } finally {
