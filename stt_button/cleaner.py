@@ -138,6 +138,32 @@ def live_chunks(text: str, count_tokens: Callable[[str], int], min_tokens: int, 
     return chunks
 
 
+def whole_chunks(text: str, count_tokens: Callable[[str], int], max_tokens: int) -> list[str]:
+    """The text a field take cleans after the stop, in pieces of at most max_tokens.
+
+    The whole text when it fits. Otherwise consecutive runs of whole sentences, each at most
+    max_tokens; a sentence longer than that is split at words, as live_chunks splits one. A
+    correction sentence stays in the run with its neighbours.
+    """
+    body = text.strip()
+    if not body:
+        return []
+    if count_tokens(body) <= max_tokens:
+        return [body]
+    chunks: list[str] = []
+    current = ""
+    for piece in _pieces(split_sentences(body), count_tokens, max_tokens):
+        candidate = f"{current} {piece}" if current else piece
+        if current and count_tokens(candidate) > max_tokens:
+            chunks.append(current)
+            current = piece
+        else:
+            current = candidate
+    if current:
+        chunks.append(current)
+    return chunks
+
+
 def join_cleaned(chunks: list[str], outputs: list[str], cues: list[str]) -> str:
     """Cleaned chunks as one text. A chunk boundary is a sentence end, and a paragraph break there
     cannot glue a list onto prose; a correction unit is cut out of the middle of a thought, so it

@@ -1048,6 +1048,44 @@
    "chunks": []
   }
  ],
+ "whole_chunks": [
+  {
+   "name": "under_max",
+   "text": "word word word word word word word last. word word word word word word word last.",
+   "max_tokens": 20,
+   "chunks": [
+    "word word word word word word word last. word word word word word word word last."
+   ]
+  },
+  {
+   "name": "over_max_at_a_sentence_end",
+   "text": "word word word word word word word word word word word last. word word word word word word word word word word word last.",
+   "max_tokens": 20,
+   "chunks": [
+    "word word word word word word word word word word word last.",
+    "word word word word word word word word word word word last."
+   ]
+  },
+  {
+   "name": "correction_stays_in_its_piece",
+   "text": "word word word word word word word word word word word last. Actually no, make that Wednesday. word word word word word word word word word word word last.",
+   "max_tokens": 20,
+   "chunks": [
+    "word word word word word word word word word word word last. Actually no, make that Wednesday.",
+    "word word word word word word word word word word word last."
+   ]
+  },
+  {
+   "name": "sentence_over_max_split_at_words",
+   "text": "word word word word word word word word word word word word word word word word word word word word word word word word last.",
+   "max_tokens": 10,
+   "chunks": [
+    "word word word word word word word word word word",
+    "word word word word word word word word word word",
+    "word word word word last."
+   ]
+  }
+ ],
  "takes": [
   {
    "name": "one_slice_under_the_skip_limit",

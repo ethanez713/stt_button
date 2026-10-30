@@ -22,7 +22,6 @@ class PipelineConfig(json: JSONObject) {
     val chunkMinTokens = json.getInt("chunk_min_tokens")
     val chunkMaxTokens = json.getInt("chunk_max_tokens")
     val skipMaxWords = json.getInt("skip_max_words")
-    val fieldRevise: String = json.optString("field_revise", "stop")
     val cleanerLoadAfterS = json.getDouble("cleaner_load_after_s")
     val selfCorrectionCues: List<String> = json.getJSONArray("self_correction_cues").let { a -> List(a.length(), a::getString) }
     private val cleaner = json.getJSONObject("cleaners").getJSONObject(json.getString("cleaner"))
@@ -383,6 +382,31 @@ object Pipeline {
             }
         }
         if (final && current.isNotEmpty()) chunks += current
+        return chunks
+    }
+
+    /**
+     * Mirrors `stt_button.cleaner.whole_chunks`. The whole text when it is at most [maxTokens]; otherwise
+     * consecutive runs of whole sentences each at most [maxTokens]. A sentence longer than that is split at
+     * words. A correction sentence stays in the run with its neighbours.
+     */
+    fun wholeChunks(text: String, countTokens: (String) -> Int, maxTokens: Int): List<String> {
+        val body = text.trim()
+        if (body.isEmpty()) return emptyList()
+        if (countTokens(body) <= maxTokens) return listOf(body)
+        val parts = pieces(splitSentences(body), countTokens, maxTokens)
+        val chunks = mutableListOf<String>()
+        var current = ""
+        for (piece in parts) {
+            val candidate = if (current.isEmpty()) piece else "$current $piece"
+            if (current.isNotEmpty() && countTokens(candidate) > maxTokens) {
+                chunks += current
+                current = piece
+            } else {
+                current = candidate
+            }
+        }
+        if (current.isNotEmpty()) chunks += current
         return chunks
     }
 

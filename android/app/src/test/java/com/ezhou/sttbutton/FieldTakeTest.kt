@@ -26,7 +26,6 @@ class FieldTakeTest {
     private val cfg = PipelineConfig(JSONObject(Fixtures.resource("pipeline.json")).apply {
         put("chunk_min_tokens", 15)
         put("skip_max_words", 5)
-        put("field_revise", "stop")
     })
 
     private fun audio(speechS: Double, silenceS: Double): ShortArray = Fixtures.signal(JSONArray(
@@ -39,7 +38,7 @@ class FieldTakeTest {
         val doc = FieldDocument(editor) { clock.now }.also { check(it.sync()) }
         val slicer = Slicer.fromConfig(cfg)
         val engine = TakeEngine(
-            doc, slicer, Heard(*heard), Upper(), RevisePolicy(cfg), cfg,
+            doc, slicer, Heard(*heard), Upper(), WholePolicy(cfg), cfg,
             jobs = { records += it }, nowMs = { clock.now },
         )
         var detached = 0
@@ -56,7 +55,7 @@ class FieldTakeTest {
     }
 
     @Test
-    fun given_typing_when_a_phrase_has_landed_then_no_clean_starts_until_700_ms_after_the_edit() {
+    fun given_typing_when_a_phrase_has_landed_then_writes_stay_held_for_700_ms_and_no_clean_starts() {
         val clock = Clock()
         val rig = Rig(FakeEditor(""), clock, cfg, words("a"))
         rig.decodeFirstSlice()
@@ -69,7 +68,8 @@ class FieldTakeTest {
         assertNull(rig.engine.next())
         clock.now = 800
         assertFalse(rig.engine.writesHeld())
-        assertNotNull(rig.engine.next())
+        assertNull(rig.engine.next())
+        assertTrue(rig.records.none { it.kind == "clean" })
     }
 
     @Test

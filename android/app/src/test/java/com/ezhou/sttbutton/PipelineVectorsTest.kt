@@ -48,6 +48,14 @@ class PipelineVectorsTest {
     }
 
     @Test
+    fun given_whole_chunk_vectors_when_chunked_then_pieces_match_the_host() {
+        for (case in Fixtures.objects(Fixtures.vectors.getJSONArray("whole_chunks"))) {
+            val chunks = Pipeline.wholeChunks(case.getString("text"), Fixtures::words, case.getInt("max_tokens"))
+            assertEquals(case.getString("name"), Fixtures.strings(case.getJSONArray("chunks")), chunks)
+        }
+    }
+
+    @Test
     fun given_correction_vectors_when_text_grows_word_by_word_then_chunks_match_the_host() {
         for (case in Fixtures.objects(Fixtures.vectors.getJSONArray("correction_chunks"))) {
             val chunks = Pipeline.liveChunks(

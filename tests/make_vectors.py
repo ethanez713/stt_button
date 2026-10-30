@@ -16,7 +16,7 @@ from stt_button.asr import context_audio, continuing, drop_overlap, settled_mark
 from stt_button.bubble import Bubble
 from stt_button.live import LiveTake
 from stt_button.cleaner import (casual, fact_drift, join_cleaned, live_chunks, opens_with_cue, matched_cue, skips_cleaner,
-                                strip_hidden, untrusted_clean, without_sign_off)
+                                strip_hidden, untrusted_clean, whole_chunks, without_sign_off)
 from stt_button.spoken import keep_spoken_ending, spoken_punctuation
 
 FIXTURE = Path(__file__).parent / "fixtures" / "pipeline_vectors.json"
@@ -415,6 +415,29 @@ def replay_bubble(events: list[list]) -> list[list[str]]:
     return shown
 
 
+def whole_chunk_vectors() -> list[dict]:
+    under = sentence(8) + " " + sentence(8)
+    over = sentence(12) + " " + sentence(12)
+    correction = sentence(12) + " Actually no, make that Wednesday. " + sentence(12)
+    long = sentence(25)
+    cases = [
+        ("under_max", under, 20),
+        ("over_max_at_a_sentence_end", over, 20),
+        ("correction_stays_in_its_piece", correction, 20),
+        ("sentence_over_max_split_at_words", long, 10),
+    ]
+    out = [{"name": name, "text": text, "max_tokens": limit, "chunks": whole_chunks(text, words, limit)}
+           for name, text, limit in cases]
+    by_name = {case["name"]: case for case in out}
+    assert by_name["under_max"]["chunks"] == [under]
+    assert by_name["over_max_at_a_sentence_end"]["chunks"] == [sentence(12), sentence(12)]
+    assert by_name["correction_stays_in_its_piece"]["chunks"] == [
+        sentence(12) + " Actually no, make that Wednesday.", sentence(12)]
+    assert by_name["sentence_over_max_split_at_words"]["chunks"] == [
+        " ".join(["word"] * 10), " ".join(["word"] * 10), " ".join(["word"] * 4 + ["last."])]
+    return out
+
+
 def vectors() -> dict:
     cfg = config.load()
     slicer = []
@@ -433,6 +456,7 @@ def vectors() -> dict:
         "slicer": slicer,
         "bubble": [{"name": n, "events": e, "after_each": replay_bubble(e)} for n, e in BUBBLE_SEQUENCES.items()],
         "live_chunks": chunks,
+        "whole_chunks": whole_chunk_vectors(),
         "takes": take_vectors(),
         "correction_chunks": [
             {"name": n, "text": " ".join(t.split()[:k]), "min_tokens": 20, "max_tokens": 100, "final": final,

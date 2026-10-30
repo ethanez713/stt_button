@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Runs recordings (.pcm or .wav) through the phone's own take pipeline and pulls one JSON line each.
 #
-#     android/replay_takes.sh [--config pipeline.json] [--policy chunk|revise] <out.jsonl> <files...>
+#     android/replay_takes.sh [--config pipeline.json] [--policy chunk|whole] <out.jsonl> <files...>
 #
 # With --config the phone replays under that file in place of the bundled pipeline.json, and each
 # line's config_id is computed from it; daily takes are untouched. --policy defaults to chunk.
@@ -18,8 +18,8 @@ while [ "$#" -gt 0 ]; do
     esac
 done
 case "$policy" in
-    ""|chunk|revise) ;;
-    *) echo "replay_takes: --policy must be chunk or revise" >&2; exit 2 ;;
+    ""|chunk|whole) ;;
+    *) echo "replay_takes: --policy must be chunk or whole" >&2; exit 2 ;;
 esac
 [ "$#" -ge 2 ] || { sed -n '2,8p' "$0" >&2; exit 2; }
 out="$1"

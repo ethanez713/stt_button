@@ -253,7 +253,7 @@ class TakeController(
         val slicer = if (fieldDoc != null) Slicer.fromConfigForField(cfg) else Slicer.fromConfig(cfg)
         val engine = TakeEngine(
             fieldDoc ?: BufferDocument(), slicer, models.recognizer, models.cleaner(),
-            if (fieldDoc != null) RevisePolicy(cfg) else ChunkPolicy(cfg), cfg,
+            if (fieldDoc != null) WholePolicy(cfg) else ChunkPolicy(cfg), cfg,
             jobs = { writeJob(take.id, it) }, prepareCleaner = models::prepareCleaner,
             nowMs = SystemClock::elapsedRealtime,
         ).also {

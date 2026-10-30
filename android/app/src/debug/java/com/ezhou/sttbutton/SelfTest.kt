@@ -20,7 +20,7 @@ import kotlin.concurrent.thread
  * adb shell am start-foreground-service -n com.ezhou.sttbutton/.SelfTest --es wav <name> [--ei speed N]
  * adb shell am start-foreground-service -n com.ezhou.sttbutton/.SelfTest --es asr <name>
  * adb shell am start-foreground-service -n com.ezhou.sttbutton/.SelfTest --es clean <name>
- * adb shell am start-foreground-service -n com.ezhou.sttbutton/.SelfTest --ez replay true [--es policy chunk|revise]
+ * adb shell am start-foreground-service -n com.ezhou.sttbutton/.SelfTest --ez replay true [--es policy chunk|whole]
  * adb shell am start-foreground-service -n com.ezhou.sttbutton/.SelfTest --es play <name>
  *
  * wav plays files/selftest/<name>.wav through the take pipeline (models, slicer, worker, chunk
@@ -75,15 +75,15 @@ class SelfTest : Service() {
 
     /**
      * Plays [audio] into a take at [speed] times real time and returns what it would insert into a field
-     * that holds [seed]. Under the revise policy audio is fed only while no job is in flight, so the text
+     * that holds [seed]. Under the whole policy audio is fed only while no job is in flight, so the text
      * does not depend on the speed, and slices close on the field cadence. Chunk keeps the buffer cadence.
      */
     private fun runTake(
         models: Models, cfg: PipelineConfig, audio: ShortArray, speed: Int, policy: String = "chunk", seed: String = "",
     ): TakeRun {
         val bubble = BubbleText()
-        val slicer = if (policy == "revise") Slicer.fromConfigForField(cfg) else Slicer.fromConfig(cfg)
-        val chosen = if (policy == "revise") RevisePolicy(cfg) else ChunkPolicy(cfg)
+        val slicer = if (policy == "whole") Slicer.fromConfigForField(cfg) else Slicer.fromConfig(cfg)
+        val chosen = if (policy == "whole") WholePolicy(cfg) else ChunkPolicy(cfg)
         val engine = TakeEngine(BufferDocument(seed), slicer, models.recognizer, models.cleaner(), chosen, cfg, jobs = { r ->
             Log.i(TAG, "selftest job ${r.kind} ${r.moment} ${r.outcome} ms=${r.ms} in=${r.input?.length} out=${r.output?.length}")
         }, prepareCleaner = models::prepareCleaner)
@@ -112,7 +112,7 @@ class SelfTest : Service() {
         }
         val piece = Slicer.SAMPLE_RATE / 10
         for (at in audio.indices step piece) {
-            if (policy == "revise") driver.settle()
+            if (policy == "whole") driver.settle()
             val buffer = audio.copyOfRange(at, minOf(audio.size, at + piece))
             val slices = slicer.feed(buffer)
             engine.onAudio()
