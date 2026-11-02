@@ -6,7 +6,7 @@ enum class Moment { SLICE, PAUSE, FINISH }
 /**
  * What a policy sees of a take's region: the uncleaned [tail] starting at document offset [tailStart],
  * whether any of the region has been cleaned, the [kept] targets a speculative clean has already answered,
- * a token counter, and how many edits the user made inside the region.
+ * and a token counter.
  */
 class PolicyView(
     val tail: String,
@@ -14,7 +14,6 @@ class PolicyView(
     val cleanedAny: Boolean,
     val kept: Set<String>,
     val countTokens: (String) -> Int,
-    val editsInside: Int = 0,
 )
 
 /**

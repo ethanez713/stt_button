@@ -418,7 +418,6 @@ class TakeEngine(
                 policy.next(
                     PolicyView(
                         tail, tailStart, chunks.isNotEmpty() || region.cleanEnd > region.start + lead, kept.keys.toSet(), counter(),
-                        editsInside,
                     ),
                     moment,
                 )

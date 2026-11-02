@@ -178,9 +178,9 @@ class WholePolicyTest {
     }
 
     @Test
-    fun given_an_edit_inside_the_region_when_the_take_finishes_then_it_is_not_cleaned() {
+    fun given_an_edit_inside_the_region_when_the_take_finishes_then_the_text_as_typed_is_converted_and_not_settled() {
         val editor = FakeEditor("")
-        val heard = "see you question mark extra words today."
+        val heard = "see you question mark"
         val rig = Rig(config(), editor, Unused(), Heard({ if (it == 1) heard else "" }, { "settled text should not land here today." }))
         rig.feed(audio(3.0, 3.0))
         assertTrue(editor.text, editor.text.contains("question mark"))
@@ -191,10 +191,28 @@ class WholePolicyTest {
 
         assertTrue(rig.clean.isEmpty())
         assertTrue(editor.text, editor.text.contains("zz"))
-        assertTrue(editor.text, editor.text.contains("question mark"))
-        assertFalse(editor.text, editor.text.contains("?"))
+        assertFalse(editor.text, editor.text.contains("question mark"))
+        assertTrue(editor.text, editor.text.contains("?"))
         assertEquals("edited", result.settle)
         assertTrue(rig.records.none { it.moment == "settle" })
+    }
+
+    @Test
+    fun given_a_take_over_the_skip_rule_edited_inside_when_it_finishes_then_one_clean_covers_the_typed_text() {
+        val editor = FakeEditor("")
+        val heard = sentence("a")
+        val rig = Rig(config(), editor, Upper(), Heard({ heard }, { "settled text should not land here today." }))
+        rig.feed(audio(3.0, 3.0))
+        editor.type(2, 0, ",")
+        rig.doc.sync()
+
+        val result = rig.finish()
+
+        val clean = rig.clean.single()
+        assertEquals("applied", clean.outcome)
+        assertTrue(clean.input!!, clean.input!!.contains(","))
+        assertEquals(clean.input!!.uppercase(), editor.text)
+        assertEquals("edited", result.settle)
     }
 
     @Test
@@ -221,25 +239,26 @@ class WholePolicyTest {
     }
 
     @Test
-    fun given_an_edit_during_the_clean_when_it_returns_then_the_field_stays_as_the_user_left_it() {
+    fun given_an_edit_during_the_clean_when_it_returns_then_that_clean_is_dropped_and_the_typed_text_is_cleaned_next() {
         val editor = FakeEditor("")
         val heard = labelled("a", 3)
         val rig = Rig(config(), editor, Upper(), Heard({ heard }, { heard }))
         rig.slicer.feed(audio(3.0, 0.0))
         rig.engine.stop()
+        var typed = false
         while (true) {
             val job = rig.engine.next() ?: break
-            if (job.kind == Job.Kind.CLEAN) {
+            if (job.kind == Job.Kind.CLEAN && !typed) {
+                typed = true
                 editor.type(2, 0, "zz")
                 rig.doc.sync()
             }
             rig.engine.complete(job, job.run())
         }
 
-        assertTrue(editor.text, editor.text.contains("zz"))
-        assertTrue(editor.text, editor.text.contains("a1"))
-        assertFalse(editor.text, editor.text.contains("A1"))
-        assertEquals("dropped", rig.clean.single().outcome)
+        assertEquals(listOf("dropped", "applied"), rig.clean.map { it.outcome })
+        assertTrue(editor.text, editor.text.contains("ZZ"))
+        assertFalse(editor.text, editor.text.contains("a1"))
         assertNull(rig.engine.next())
     }
 }
