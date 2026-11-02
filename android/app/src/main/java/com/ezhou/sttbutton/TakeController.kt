@@ -16,6 +16,7 @@ import android.widget.Toast
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import java.io.File
+import java.util.Locale
 import java.util.UUID
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
@@ -36,6 +37,7 @@ class TakeController(
     private val handler = Handler(Looper.getMainLooper())
     private val configBytes = service.assets.open("pipeline.json").use { it.readBytes() }
     private val cfg = PipelineConfig(org.json.JSONObject(String(configBytes)))
+    private val takeStyle = TakeStyle(cfg.appCategories)
     private val configId by lazy {
         ConfigId.of(configBytes, ModelFiles.required.map { it to File(service.filesDir, it).length() })
     }
@@ -49,6 +51,7 @@ class TakeController(
     private var session: TakeSession? = null
     private val runs = HashMap<TakeSession, Run>()
     private var fieldAtTap: AccessibilityNodeInfo? = null
+    private var tapField = TapField(Category.DEFAULT, null, null, null, null)
     private val returnedBy = HashMap<String, String?>()
     private val bubbleQueued = AtomicBoolean(false)
     private var tracker: FieldTracker? = null
@@ -65,7 +68,8 @@ class TakeController(
     private class Run(
         val take: Take, val models: Models, val engine: TakeEngine, val driver: TakeDriver, val recorder: Recorder,
         val cost: TakeCost, val sampler: CostSampler, val bubbleText: BubbleText, val preview: PreviewRecognizer,
-        val level: AudioLevel, val executor: ExecutorService,
+        val level: AudioLevel, val executor: ExecutorService, val category: Category,
+        val fieldInputType: Int?, val fieldMultiLine: Boolean?, val fieldHint: String?, val fieldViewId: String?,
     ) {
         /** The field the take was started in. Text goes to the focused field, or to this one when nothing is. */
         var field: AccessibilityNodeInfo? = null
@@ -86,6 +90,10 @@ class TakeController(
         var detached = false
     }
 
+    private class TapField(
+        val category: Category, val inputType: Int?, val multiLine: Boolean?, val hint: String?, val viewId: String?,
+    )
+
     /** Where a finished take's text goes, as the field stood when the engine finished. */
     private class Placement(val field: AccessibilityNodeInfo?, val fieldText: String?, val body: String)
 
@@ -105,12 +113,25 @@ class TakeController(
         }
         val field = service.focusedField()
         val pkg = field?.packageName?.toString() ?: service.activePackage() ?: UNKNOWN_PACKAGE
+        tapField = readTapField(pkg, field)
         val fresh = TakeSession(Take(UUID.randomUUID().toString(), pkg, SystemClock.elapsedRealtime()), cfg.takeCapS * 1000L) {
             SystemClock.uptimeMillis()
         }
         session = fresh
         fieldAtTap = field
         dispatch(fresh, TakeEvent.Tap(micGranted()))
+    }
+
+    private fun readTapField(pkg: String, field: AccessibilityNodeInfo?): TapField {
+        if (field == null) {
+            // No input type to read. multiLine keeps that from classifying as a form, so only the package decides.
+            return TapField(takeStyle.classify(pkg, 0, true, null, null), null, null, null, null)
+        }
+        val inputType = field.inputType
+        val multiLine = FieldPolicy.multiLine(field.isMultiLine, inputType)
+        val hint = field.hintText?.toString()
+        val viewId = field.viewIdResourceName
+        return TapField(takeStyle.classify(pkg, inputType, multiLine, hint, viewId), inputType, multiLine, hint, viewId)
     }
 
     private fun micGranted(): Boolean {
@@ -254,6 +275,7 @@ class TakeController(
         val engine = TakeEngine(
             fieldDoc ?: BufferDocument(), slicer, models.recognizer, models.cleaner(),
             if (fieldDoc != null) WholePolicy(cfg) else ChunkPolicy(cfg), cfg,
+            category = tapField.category,
             jobs = { writeJob(take.id, it) }, prepareCleaner = models::prepareCleaner,
             nowMs = SystemClock::elapsedRealtime,
         ).also {
@@ -291,7 +313,10 @@ class TakeController(
             preview.offer(samples, length, slicer.paused)
         }
         val cost = TakeCost(AndroidCostProbe(service)).also { it.start() }
-        val run = Run(take, models, engine, driver, recorder, cost, CostSampler(cost), bubbleText, preview, level, executor)
+        val run = Run(
+            take, models, engine, driver, recorder, cost, CostSampler(cost), bubbleText, preview, level, executor,
+            tapField.category, tapField.inputType, tapField.multiLine, tapField.hint, tapField.viewId,
+        )
         run.field = field
         run.fieldDoc = fieldDoc
         run.fieldId = taken
@@ -372,7 +397,7 @@ class TakeController(
 
     /** The field is gone: what was heard after the last write has nowhere to go but the clipboard. */
     private fun deliverUnwritten(current: TakeSession, run: Run, result: LiveResult) {
-        val body = Pipeline.trimMessageEnd(Pipeline.withoutSignOff(result.cleaned).trim())
+        val body = shape(Pipeline.withoutSignOff(result.cleaned).trim(), run, casual = false, multiLine = null)
         run.placement = Placement(null, null, body)
         dispatch(current, TakeEvent.EngineFinished(if (body.isBlank()) Delivery.BLANK else Delivery.NO_FIELD))
     }
@@ -384,7 +409,10 @@ class TakeController(
         val start = run.engine.textStart.coerceAtMost(end)
         val field = targetField(run)
         val dictated = state.text.substring(start, end)
-        val body = Documents.finalText(dictated, run.textBefore, state.text, FieldPolicy.multiLine(field?.isMultiLine ?: true, field?.inputType ?: 0), cfg)
+        val body = Documents.finalText(
+            dictated, run.textBefore, state.text, FieldPolicy.multiLine(field?.isMultiLine ?: true, field?.inputType ?: 0),
+            cfg, run.category,
+        )
         if (body != dictated) {
             doc.replace(start, end, body)
             run.engine.markFieldWrite()
@@ -400,9 +428,8 @@ class TakeController(
         val otherPackage = field != null && take.pkg != UNKNOWN_PACKAGE && field.packageName?.toString() != take.pkg
         val fieldText = if (field != null && !otherPackage) inserter.textOf(field) else null
         val signedOff = Pipeline.withoutSignOff(result.cleaned)
-        val cleaned = if (fieldText != null && fieldText.isEmpty()) Pipeline.casual(signedOff, cfg) else signedOff
-        val shaped = if (field == null) cleaned else Pipeline.forField(cleaned, FieldPolicy.multiLine(field.isMultiLine, field.inputType))
-        val body = Pipeline.trimMessageEnd(shaped)
+        val multiLine = field?.let { FieldPolicy.multiLine(it.isMultiLine, it.inputType) }
+        val body = shape(signedOff, run, casual = fieldText != null && fieldText.isEmpty(), multiLine)
         run.placement = Placement(field, fieldText, body)
         dispatch(current, TakeEvent.EngineFinished(when {
             body.isBlank() -> Delivery.BLANK
@@ -410,6 +437,21 @@ class TakeController(
             else -> Delivery.INSERT
         }))
     }
+
+    private fun shape(text: String, run: Run, casual: Boolean, multiLine: Boolean?): String {
+        val style = cfg.styles.getValue(run.category)
+        val styled = Pipeline.styled(text, if (casual) style else style.copy(casual = false), cfg)
+        val fitted = if (multiLine == null) styled else Pipeline.forField(styled, multiLine)
+        return if (style.keepEnd) fitted else Pipeline.trimMessageEnd(fitted)
+    }
+
+    private fun fieldLog(run: Run): Array<Pair<String, Any?>> = arrayOf(
+        "category" to run.category.name.lowercase(Locale.ROOT),
+        "field_input_type" to run.fieldInputType,
+        "field_multi_line" to run.fieldMultiLine,
+        "field_hint" to run.fieldHint,
+        "field_view_id" to run.fieldViewId,
+    )
 
     private fun insert(current: TakeSession, run: Run, trigger: String) {
         if (run.fieldDoc != null && !run.detached) {
@@ -433,7 +475,7 @@ class TakeController(
         val caretAfter = inserter.readCaret(field)
         stampTextTiming(current, run, writingNow = true)
         log.write("insert", take.id,
-            "pkg" to take.pkg, "raw" to result.raw, "cleaned" to body, "text_before" to outcome.textBefore,
+            "pkg" to take.pkg, *fieldLog(run), "raw" to result.raw, "cleaned" to body, "text_before" to outcome.textBefore,
             "insert_path" to outcome.path, "landed" to outcome.landed,
             "readback" to outcome.readback, "landed_count" to outcome.landedCount,
             "attempts" to outcome.attempts, "copied" to outcome.copied,
@@ -460,7 +502,7 @@ class TakeController(
         run.sampler.stop()
         stampTextTiming(current, run, writingNow = false)
         log.write("insert", take.id,
-            "pkg" to take.pkg, "raw" to result.raw, "cleaned" to placement.body, "text_before" to run.textBefore,
+            "pkg" to take.pkg, *fieldLog(run), "raw" to result.raw, "cleaned" to placement.body, "text_before" to run.textBefore,
             "insert_path" to "field", "field_read" to run.fieldRead, "readback" to null, "landed_count" to null, "attempts" to null,
             "sel_before" to null, "sel_after" to null,
             "writes" to run.fieldDoc?.writes, "writes_held" to run.driver.heldWrites, "held_max_ms" to run.driver.heldMaxMs,

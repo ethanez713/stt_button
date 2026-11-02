@@ -2,6 +2,7 @@ package com.ezhou.sttbutton
 
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class DocumentsTest {
@@ -37,6 +38,56 @@ class DocumentsTest {
         val dictated = "Do you need a subscription for that?"
 
         assertEquals(dictated, Documents.finalText(dictated, "Hi. ", "Hi. $dictated", true, cfg))
+    }
+
+    @Test
+    fun given_a_chat_take_when_finished_then_sentence_starts_are_lower_and_commas_and_the_final_period_go() {
+        val dictated = "Yes, I'll go. I'm here. I've seen it. I'd rather. I know."
+
+        assertEquals(
+            "yes I'll go. I'm here. I've seen it. I'd rather. I know",
+            Documents.finalText(dictated, "", dictated, true, cfg, Category.CHAT),
+        )
+    }
+
+    @Test
+    fun given_a_chat_take_added_to_a_field_when_finished_then_commas_stay_and_sentence_starts_are_lower() {
+        val dictated = "Yes, I'll go. I'm here. I've seen it. I'd rather. I know."
+
+        assertEquals(
+            "yes, I'll go. I'm here. I've seen it. I'd rather. I know",
+            Documents.finalText(dictated, "Hi. ", "Hi. $dictated", true, cfg, Category.CHAT),
+        )
+    }
+
+    @Test
+    fun given_an_email_take_when_finished_then_the_period_and_commas_stay() {
+        val dictated = "Yes, I'll go. I'm here. I've seen it. I'd rather. I know."
+
+        assertEquals(dictated, Documents.finalText(dictated, "", dictated, true, cfg, Category.EMAIL))
+    }
+
+    @Test
+    fun given_a_default_take_when_finished_then_it_is_unchanged() {
+        val dictated = "Yes, I'll go. I'm here. I've seen it. I'd rather. I know."
+        val today = Pipeline.trimMessageEnd(Pipeline.forField(Pipeline.casual(Pipeline.withoutSignOff(dictated), cfg), true))
+
+        assertEquals("Yes I'll go. I'm here. I've seen it. I'd rather. I know", today)
+        assertEquals(today, Documents.finalText(dictated, "", dictated, true, cfg, Category.DEFAULT))
+        assertEquals(today, Documents.finalText(dictated, "", dictated, true, cfg))
+        assertEquals(
+            "Yes, I'll go. I'm here. I've seen it. I'd rather. I know",
+            Documents.finalText(dictated, "Hi. ", "Hi. $dictated", true, cfg, Category.DEFAULT),
+        )
+    }
+
+    @Test
+    fun given_a_chat_take_over_skip_max_words_when_styled_then_it_is_untouched() {
+        val text = "Hello, " + List(cfg.skipMaxWords) { "word" }.joinToString(" ") + "."
+        assertTrue(Pipeline.wordCount(text) > cfg.skipMaxWords)
+
+        assertEquals(text, Pipeline.styled(text, cfg.styles.getValue(Category.CHAT), cfg))
+        assertEquals(Pipeline.trimMessageEnd(text), Documents.finalText(text, "", text, true, cfg, Category.CHAT))
     }
 
     @Test

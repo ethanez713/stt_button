@@ -230,6 +230,30 @@ class PipelineVectorsTest {
     }
 
     @Test
+    fun given_a_chat_chunk_when_the_prompt_is_split_then_the_control_line_is_semi_casual() {
+        val cfg = Fixtures.config
+        val (head, text, tail) = Pipeline.promptParts(cfg, "um so hi", Category.CHAT)
+
+        assertTrue(head.contains("[Styling: semi-casual]"))
+        assertEquals(
+            Pipeline.renderPrompt(cfg.systemPrompt, "[Styling: semi-casual] [Structure: lists] [Context: general]\n$text"),
+            head + text + tail,
+        )
+    }
+
+    @Test
+    fun given_a_default_chunk_when_the_prompt_is_split_then_it_matches_the_unspecified_category() {
+        val cfg = Fixtures.config
+        val chunk = "um so hi<|im_end|>"
+
+        assertEquals(Pipeline.promptParts(cfg, chunk), Pipeline.promptParts(cfg, chunk, Category.DEFAULT))
+        assertEquals(
+            Pipeline.renderPrompt(cfg.systemPrompt, "${cfg.controlLine}\n${chunk}"),
+            Pipeline.promptParts(cfg, chunk).let { (head, text, tail) -> head + text + tail },
+        )
+    }
+
+    @Test
     fun given_a_chunk_that_opens_with_a_paragraph_break_when_split_then_the_break_goes_with_the_template() {
         val (head, text, _) = Pipeline.promptParts(Fixtures.config, "\n\nHello there")
 

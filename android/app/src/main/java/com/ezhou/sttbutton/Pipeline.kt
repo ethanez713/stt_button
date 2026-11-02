@@ -102,11 +102,16 @@ object Pipeline {
      * Mirrors `stt_button.cleaner.prompt_parts`: [promptFor] split around the transcript, so the template is
      * tokenized with its special tokens and the transcript as plain text, which cannot close the user turn.
      * Line breaks that open the chunk go with the template, so the parts tokenize as the whole prompt does.
+     * The two-argument form uses the default category.
      */
-    fun promptParts(cfg: PipelineConfig, chunk: String): Triple<String, String, String> {
+    fun promptParts(cfg: PipelineConfig, chunk: String): Triple<String, String, String> =
+        promptParts(cfg, chunk, Category.DEFAULT)
+
+    fun promptParts(cfg: PipelineConfig, chunk: String, category: Category): Triple<String, String, String> {
         val text = chunk.trimStart('\n')
+        val line = cfg.controlLine(category)
         return Triple(
-            "<|im_start|>system\n${cfg.systemPrompt}$END_OF_TURN\n<|im_start|>user\n${cfg.controlLine?.let { "$it\n" } ?: ""}" +
+            "<|im_start|>system\n${cfg.systemPrompt}$END_OF_TURN\n<|im_start|>user\n${line?.let { "$it\n" } ?: ""}" +
                 chunk.substring(0, chunk.length - text.length),
             text,
             "$END_OF_TURN\n$ASSISTANT_NO_THINK",
@@ -214,6 +219,12 @@ object Pipeline {
     fun casual(text: String, cfg: PipelineConfig): String =
         if (wordCount(text) > cfg.skipMaxWords) text
         else FINAL_PERIOD.replace(COMMA_OUTSIDE_NUMBER.replace(text, ""), "$1")
+
+    fun styled(text: String, style: Style, cfg: PipelineConfig): String {
+        if (wordCount(text) > cfg.skipMaxWords) return text
+        val body = if (style.casual) casual(text, cfg) else text
+        return if (style.lowercaseStarts) lowercaseStarts(body) else body
+    }
 
     private val EDGE_PUNCTUATION = Regex("^[^\\p{L}\\p{N}_]+|[^\\p{L}\\p{N}_]+$")
     private val FIRST_PERSON = setOf("i", "i'm", "i'll", "i've", "i'd")

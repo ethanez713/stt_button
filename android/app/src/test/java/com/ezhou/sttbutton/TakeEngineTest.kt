@@ -35,6 +35,7 @@ class TakeEngineTest {
         private val onClean: (String) -> Unit = {},
     ) : Cleaner {
         val calls = mutableListOf<String>()
+        val categories = mutableListOf<Category>()
         val completed = mutableListOf<String>()
         var armed: (() -> Unit)? = null
         @Volatile var cancelled = false
@@ -45,6 +46,7 @@ class TakeEngineTest {
             cancelled = false
             armed?.also { armed = null }?.invoke()
             calls += request.target
+            categories += request.category
             onClean(request.target)
             if (cancelled) return null
             completed += request.target
@@ -88,10 +90,14 @@ class TakeEngineTest {
         pauseOpen: Boolean = true,
         nowMs: () -> Long = { System.nanoTime() / 1_000_000 },
         settles: Boolean = doc is FieldDocument,
+        category: Category = Category.DEFAULT,
     ) {
         val records = mutableListOf<JobRecord>()
         val policy = GatedPolicy(ChunkPolicy(cfg)).also { it.pauseOpen = pauseOpen }
-        val engine = TakeEngine(doc, slicer, recognizer, cleaner, policy, cfg, jobs = { records += it }, prepareCleaner = prepare, nowMs = nowMs, settles = settles)
+        val engine = TakeEngine(
+            doc, slicer, recognizer, cleaner, policy, cfg, category = category,
+            jobs = { records += it }, prepareCleaner = prepare, nowMs = nowMs, settles = settles,
+        )
         val driver = SerialDriver(engine)
 
         fun feed(samples: ShortArray) {
@@ -167,6 +173,30 @@ class TakeEngineTest {
             assertEquals("$name clean_mode", expected.getString("clean_mode"), result.cleanMode)
             assertEquals("$name chunks", expected.getInt("chunks"), result.chunks)
         }
+    }
+
+    @Test
+    fun given_a_chat_category_when_a_chunk_is_cleaned_then_the_request_carries_it() {
+        val cleaner = MarkingCleaner()
+        val rig = Rig(cfg, ScriptedRecognizer("Put it on the shelf please now"), cleaner, category = Category.CHAT)
+
+        rig.feed(tone(3))
+        rig.finish()
+
+        assertTrue(cleaner.categories.isNotEmpty())
+        assertTrue(cleaner.categories.all { it == Category.CHAT })
+    }
+
+    @Test
+    fun given_no_category_when_a_chunk_is_cleaned_then_the_request_is_the_default() {
+        val cleaner = MarkingCleaner()
+        val rig = Rig(cfg, ScriptedRecognizer("Put it on the shelf please now"), cleaner)
+
+        rig.feed(tone(3))
+        rig.finish()
+
+        assertTrue(cleaner.categories.isNotEmpty())
+        assertTrue(cleaner.categories.all { it == Category.DEFAULT })
     }
 
     @Test

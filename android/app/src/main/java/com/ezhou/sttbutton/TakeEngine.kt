@@ -110,6 +110,8 @@ class TakeEngine(
     private val cleaner: Cleaner,
     private val policy: CleanPolicy,
     private val cfg: PipelineConfig,
+    /** The field's category at the tap. Replay and the self-test omit it, so they stay on the default. */
+    private val category: Category = Category.DEFAULT,
     private val jobs: (JobRecord) -> Unit = {},
     private val prepareCleaner: (trigger: String) -> Unit = {},
     private val nowMs: () -> Long = { System.nanoTime() / 1_000_000 },
@@ -655,7 +657,7 @@ class TakeEngine(
         abandonSpoken = if (plan.abandonable) spoken else null
         return Job(Job.Kind.CLEAN, moment, plan = plan) {
             val started = System.nanoTime()
-            val result = if (plan.abandonable && slicer.lastSpeechEnd != spoken) null else cleaner.clean(CleanRequest(plan.target))
+            val result = if (plan.abandonable && slicer.lastSpeechEnd != spoken) null else cleaner.clean(CleanRequest(plan.target, category))
             val ms = elapsedMs(started)
             if (result == null) {
                 Cleaned(null, null, 0, 0, ms)

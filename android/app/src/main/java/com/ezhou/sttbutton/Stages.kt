@@ -10,8 +10,8 @@ interface Recognizer {
     fun recognize(request: RecognizeRequest): Recognized
 }
 
-/** [target] is the text to clean. */
-class CleanRequest(val target: String)
+/** [target] is the text to clean. [category] selects its control line; omitted means the default, which is what a replay sends. */
+class CleanRequest(val target: String, val category: Category = Category.DEFAULT)
 
 class CleanResult(val text: String, val outTokens: Int)
 
