@@ -16,6 +16,7 @@ from collections import Counter, defaultdict
 from pathlib import Path
 
 from experiments import config_ids, paths
+from stt_button import config
 
 DEFAULT_EDITS = paths.REPO / "data" / "phone" / "edits.jsonl"
 CLASSES = ("untouched", "marks", "words", "gone")
@@ -57,8 +58,14 @@ def classify(cleaned: str, text_after: str, span_start: int, span_end: int) -> t
     return "words", runs, now
 
 
+def category_of(insert: dict, app_categories: dict[str, str]) -> str:
+    """The logged category, or for a take logged before categories existed the one its package maps to: input
+    types were not logged, so a form or short-message field there reads as the default."""
+    return insert.get("category") or app_categories.get(insert.get("pkg"), "default")
+
+
 def analyse(lines: list[dict]) -> tuple[list[dict], Counter]:
-    """Counted takes as {id, ts, pkg, clean_mode, cleaned, text_before, reference, class, runs}, and how many inserted takes were not counted, by reason."""
+    """Counted takes as {id, ts, pkg, category, clean_mode, cleaned, text_before, reference, class, runs}, and how many inserted takes were not counted, by reason."""
     inserts, edits = defaultdict(list), {}
     for line in lines:
         if line.get("event") == "insert":
@@ -66,6 +73,7 @@ def analyse(lines: list[dict]) -> tuple[list[dict], Counter]:
         elif line.get("event") == "edit":
             edits[line["id"]] = line
     counted, skipped = [], Counter()
+    app_categories = config.load().get("app_categories", {})
     for take_id, rows in inserts.items():
         edit = edits.get(take_id)
         if len(rows) > 1:
@@ -77,7 +85,7 @@ def analyse(lines: list[dict]) -> tuple[list[dict], Counter]:
         else:
             insert = rows[0]
             cls, runs, reference = classify(insert["cleaned"], edit["text_after"], edit["span_start"], edit["span_end"])
-            counted.append({"id": take_id, "ts": insert.get("ts"), "pkg": insert.get("pkg"), "clean_mode": insert.get("clean_mode"),
+            counted.append({"id": take_id, "ts": insert.get("ts"), "pkg": insert.get("pkg"), "category": category_of(insert, app_categories), "clean_mode": insert.get("clean_mode"),
                             "cleaned": insert["cleaned"], "text_before": insert.get("text_before") or "",
                             "reference": reference.strip(), "class": cls, "runs": runs})
     return counted, skipped
@@ -101,7 +109,7 @@ def report(lines: list[dict]) -> str:
     if counted:
         untouched = sum(r["class"] == "untouched" for r in counted)
         out += [_shares(counted), f"zero-edit rate: {untouched / len(counted) * 100:.0f}% ({untouched} of {len(counted)})",
-                "\nby package:", *_by(counted, "pkg"), "\nby clean_mode:", *_by(counted, "clean_mode")]
+                "\nby category:", *_by(counted, "category"), "\nby package:", *_by(counted, "pkg"), "\nby clean_mode:", *_by(counted, "clean_mode")]
     replaced = [r for r in counted if r["class"] == "words"]
     if replaced:
         out.append("\nreplaced words (cleaned → now):")

@@ -648,6 +648,20 @@ class TestCorrections:
         assert "zero-edit rate: 50% (1 of 2)" in text
         assert "c: phalanx → failing" in text
 
+    def test_a_take_logged_before_categories_takes_its_packages_category(self):
+        from experiments import corrections
+        lines = _take("a", "Hi.", " Hi.", (0, 4), pkg="com.discord") + _take("b", "Hi.", " Hi.", (0, 4), pkg="unlisted")
+        lines[0]["category"] = None
+        by_id = {r["id"]: r["category"] for r in corrections.analyse(lines)[0]}
+        assert by_id == {"a": "chat", "b": "default"}
+
+    def test_a_logged_category_wins_over_the_package(self):
+        from experiments import corrections
+        lines = _take("a", "Hi.", " Hi.", (0, 4), pkg="com.discord")
+        lines[0]["category"] = "form"
+        assert corrections.analyse(lines)[0][0]["category"] == "form"
+        assert "form: 1 takes" in corrections.report(lines)
+
 
 class TestConfigIds:
     def write(self, tmp_path, *ids):
