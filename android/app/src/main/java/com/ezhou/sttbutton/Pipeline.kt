@@ -1,6 +1,7 @@
 package com.ezhou.sttbutton
 
 import org.json.JSONObject
+import java.util.Locale
 
 /** The values `config/pipeline.json` shares with the host library, plus the functions that apply them. */
 class PipelineConfig(json: JSONObject) {
@@ -26,10 +27,48 @@ class PipelineConfig(json: JSONObject) {
     val selfCorrectionCues: List<String> = json.getJSONArray("self_correction_cues").let { a -> List(a.length(), a::getString) }
     private val cleaner = json.getJSONObject("cleaners").getJSONObject(json.getString("cleaner"))
     val systemPrompt: String = cleaner.getString("system_prompt")
-    val controlLine: String? = if (cleaner.isNull("control_line")) null else cleaner.getString("control_line")
+    internal val controlTemplate: String? = if (cleaner.isNull("control_line")) null else cleaner.getString("control_line")
+    val styles: Map<Category, Style> = readStyles(json.getJSONObject("styles"))
+    val appCategories: Map<String, Category> = readAppCategories(json.getJSONObject("app_categories"))
+    val controlLine: String? = renderControlLine(controlTemplate, styles.getValue(Category.DEFAULT))
     val maxNewTokensRatio = cleaner.getDouble("max_new_tokens_ratio")
     val maxNewTokensPad = cleaner.getInt("max_new_tokens_pad")
 }
+
+fun PipelineConfig.controlLine(category: Category): String? =
+    renderControlLine(controlTemplate, styles.getValue(category))
+
+private fun readStyles(obj: JSONObject): Map<Category, Style> {
+    val out = mutableMapOf<Category, Style>()
+    val names = obj.keys()
+    while (names.hasNext()) {
+        val name = names.next()
+        val row = obj.getJSONObject(name)
+        out[categoryOf(name)] = Style(
+            row.getString("styling"),
+            row.getString("structure"),
+            row.getBoolean("casual"),
+            row.getBoolean("lowercase_starts"),
+            row.getBoolean("keep_end"),
+        )
+    }
+    return out
+}
+
+private fun readAppCategories(obj: JSONObject): Map<String, Category> {
+    val out = mutableMapOf<String, Category>()
+    val names = obj.keys()
+    while (names.hasNext()) {
+        val name = names.next()
+        out[name] = categoryOf(obj.getString(name))
+    }
+    return out
+}
+
+private fun categoryOf(name: String): Category = Category.valueOf(name.uppercase(Locale.ROOT))
+
+private fun renderControlLine(template: String?, style: Style): String? =
+    template?.replace("{styling}", style.styling)?.replace("{structure}", style.structure)
 
 object Pipeline {
     private const val ASSISTANT_NO_THINK = "<|im_start|>assistant\n<think>\n\n</think>\n\n"
@@ -315,6 +354,28 @@ object Pipeline {
         val word = token.drop(lead.length).trimEnd { !it.isLetterOrDigit() && it != '\'' && it != '\u2019' }.replace('\u2019', '\'')
         if (word.isEmpty() || word.lowercase() in FIRST_PERSON || word.drop(1) != word.drop(1).lowercase()) return body
         return body.substring(0, lead.length) + body[lead.length].lowercaseChar() + body.substring(lead.length + 1)
+    }
+
+    fun lowercaseStarts(text: String): String {
+        if (text.isEmpty()) return text
+        val out = StringBuilder(text)
+        lowercaseWordAt(out, 0)
+        for (match in SENTENCE_BREAK.findAll(text)) lowercaseWordAt(out, match.range.last + 1)
+        return out.toString()
+    }
+
+    private fun lowercaseWordAt(out: StringBuilder, start: Int) {
+        var at = start
+        while (at < out.length && out[at].isWhitespace()) at++
+        if (at >= out.length) return
+        val token = out.substring(at).takeWhile { !it.isWhitespace() }
+        val lead = token.takeWhile { !it.isLetterOrDigit() }
+        val word = token.drop(lead.length).trimEnd { !it.isLetterOrDigit() && it != '\'' && it != '\u2019' }
+            .replace('\u2019', '\'')
+        // Root locale: the default locale folds "I" to "ı", which would miss the "I" words.
+        if (word.isEmpty() || word.lowercase(Locale.ROOT) in FIRST_PERSON || word.drop(1) != word.drop(1).lowercase(Locale.ROOT)) return
+        val index = at + lead.length
+        out.setCharAt(index, out[index].lowercaseChar())
     }
 
     /** Mirrors `stt_button.asr.settled_mark`. */

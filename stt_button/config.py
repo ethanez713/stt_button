@@ -6,8 +6,19 @@ REPO = Path(__file__).resolve().parent.parent
 PIPELINE_JSON = REPO / "config" / "pipeline.json"
 
 
+def render_control_line(template: str | None, style: dict) -> str | None:
+    if template is None:
+        return None
+    return template.replace("{styling}", style["styling"]).replace("{structure}", style["structure"])
+
+
 def load() -> dict:
-    return json.loads(PIPELINE_JSON.read_text())
+    cfg = json.loads(PIPELINE_JSON.read_text())
+    # The file stores a template. Callers read control_line as the prompt text, which is the default style.
+    default = cfg["styles"]["default"]
+    for spec in cfg["cleaners"].values():
+        spec["control_line"] = render_control_line(spec["control_line"], default)
+    return cfg
 
 
 def model_dir() -> Path:

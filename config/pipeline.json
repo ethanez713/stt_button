@@ -49,12 +49,33 @@
   "recognizer": "unified",
   "preview_model": "fc-stream480",
   "cleaner": "s1-mini",
+  "styles": {
+    "default": {"styling": "semi-formal", "structure": "lists", "casual": true, "lowercase_starts": false, "keep_end": false},
+    "chat": {"styling": "semi-casual", "structure": "lists", "casual": true, "lowercase_starts": true, "keep_end": false},
+    "email": {"styling": "semi-formal", "structure": "lists", "casual": false, "lowercase_starts": false, "keep_end": true},
+    "notes": {"styling": "semi-formal", "structure": "lists", "casual": false, "lowercase_starts": false, "keep_end": true},
+    "form": {"styling": "semi-formal", "structure": "prose", "casual": false, "lowercase_starts": false, "keep_end": false}
+  },
+  "app_categories": {
+    "com.google.android.apps.messaging": "chat",
+    "com.samsung.android.messaging": "chat",
+    "com.discord": "chat",
+    "com.facebook.orca": "chat",
+    "com.whatsapp": "chat",
+    "org.telegram.messenger": "chat",
+    "com.instagram.android": "chat",
+    "com.snapchat.android": "chat",
+    "com.google.android.gm": "email",
+    "com.microsoft.office.outlook": "email",
+    "com.google.android.keep": "notes",
+    "com.samsung.android.app.notes": "notes"
+  },
   "cleaners": {
     "s1-mini": {
       "model": "s1-mini/s1-mini-q4_k_m.gguf",
       "ollama_model": "s1-mini-stt",
       "system_prompt": "You are a text normalizer for speech-to-text transcripts. The input begins with a control line specifying the styling, structure, and context settings; clean the transcript to match those settings and output only the cleaned text.",
-      "control_line": "[Styling: semi-formal] [Structure: lists] [Context: general]",
+      "control_line": "[Styling: {styling}] [Structure: {structure}] [Context: general]",
       "max_new_tokens_ratio": 1.3,
       "max_new_tokens_pad": 32
     },

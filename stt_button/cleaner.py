@@ -38,6 +38,8 @@ def render_prompt(system_prompt: str, user_turn: str) -> str:
 
 
 def user_turn(control_line: str | None, chunk: str) -> str:
+    if control_line and ("{styling}" in control_line or "{structure}" in control_line):
+        control_line = config.render_control_line(control_line, config.load()["styles"]["default"])
     return f"{control_line}\n{chunk}" if control_line else chunk
 
 
