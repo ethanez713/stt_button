@@ -68,7 +68,7 @@ class LlamaChunkCleaner(private val llama: LlamaCleaner, private val cfg: Pipeli
         val chunk = request.target
         cancelRequested = false
         val started = System.nanoTime()
-        val spoken = Spoken.convert(chunk)
+        val spoken = Spoken.convert(chunk, cfg.nameMap)
         val (head, transcript, tail) = Pipeline.promptParts(cfg, spoken, request.category)
         val text = llama.clean(head, transcript, tail, Pipeline.maxNewTokens(cfg, countTokens(spoken)))
         if (text != null) {

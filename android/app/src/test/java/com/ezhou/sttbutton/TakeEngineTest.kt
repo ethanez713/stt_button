@@ -133,12 +133,12 @@ class TakeEngineTest {
 
     private fun tone(seconds: Int) = ShortArray(seconds * Slicer.SAMPLE_RATE) { (9000 * Math.sin(2 * Math.PI * 220 * it / 16000)).toInt().toShort() }
 
-    private fun scriptConfig(overrides: JSONObject) = PipelineConfig(JSONObject(Fixtures.resource("pipeline.json")).also { base ->
+    private fun scriptConfig(overrides: JSONObject, names: JSONArray? = null) = PipelineConfig(JSONObject(Fixtures.resource("pipeline.json")).also { base ->
         overrides.keys().forEach { base.put(it, overrides.get(it)) }
-    })
+    }, names)
 
     private fun runScript(script: JSONObject): LiveResult {
-        val config = scriptConfig(script.getJSONObject("cfg"))
+        val config = scriptConfig(script.getJSONObject("cfg"), script.optJSONArray("name_map"))
         val replacements = Fixtures.objects(JSONArray().also { }).let { script.optJSONArray("cleaner") }
             ?.let { arr -> List(arr.length()) { arr.getJSONArray(it).getString(0) to arr.getJSONArray(it).getString(1) } }.orEmpty()
         val slices = script.getJSONArray("slices").let { arr -> List(arr.length()) { arr.getJSONArray(it).getString(0) to arr.getJSONArray(it).getString(1) } }
@@ -163,7 +163,7 @@ class TakeEngineTest {
     @Test
     fun given_every_take_script_when_run_then_the_engine_inserts_what_the_host_library_does() {
         val scripts = Fixtures.objects(Fixtures.vectors.getJSONArray("takes"))
-        assertEquals(16, scripts.size)
+        assertEquals(18, scripts.size)
         for (script in scripts) {
             val expected = script.getJSONObject("result")
             val result = runScript(script)

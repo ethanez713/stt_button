@@ -663,8 +663,8 @@ class TakeEngine(
                 Cleaned(null, null, 0, 0, ms)
             } else {
                 val rejected = if (result.text.isBlank()) "empty" else Pipeline.untrustedClean(plan.target, result.text)
-                val text = if (rejected != null) Spoken.convert(plan.target) else result.text
-                Cleaned(Spoken.keepSpokenEnding(plan.target, text), rejected, cleaner.countTokens(plan.target), result.outTokens, ms)
+                val text = if (rejected != null) Spoken.convert(plan.target, cfg.nameMap) else result.text
+                Cleaned(Spoken.keepSpokenEnding(plan.target, text, cfg.nameMap), rejected, cleaner.countTokens(plan.target), result.outTokens, ms)
             }
         }
     }
@@ -705,7 +705,7 @@ class TakeEngine(
                 record("dropped", cleaned.text)
             }
             else -> {
-                val text = cleaned.text ?: Spoken.convert(plan.target)
+                val text = cleaned.text ?: Spoken.convert(plan.target, cfg.nameMap)
                 apply(flight.from, flight.to, text, plan)
                 record(if (cleaned.text == null || cleaned.rejected != null) "fallback" else "applied", text)
             }
@@ -720,7 +720,7 @@ class TakeEngine(
 
     private fun applyLocal(plan: CleanPlan) {
         region.flightOver(plan.from, plan.to)
-        val text = Spoken.convert(plan.target)
+        val text = Spoken.convert(plan.target, cfg.nameMap)
         replaceDocument(plan.from, plan.to, text)
         region.flightReplaced(text.length)
         onText?.invoke(regionText())

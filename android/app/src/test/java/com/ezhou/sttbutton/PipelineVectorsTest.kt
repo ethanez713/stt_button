@@ -7,6 +7,11 @@ import org.junit.Test
 class PipelineVectorsTest {
     private fun bounds(slices: List<IntArray>) = slices.map { it.toList() }
 
+    private fun nameMap(case: org.json.JSONObject): List<Pair<String, String>> {
+        val names = case.optJSONArray("name_map") ?: return emptyList()
+        return List(names.length()) { names.getJSONArray(it).let { pair -> pair.getString(0) to pair.getString(1) } }
+    }
+
     private fun sliced(case: org.json.JSONObject, piece: Int): List<List<Int>> {
         val pause = case.getJSONObject("pause")
         val slicer = Slicer(
@@ -69,7 +74,7 @@ class PipelineVectorsTest {
     @Test
     fun given_spoken_ending_vectors_when_kept_then_they_match_the_host() {
         for (case in Fixtures.objects(Fixtures.vectors.getJSONArray("spoken_ending"))) {
-            assertEquals(case.getString("chunk"), case.getString("kept"), Spoken.keepSpokenEnding(case.getString("chunk"), case.getString("cleaned")))
+            assertEquals(case.getString("chunk"), case.getString("kept"), Spoken.keepSpokenEnding(case.getString("chunk"), case.getString("cleaned"), nameMap(case)))
         }
     }
 
@@ -129,7 +134,7 @@ class PipelineVectorsTest {
     @Test
     fun given_spoken_vectors_when_converted_then_text_matches_the_host() {
         for (case in Fixtures.objects(Fixtures.vectors.getJSONArray("spoken"))) {
-            assertEquals(case.getString("text"), case.getString("spoken"), Spoken.convert(case.getString("text")))
+            assertEquals(case.getString("text"), case.getString("spoken"), Spoken.convert(case.getString("text"), nameMap(case)))
         }
     }
 

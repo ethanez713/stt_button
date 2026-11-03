@@ -1,7 +1,8 @@
 """Spoken punctuation: "quote … unquote", "open paren … close paren", "question mark", "new line".
 
-Applied to raw text before the cleaner sees it, and on the path that skips the cleaner. A text with
-no command comes back untouched; the Kotlin port in Spoken.kt is tested on the same vectors.
+Applied to raw text before the cleaner sees it, and on the path that skips the cleaner. A name map
+passed in rewrites misheard names on whole words first. A text with no command and no mapped name
+comes back untouched; the Kotlin port in Spoken.kt is tested on the same vectors.
 """
 
 import re
@@ -239,17 +240,66 @@ def _render(items: list[tuple]) -> str:
     return "".join(out)
 
 
-def keep_spoken_ending(chunk: str, cleaned: str) -> str:
+def keep_spoken_ending(chunk: str, cleaned: str, name_map: list[list[str]] | None = None) -> str:
     """A question or exclamation mark the speaker dictated at the end of a chunk outranks the full
     stop the cleaner prefers there ("ask if anyone wants it sooner question mark")."""
-    spoken = spoken_punctuation(chunk).rstrip()
+    spoken = spoken_punctuation(chunk, name_map).rstrip()
     if spoken != chunk.rstrip() and spoken[-1:] in ("?", "!") and cleaned.rstrip().endswith("."):
         return cleaned.rstrip()[:-1] + spoken[-1]
     return cleaned
 
 
-def spoken_punctuation(text: str) -> str:
-    text = resolve_restatements(_MARK_ECHO.sub(" ", text))
+def _apply_name_map(text: str, name_map: list[list[str]] | None) -> str:
+    if not name_map or not text:
+        return text
+    keys = [(heard.lower().split(), written) for heard, written in name_map]
+    keys = [(words, written) for words, written in keys if words]
+    if not keys:
+        return text
+    keys.sort(key=lambda item: -len(item[0]))
+    spans = list(_TOKEN_SPAN.finditer(text))
+    if not spans:
+        return text
+    tokens = []
+    for match in spans:
+        lead, core, trail = _TOKEN.match(match.group()).groups()
+        tokens.append((match.start(), match.end(), lead, core.lower(), trail))
+    pieces: list[str] = []
+    cursor = index = 0
+    changed = False
+    while index < len(tokens):
+        found = None
+        for words, written in keys:
+            size = len(words)
+            if index + size > len(tokens) or any(tokens[index + at][3] != words[at] for at in range(size)):
+                continue
+            # "acme, park" is not the words "acme park": a mark between them is not whitespace.
+            if any(tokens[index + at][4] or tokens[index + at + 1][2] for at in range(size - 1)):
+                continue
+            found = (size, written)
+            break
+        if found is None:
+            index += 1
+            continue
+        size, written = found
+        start, lead = tokens[index][0], tokens[index][2]
+        end, trail = tokens[index + size - 1][1], tokens[index + size - 1][4]
+        rewritten = f"{lead}{written}{trail}"
+        index += size
+        if rewritten == text[start:end]:
+            continue
+        pieces.append(text[cursor:start])
+        pieces.append(rewritten)
+        cursor = end
+        changed = True
+    if not changed:
+        return text
+    pieces.append(text[cursor:])
+    return "".join(pieces)
+
+
+def spoken_punctuation(text: str, name_map: list[list[str]] | None = None) -> str:
+    text = resolve_restatements(_MARK_ECHO.sub(" ", _apply_name_map(text, name_map)))
     elements = _parse(text)
     if not any(kind in _COMMAND_KINDS for kind, *_ in elements):
         return text

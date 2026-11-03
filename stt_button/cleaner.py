@@ -412,7 +412,7 @@ class Cleaner:
     def clean_chunk(self, chunk: str, cancelled: Callable[[], bool] | None = None) -> tuple[str, int] | None:
         """The cleaned text of one chunk and the tokens generated, or None when cancelled() turned
         true while generating."""
-        chunk = spoken_punctuation(chunk)
+        chunk = spoken_punctuation(chunk, self.cfg.get("name_map"))
         if self.backend == "ollama" and _SPECIAL_TOKEN_TEXT.search(chunk):
             # Ollama parses special tokens anywhere in a raw prompt, so such a chunk is not sent.
             return chunk.strip(), 0
@@ -427,7 +427,7 @@ class Cleaner:
         replaces the configured chunk size, which experiments use to compare against a whole pass."""
         started = time.monotonic()
         if skip and skips_cleaner(raw, self.cfg):
-            return Cleaned(casual(without_sign_off(spoken_punctuation(raw)), self.cfg), int((time.monotonic() - started) * 1000), 0, 0, 0)
+            return Cleaned(casual(without_sign_off(spoken_punctuation(raw, self.cfg.get("name_map"))), self.cfg), int((time.monotonic() - started) * 1000), 0, 0, 0)
         outputs = []
         in_tokens = out_tokens = 0
         chunks = live_chunks(raw, self.count_tokens, min_tokens or self.cfg["chunk_min_tokens"],

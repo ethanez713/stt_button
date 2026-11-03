@@ -17,6 +17,9 @@ venv/
 # Host recordings and experiment outputs are personal audio/text
 data/
 
+# Personal heard-to-written names. Packaged into the APK when the file is present.
+config/names.json
+
 # Fetched by android/fetch_native.sh
 android/app/src/main/jniLibs/
 android/app/.cxx/

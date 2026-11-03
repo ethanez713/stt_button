@@ -1,10 +1,13 @@
 package com.ezhou.sttbutton
 
+import android.content.res.AssetManager
+import org.json.JSONArray
 import org.json.JSONObject
+import java.io.FileNotFoundException
 import java.util.Locale
 
 /** The values `config/pipeline.json` shares with the host library, plus the functions that apply them. */
-class PipelineConfig(json: JSONObject) {
+class PipelineConfig(json: JSONObject, names: JSONArray? = null) {
     val takeCapS = json.getInt("take_cap_s")
     val sliceMaxS = json.getDouble("slice_max_s")
     val sliceSearchS = json.getDouble("slice_search_s")
@@ -25,6 +28,7 @@ class PipelineConfig(json: JSONObject) {
     val skipMaxWords = json.getInt("skip_max_words")
     val cleanerLoadAfterS = json.getDouble("cleaner_load_after_s")
     val selfCorrectionCues: List<String> = json.getJSONArray("self_correction_cues").let { a -> List(a.length(), a::getString) }
+    val nameMap: List<Pair<String, String>> = readNameMap(names)
     private val cleaner = json.getJSONObject("cleaners").getJSONObject(json.getString("cleaner"))
     val systemPrompt: String = cleaner.getString("system_prompt")
     internal val controlTemplate: String? = if (cleaner.isNull("control_line")) null else cleaner.getString("control_line")
@@ -33,7 +37,24 @@ class PipelineConfig(json: JSONObject) {
     val controlLine: String? = renderControlLine(controlTemplate, styles.getValue(Category.DEFAULT))
     val maxNewTokensRatio = cleaner.getDouble("max_new_tokens_ratio")
     val maxNewTokensPad = cleaner.getInt("max_new_tokens_pad")
+
+    companion object {
+        fun fromAssets(assets: AssetManager, pipelineBytes: ByteArray): PipelineConfig =
+            PipelineConfig(JSONObject(String(pipelineBytes)), namesAsset(assets))
+
+        private fun namesAsset(assets: AssetManager): JSONArray? =
+            try {
+                JSONArray(String(assets.open("names.json").use { it.readBytes() }))
+            } catch (_: FileNotFoundException) {
+                // config/names.json is optional; a build without it has no such asset.
+                null
+            }
+    }
 }
+
+private fun readNameMap(names: JSONArray?): List<Pair<String, String>> =
+    if (names == null) emptyList()
+    else List(names.length()) { i -> names.getJSONArray(i).let { it.getString(0) to it.getString(1) } }
 
 fun PipelineConfig.controlLine(category: Category): String? =
     renderControlLine(controlTemplate, styles.getValue(category))

@@ -1921,6 +1921,93 @@
     "clean_mode": "chunks",
     "chunks": 1
    }
+  },
+  {
+   "name": "name_map_on_a_skipped_take",
+   "steps": [
+    [
+     "audio",
+     [
+      [
+       "silence",
+       0.3
+      ],
+      [
+       "noise",
+       3,
+       8000
+      ]
+     ]
+    ]
+   ],
+   "slices": [
+    [
+     "in acme park, ohio",
+     "."
+    ]
+   ],
+   "name_map": [
+    [
+     "acme park",
+     "Acme Park"
+    ],
+    [
+     "zorbo",
+     "Zorbo Labs"
+    ]
+   ],
+   "cfg": {
+    "chunk_min_tokens": 15,
+    "chunk_max_tokens": 1000,
+    "skip_max_words": 5,
+    "pause_s": 0.8,
+    "slice_min_s": 2
+   },
+   "result": {
+    "raw": "in acme park, ohio",
+    "cleaned": "in Acme Park ohio",
+    "clean_mode": "raw",
+    "chunks": 0
+   }
+  },
+  {
+   "name": "empty_name_map_on_a_skipped_take",
+   "steps": [
+    [
+     "audio",
+     [
+      [
+       "silence",
+       0.3
+      ],
+      [
+       "noise",
+       3,
+       8000
+      ]
+     ]
+    ]
+   ],
+   "slices": [
+    [
+     "in acme park, ohio",
+     "."
+    ]
+   ],
+   "name_map": [],
+   "cfg": {
+    "chunk_min_tokens": 15,
+    "chunk_max_tokens": 1000,
+    "skip_max_words": 5,
+    "pause_s": 0.8,
+    "slice_min_s": 2
+   },
+   "result": {
+    "raw": "in acme park, ohio",
+    "cleaned": "in acme park ohio",
+    "clean_mode": "raw",
+    "chunks": 0
+   }
   }
  ],
  "correction_chunks": [
@@ -9404,6 +9491,67 @@
   {
    "text": "",
    "spoken": ""
+  },
+  {
+   "text": "in acme park, ohio",
+   "spoken": "in Acme Park, ohio",
+   "name_map": [
+    [
+     "acme park",
+     "Acme Park"
+    ],
+    [
+     "zorbo",
+     "Zorbo Labs"
+    ]
+   ]
+  },
+  {
+   "text": "acme, ohio",
+   "spoken": "acme, ohio",
+   "name_map": [
+    [
+     "acme park",
+     "Acme Park"
+    ],
+    [
+     "zorbo",
+     "Zorbo Labs"
+    ]
+   ]
+  },
+  {
+   "text": "ZORBO.",
+   "spoken": "Zorbo Labs.",
+   "name_map": [
+    [
+     "acme park",
+     "Acme Park"
+    ],
+    [
+     "zorbo",
+     "Zorbo Labs"
+    ]
+   ]
+  },
+  {
+   "text": "zorbos",
+   "spoken": "zorbos",
+   "name_map": [
+    [
+     "acme park",
+     "Acme Park"
+    ],
+    [
+     "zorbo",
+     "Zorbo Labs"
+    ]
+   ]
+  },
+  {
+   "text": "in acme park, ohio",
+   "spoken": "in acme park, ohio",
+   "name_map": []
   }
  ],
  "skips_cleaner": {

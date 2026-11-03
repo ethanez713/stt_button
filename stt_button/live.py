@@ -147,7 +147,7 @@ class LiveTake:
         self.stop()
         raw = self.raw
         if skips_cleaner(raw, self.cfg):
-            return LiveResult(raw, trim_message_end(casual(without_sign_off(spoken_punctuation(raw)), self.cfg)), 0, "raw", self.asr_ms - self._stop_asr_ms, 0,
+            return LiveResult(raw, trim_message_end(casual(without_sign_off(spoken_punctuation(raw, self.cfg.get("name_map"))), self.cfg)), 0, "raw", self.asr_ms - self._stop_asr_ms, 0,
                               context_decodes=self.context_decodes, context_fallbacks=self.context_fallbacks)
         chunks = self._clean_closed(final=True)
         outputs = [self.cleaned_chunks[c] for c in chunks]
@@ -239,9 +239,10 @@ class LiveTake:
             self.drifts += 1
         elif reason:
             self.rejects += 1
+        names = self.cfg.get("name_map")
         if reason:
-            cleaned = spoken_punctuation(chunk)
-        self.cleaned_chunks[chunk] = keep_spoken_ending(chunk, cleaned)
+            cleaned = spoken_punctuation(chunk, names)
+        self.cleaned_chunks[chunk] = keep_spoken_ending(chunk, cleaned, names)
 
     def _announce(self, chunk: str) -> None:
         if self.bubble:

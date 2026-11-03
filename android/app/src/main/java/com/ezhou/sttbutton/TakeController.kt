@@ -36,7 +36,7 @@ class TakeController(
     private val tag = DictationService.TAG
     private val handler = Handler(Looper.getMainLooper())
     private val configBytes = service.assets.open("pipeline.json").use { it.readBytes() }
-    private val cfg = PipelineConfig(org.json.JSONObject(String(configBytes)))
+    private val cfg = PipelineConfig.fromAssets(service.assets, configBytes)
     private val takeStyle = TakeStyle(cfg.appCategories)
     private val configId by lazy {
         ConfigId.of(configBytes, ModelFiles.required.map { it to File(service.filesDir, it).length() })

@@ -134,7 +134,8 @@ class SelfTest : Service() {
 
     private fun take(context: Context, name: String, speed: Int) {
         val dir = File(context.filesDir, "selftest")
-        val cfg = PipelineConfig(org.json.JSONObject(context.assets.open("pipeline.json").bufferedReader().readText()))
+        val configBytes = context.assets.open("pipeline.json").use { it.readBytes() }
+        val cfg = PipelineConfig.fromAssets(context.assets, configBytes)
         val audio = readWav(File(dir, "$name.wav"))
         val models = Models.forFiles(context.filesDir, cfg)
         val run = runTake(models, cfg, audio, speed)
@@ -161,7 +162,7 @@ class SelfTest : Service() {
         val inputs = File(dir, "replay")
         val override = File(inputs, "pipeline.json").takeIf { it.isFile }?.readBytes()
         val configBytes = override ?: context.assets.open("pipeline.json").use { it.readBytes() }
-        val cfg = PipelineConfig(org.json.JSONObject(String(configBytes)))
+        val cfg = PipelineConfig.fromAssets(context.assets, configBytes)
         val configId = ConfigId.of(configBytes, ModelFiles.required.map { it to File(context.filesDir, it).length() })
         val out = File(dir, "replay.jsonl")
         val files = inputs.listFiles { f -> f.isFile && f.extension in listOf("pcm", "wav") }.orEmpty().sortedBy { it.name }

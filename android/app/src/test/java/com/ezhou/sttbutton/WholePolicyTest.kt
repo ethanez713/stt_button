@@ -171,7 +171,7 @@ class WholePolicyTest {
         val result = rig.finish()
 
         assertTrue(rig.clean.isEmpty())
-        assertEquals(Spoken.convert(heard), editor.text)
+        assertEquals(Spoken.convert(heard, rig.cfg.nameMap), editor.text)
         assertEquals("see you?", editor.text)
         assertEquals("raw", result.cleanMode)
         assertEquals(0, result.chunks)

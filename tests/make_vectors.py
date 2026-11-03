@@ -169,6 +169,8 @@ SPOKEN_TEXTS = [
     "",
 ]
 
+SYNTHETIC_NAMES = [["acme park", "Acme Park"], ["zorbo", "Zorbo Labs"]]
+
 
 DRIFT_CASES = [
     ("Agents attach to my S20 Ultra today.", "Agents attach to my S25 Ultra today."),
@@ -327,6 +329,10 @@ TAKE_SCRIPTS = [
      "cleaner": [["TODAY.", "TODAY. SEE X.IO"]], "slices": [["Send the plan to the team please now today.", "."]]},
     {"name": "spoken_question_mark_at_a_chunks_end", "steps": [["audio", [LEAD, SPEECH]]],
      "cleaner": [[" QUESTION MARK", "."]], "slices": [["then ask if anyone wants it sooner question mark", "."]]},
+    {"name": "name_map_on_a_skipped_take", "steps": [["audio", [LEAD, SPEECH]]],
+     "slices": [["in acme park, ohio", "."]], "name_map": SYNTHETIC_NAMES},
+    {"name": "empty_name_map_on_a_skipped_take", "steps": [["audio", [LEAD, SPEECH]]],
+     "slices": [["in acme park, ohio", "."]], "name_map": []},
 ]
 
 
@@ -359,7 +365,7 @@ class MarkingCleaner:
 
 
 def run_take_script(script: dict, with_idle: bool = True) -> dict:
-    cfg = {**config.load(), **TAKE_CFG, **script.get("cfg", {})}
+    cfg = {**config.load(), **TAKE_CFG, **script.get("cfg", {}), "name_map": script.get("name_map", [])}
     recognizer = ScriptedRecognizer(script["slices"])
     take = LiveTake(recognizer, lambda: MarkingCleaner(script.get("cleaner", [])), cfg)
     piece = SR // 10
@@ -404,6 +410,14 @@ def take_vectors() -> list[dict]:
     assert by_name["short_whole_take_okay_is_kept"]["result"]["raw"] == "Okay."
     assert by_name["short_tail_with_real_words_is_kept"]["result"]["raw"] == "Meet me at noon. See you tomorrow."
     assert by_name["yeah_tail_of_two_seconds_is_kept"]["result"]["raw"] == "Meet me at noon. Yeah."
+    skipped = by_name["name_map_on_a_skipped_take"]["result"]
+    assert skipped["clean_mode"] == "raw" and skipped["chunks"] == 0
+    assert skipped["raw"] == "in acme park, ohio"
+    assert skipped["cleaned"] == "in Acme Park ohio"
+    empty = by_name["empty_name_map_on_a_skipped_take"]["result"]
+    assert empty["clean_mode"] == "raw" and empty["chunks"] == 0
+    assert empty["raw"] == "in acme park, ohio"
+    assert empty["cleaned"] == "in acme park ohio"
     return out
 
 
@@ -436,6 +450,22 @@ def whole_chunk_vectors() -> list[dict]:
     assert by_name["sentence_over_max_split_at_words"]["chunks"] == [
         " ".join(["word"] * 10), " ".join(["word"] * 10), " ".join(["word"] * 4 + ["last."])]
     return out
+
+
+def spoken_vectors() -> list[dict]:
+    rows = [{"text": text, "spoken": spoken_punctuation(text)} for text in SPOKEN_TEXTS]
+    cases = [
+        ("in acme park, ohio", SYNTHETIC_NAMES, "in Acme Park, ohio"),
+        ("acme, ohio", SYNTHETIC_NAMES, "acme, ohio"),
+        ("ZORBO.", SYNTHETIC_NAMES, "Zorbo Labs."),
+        ("zorbos", SYNTHETIC_NAMES, "zorbos"),
+        ("in acme park, ohio", [], "in acme park, ohio"),
+    ]
+    for text, name_map, expected in cases:
+        spoken = spoken_punctuation(text, name_map)
+        assert spoken == expected, (text, spoken)
+        rows.append({"text": text, "spoken": spoken, "name_map": name_map})
+    return rows
 
 
 def vectors() -> dict:
@@ -487,7 +517,7 @@ def vectors() -> dict:
             ("sooner question mark", "Sooner?"),
             ("", ""),
         ]],
-        "spoken": [{"text": t, "spoken": spoken_punctuation(t)} for t in SPOKEN_TEXTS],
+        "spoken": spoken_vectors(),
         "skips_cleaner": {
             "skip_max_words": cfg["skip_max_words"],
             "self_correction_cues": cfg["self_correction_cues"],

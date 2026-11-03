@@ -51,8 +51,8 @@ object Spoken {
     private class Item(val kind: String, val a: String, val b: String = "")
 
     /** Mirrors `stt_button.spoken.keep_spoken_ending`. */
-    fun keepSpokenEnding(chunk: String, cleaned: String): String {
-        val spoken = convert(chunk).trimEnd()
+    fun keepSpokenEnding(chunk: String, cleaned: String, nameMap: List<Pair<String, String>> = emptyList()): String {
+        val spoken = convert(chunk, nameMap).trimEnd()
         val mark = spoken.lastOrNull()
         return if (spoken != chunk.trimEnd() && (mark == '?' || mark == '!') && cleaned.trimEnd().endsWith(".")) cleaned.trimEnd().dropLast(1) + mark
         else cleaned
@@ -106,12 +106,57 @@ object Spoken {
         return null
     }
 
-    fun convert(input: String): String {
-        val text = resolveRestatements(MARK_ECHO.replace(input, " "))
+    fun convert(input: String, nameMap: List<Pair<String, String>> = emptyList()): String {
+        val text = resolveRestatements(MARK_ECHO.replace(applyNames(input, nameMap), " "))
         val elements = parse(text)
         if (elements.none { it.kind in COMMAND_KINDS }) return text
         val items = pairUp(elements)
         return if (items.all { it.kind == "word" }) text else render(items)
+    }
+
+    /** Whole-word runs. Punctuation outside the run stays; a mark between its words is not whitespace, so it does not match. */
+    private fun applyNames(text: String, nameMap: List<Pair<String, String>>): String {
+        if (nameMap.isEmpty() || text.isEmpty()) return text
+        class Key(val words: List<String>, val written: String)
+        class Span(val from: Int, val to: Int, val lead: String, val core: String, val trail: String)
+        val keys = nameMap.mapNotNull { (heard, written) ->
+            val words = heard.lowercase().split(WHITESPACE).filter { it.isNotEmpty() }
+            if (words.isEmpty()) null else Key(words, written)
+        }.sortedByDescending { it.words.size }
+        if (keys.isEmpty()) return text
+        val tokens = TOKEN_SPAN.findAll(text).map { span ->
+            val groups = checkNotNull(TOKEN.matchEntire(span.value)).groupValues
+            Span(span.range.first, span.range.last + 1, groups[1], groups[2].lowercase(), groups[3])
+        }.toList()
+        if (tokens.isEmpty()) return text
+        val pieces = mutableListOf<String>()
+        var cursor = 0
+        var index = 0
+        var changed = false
+        while (index < tokens.size) {
+            val found = keys.firstOrNull { key ->
+                val size = key.words.size
+                index + size <= tokens.size &&
+                    key.words.indices.all { at -> tokens[index + at].core == key.words[at] } &&
+                    (0 until size - 1).all { at -> tokens[index + at].trail.isEmpty() && tokens[index + at + 1].lead.isEmpty() }
+            }
+            if (found == null) {
+                index += 1
+                continue
+            }
+            val start = tokens[index]
+            val end = tokens[index + found.words.size - 1]
+            val rewritten = start.lead + found.written + end.trail
+            index += found.words.size
+            if (rewritten == text.substring(start.from, end.to)) continue
+            pieces += text.substring(cursor, start.from)
+            pieces += rewritten
+            cursor = end.to
+            changed = true
+        }
+        if (!changed) return text
+        pieces += text.substring(cursor)
+        return pieces.joinToString("")
     }
 
     private fun parse(text: String): List<Element> {
