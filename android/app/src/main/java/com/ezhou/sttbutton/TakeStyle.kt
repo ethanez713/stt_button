@@ -19,7 +19,8 @@ class TakeStyle(private val appCategories: Map<String, Category>) {
         if (kind in FORM_VARIATIONS) return Category.FORM
         pkg?.let { appCategories[it] }?.let { return it }
         if (kind == SHORT_MESSAGE) return Category.CHAT
-        if (!multiLine) return Category.FORM
+        // Compose text fields report TYPE_NULL and single-line whatever they hold, so neither says it is a form.
+        if (!multiLine && inputType != InputType.TYPE_NULL) return Category.FORM
         return Category.DEFAULT
     }
 

@@ -81,6 +81,13 @@ class TakeStyleTest {
     }
 
     @Test
+    fun given_a_single_line_field_with_no_input_type_when_classified_then_it_is_not_a_form() {
+        assertEquals(Category.DEFAULT, classify("ai.x.grok", 0, multiLine = false))
+        assertEquals(Category.DEFAULT, classify("com.anthropic.claude", 0, multiLine = false))
+        assertEquals(Category.CHAT, classify("com.discord", 0, multiLine = false))
+    }
+
+    @Test
     fun given_a_multi_line_field_in_an_unknown_app_when_classified_then_it_is_the_default() {
         assertEquals(Category.DEFAULT, classify(null, text, multiLine = true))
         assertEquals(Category.DEFAULT, classify("com.example.unknown", multi, multiLine = true))
