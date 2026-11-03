@@ -25,7 +25,7 @@ class Overlay(
     private val context: Context,
     private val onTap: () -> Unit,
     private val onPlacementChanged: () -> Unit,
-    private val level: () -> Double?,
+    private val bands: () -> DoubleArray?,
 ) {
     private val windowManager = context.getSystemService(WindowManager::class.java)
     private val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -155,7 +155,7 @@ class Overlay(
     @SuppressLint("ClickableViewAccessibility")
     private fun arcColor() = style.recordingRgb or (0xFF shl 24)
 
-    private fun createView(): WaveButtonView = WaveButtonView(context, level, mode).apply {
+    private fun createView(): WaveButtonView = WaveButtonView(context, bands, mode).apply {
         setArcColor(arcColor())
         background = oval(style.color(mode))
         val slop = ViewConfiguration.get(context).scaledTouchSlop

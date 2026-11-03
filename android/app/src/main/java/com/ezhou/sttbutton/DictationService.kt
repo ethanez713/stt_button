@@ -55,7 +55,7 @@ class DictationService : AccessibilityService() {
             this,
             onTap = { controller.onTap() },
             onPlacementChanged = ::reconcile,
-            level = { controller.currentLevelDbfs() },
+            bands = { controller.currentBands() },
         )
         bubble = BubbleOverlay(this)
         controller = TakeController(this, overlay, bubble).also {

@@ -1,6 +1,7 @@
 package com.ezhou.sttbutton
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import kotlin.math.pow
 
@@ -51,5 +52,52 @@ class WaveLevelTest {
         wave.reset()
         assertEquals(0.0, wave.update(-50.0), 0.0)
         assertEquals(1.0, wave.update(-32.0), 1e-12)
+    }
+
+    @Test
+    fun given_a_bar_when_the_target_moves_then_it_rises_at_once_falls_by_a_fifth_and_rests_on_the_floor() {
+        val bars = BarSmoother()
+        assertEquals(0.2, bars.update(0, 0.2), 0.0)
+        assertEquals(1.0, bars.update(0, 1.0), 0.0)
+        var expected = 1.0
+        while (expected * 0.8 >= 0.06) {
+            expected *= 0.8
+            assertEquals(expected, bars.update(0, 0.0), 0.0)
+        }
+        assertEquals(0.06, bars.update(0, 0.0), 0.0)
+        assertEquals(0.06, bars.update(0, 0.0), 0.0)
+        assertEquals(0.5, bars.update(0, 0.5), 0.0)
+        bars.update(1, 1.0)
+        assertEquals(0.5, bars.level(0), 0.0)
+        assertEquals(0.8, bars.update(1, 0.0), 0.0)
+    }
+
+    @Test
+    fun given_the_cleaning_ripple_when_time_passes_then_each_bar_peaks_after_the_one_before_it() {
+        var previous = 0.0
+        var after = 0.0
+        for (bar in 0 until 7) {
+            val peak = peakAfter(bar, after)
+            assertTrue("bar $bar peaks at $peak after $previous", peak > previous)
+            assertEquals(0.32, cleaningRipple(peak, bar), 1e-4)
+            previous = peak
+            after = peak
+        }
+    }
+
+    private fun peakAfter(bar: Int, after: Double): Double {
+        var bestT = after
+        var best = Double.NEGATIVE_INFINITY
+        var t = after
+        val end = after + 1.0 / 0.8
+        while (t <= end) {
+            val level = cleaningRipple(t, bar)
+            if (level > best) {
+                best = level
+                bestT = t
+            }
+            t += 0.0002
+        }
+        return bestT
     }
 }
