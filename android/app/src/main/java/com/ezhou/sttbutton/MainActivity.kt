@@ -52,6 +52,7 @@ class MainActivity : Activity() {
     private lateinit var idleSwatches: LinearLayout
     private lateinit var recordingSwatches: LinearLayout
     private lateinit var recentList: LinearLayout
+    private lateinit var stylesSection: StylesSection
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -70,6 +71,9 @@ class MainActivity : Activity() {
         content.addView(text(getString(R.string.app_name), 26f, bold = true))
         setup(content)
         button(content)
+        stylesSection = StylesSection(this)
+        content.addView(header(R.string.section_styles))
+        stylesSection.addTo(content)
         content.addView(header(R.string.section_about))
         content.addView(text(getString(R.string.restricted_settings_hint), 13f))
         content.addView(text(getString(R.string.licenses), 12f))
@@ -161,6 +165,7 @@ class MainActivity : Activity() {
         refreshMicrophone()
         unhide.isEnabled = Overlay.isHidden(this)
         showRecent()
+        stylesSection.refresh()
     }
 
     private fun showRecent() {

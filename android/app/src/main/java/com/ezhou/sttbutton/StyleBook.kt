@@ -47,7 +47,7 @@ class StyleBook(cfg: PipelineConfig, private val overrides: StyleOverrides = Sty
 
     private fun resolved(category: Category, source: StyleSource) = Resolved(category, styleFor(category), source)
 
-    private fun styleFor(category: Category): Style {
+    fun styleFor(category: Category): Style {
         val shipped = styles.getValue(category)
         val over = overrides.knobs[category] ?: return shipped
         return shipped.copy(
