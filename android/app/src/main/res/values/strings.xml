@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">STT Button</string>
+    <string name="app_name">Lispr</string>
     <string name="service_description">Places a dictation button over Gboard\'s microphone while the keyboard is in English. Everything runs on this phone.</string>
     <string name="open_accessibility">Open accessibility settings</string>
-    <string name="restricted_settings_hint">If the STT Button toggle is greyed out: Settings → Apps → STT Button → ⋮ → Allow restricted settings, then try again.</string>
+    <string name="restricted_settings_hint">If the Lispr toggle is greyed out: Settings → Apps → Lispr → ⋮ → Allow restricted settings, then try again.</string>
     <string name="drag_hint">Drag the button to move it. Drop it on Hide at the bottom-left to turn it off until you press the button below, or on Reset at the bottom-right to put it back on the microphone.</string>
     <string name="unhide">Show the button again</string>
     <string name="zone_reset">Reset</string>
@@ -69,7 +69,7 @@
     <string name="field_no_hint">No hint</string>
     <string name="field_single_line">Input type %1$d, single-line</string>
     <string name="field_multi_line">Input type %1$d, multi-line</string>
-    <string name="ime_label">STT Button recording</string>
+    <string name="ime_label">Lispr recording</string>
     <string name="ime_subtype_label">English (recording panel)</string>
     <string name="ime_stop">Stop dictation</string>
     <string name="ime_pick_keyboard">Choose keyboard</string>
