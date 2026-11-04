@@ -6,12 +6,15 @@ package com.ezhou.sttbutton
  * first, as ordinary chunk plans, over the text as the user left it. A take under the skip rule is only
  * converted.
  */
-class WholePolicy(private val cfg: PipelineConfig) : CleanPolicy {
+class WholePolicy(
+    private val cfg: PipelineConfig,
+    private val style: Style = cfg.styles.getValue(Category.DEFAULT),
+) : CleanPolicy {
     override val name = "whole"
 
     override fun next(view: PolicyView, moment: Moment): CleanPlan? {
         if (moment != Moment.FINISH) return null
-        if (!view.cleanedAny && Pipeline.skipsCleaner(view.tail, cfg)) {
+        if (!view.cleanedAny && Pipeline.skipsCleaner(view.tail, cfg, style)) {
             return if (view.tail.isNotBlank()) {
                 CleanPlan(view.tailStart, view.tailStart + view.tail.length, view.tail, local = true)
             } else {

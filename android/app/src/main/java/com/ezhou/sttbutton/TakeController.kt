@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.ComponentCallbacks2
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.media.AudioManager
@@ -15,6 +16,7 @@ import android.util.Log
 import android.widget.Toast
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import org.json.JSONObject
 import java.io.File
 import java.util.Locale
 import java.util.UUID
@@ -37,7 +39,6 @@ class TakeController(
     private val handler = Handler(Looper.getMainLooper())
     private val configBytes = service.assets.open("pipeline.json").use { it.readBytes() }
     private val cfg = PipelineConfig.fromAssets(service.assets, configBytes)
-    private val takeStyle = TakeStyle(cfg.appCategories)
     private val configId by lazy {
         ConfigId.of(configBytes, ModelFiles.required.map { it to File(service.filesDir, it).length() })
     }
@@ -51,7 +52,9 @@ class TakeController(
     private var session: TakeSession? = null
     private val runs = HashMap<TakeSession, Run>()
     private var fieldAtTap: AccessibilityNodeInfo? = null
-    private var tapField = TapField(Category.DEFAULT, null, null, null, null)
+    private var tapField = TapField(
+        Category.DEFAULT, cfg.styles.getValue(Category.DEFAULT), StyleSource.DEFAULT, null, null, null, null,
+    )
     private val returnedBy = HashMap<String, String?>()
     private val bubbleQueued = AtomicBoolean(false)
     private var tracker: FieldTracker? = null
@@ -69,6 +72,7 @@ class TakeController(
         val take: Take, val models: Models, val engine: TakeEngine, val driver: TakeDriver, val recorder: Recorder,
         val cost: TakeCost, val sampler: CostSampler, val bubbleText: BubbleText, val preview: PreviewRecognizer,
         val level: AudioLevel, val executor: ExecutorService, val category: Category,
+        val style: Style, val styleSource: StyleSource,
         val fieldInputType: Int?, val fieldMultiLine: Boolean?, val fieldHint: String?, val fieldViewId: String?,
     ) {
         /** The field the take was started in. Text goes to the focused field, or to this one when nothing is. */
@@ -91,7 +95,8 @@ class TakeController(
     }
 
     private class TapField(
-        val category: Category, val inputType: Int?, val multiLine: Boolean?, val hint: String?, val viewId: String?,
+        val category: Category, val style: Style, val source: StyleSource,
+        val inputType: Int?, val multiLine: Boolean?, val hint: String?, val viewId: String?,
     )
 
     /** Where a finished take's text goes, as the field stood when the engine finished. */
@@ -113,7 +118,7 @@ class TakeController(
         }
         val field = service.focusedField()
         val pkg = field?.packageName?.toString() ?: service.activePackage() ?: UNKNOWN_PACKAGE
-        tapField = readTapField(pkg, field)
+        tapField = readTapField(pkg, field, styleBook())
         val fresh = TakeSession(Take(UUID.randomUUID().toString(), pkg, SystemClock.elapsedRealtime()), cfg.takeCapS * 1000L) {
             SystemClock.uptimeMillis()
         }
@@ -122,16 +127,23 @@ class TakeController(
         dispatch(fresh, TakeEvent.Tap(micGranted()))
     }
 
-    private fun readTapField(pkg: String, field: AccessibilityNodeInfo?): TapField {
+    /** Built at the tap, so a settings change applies to the next take without a restart. */
+    private fun styleBook() = StyleBook(
+        cfg, StyleStore.load(service.getSharedPreferences(StyleStore.PREFS, Context.MODE_PRIVATE)).overrides(),
+    )
+
+    private fun readTapField(pkg: String, field: AccessibilityNodeInfo?, book: StyleBook): TapField {
         if (field == null) {
             // No input type to read. multiLine keeps that from classifying as a form, so only the package decides.
-            return TapField(takeStyle.classify(pkg, 0, true, null, null), null, null, null, null)
+            val resolved = book.resolve(pkg, 0, true, null, null)
+            return TapField(resolved.category, resolved.style, resolved.source, null, null, null, null)
         }
         val inputType = field.inputType
         val multiLine = FieldPolicy.multiLine(field.isMultiLine, inputType)
         val hint = field.hintText?.toString()
         val viewId = field.viewIdResourceName
-        return TapField(takeStyle.classify(pkg, inputType, multiLine, hint, viewId), inputType, multiLine, hint, viewId)
+        val resolved = book.resolve(pkg, inputType, multiLine, hint, viewId)
+        return TapField(resolved.category, resolved.style, resolved.source, inputType, multiLine, hint, viewId)
     }
 
     private fun micGranted(): Boolean {
@@ -274,8 +286,8 @@ class TakeController(
         val slicer = if (fieldDoc != null) Slicer.fromConfigForField(cfg) else Slicer.fromConfig(cfg)
         val engine = TakeEngine(
             fieldDoc ?: BufferDocument(), slicer, models.recognizer, models.cleaner(),
-            if (fieldDoc != null) WholePolicy(cfg) else ChunkPolicy(cfg), cfg,
-            category = tapField.category,
+            if (fieldDoc != null) WholePolicy(cfg, tapField.style) else ChunkPolicy(cfg, tapField.style), cfg,
+            style = tapField.style,
             jobs = { writeJob(take.id, it) }, prepareCleaner = models::prepareCleaner,
             nowMs = SystemClock::elapsedRealtime,
         ).also {
@@ -315,7 +327,7 @@ class TakeController(
         val cost = TakeCost(AndroidCostProbe(service)).also { it.start() }
         val run = Run(
             take, models, engine, driver, recorder, cost, CostSampler(cost), bubbleText, preview, level, executor,
-            tapField.category, tapField.inputType, tapField.multiLine, tapField.hint, tapField.viewId,
+            tapField.category, tapField.style, tapField.source, tapField.inputType, tapField.multiLine, tapField.hint, tapField.viewId,
         )
         run.field = field
         run.fieldDoc = fieldDoc
@@ -411,7 +423,7 @@ class TakeController(
         val dictated = state.text.substring(start, end)
         val body = Documents.finalText(
             dictated, run.textBefore, state.text, FieldPolicy.multiLine(field?.isMultiLine ?: true, field?.inputType ?: 0),
-            cfg, run.category,
+            cfg, run.style,
         )
         if (body != dictated) {
             doc.replace(start, end, body)
@@ -439,7 +451,7 @@ class TakeController(
     }
 
     private fun shape(text: String, run: Run, casual: Boolean, multiLine: Boolean?): String {
-        val style = cfg.styles.getValue(run.category)
+        val style = run.style
         val styled = Pipeline.styled(text, if (casual) style else style.copy(casual = false), cfg)
         val fitted = if (multiLine == null) styled else Pipeline.forField(styled, multiLine)
         return if (style.keepEnd) fitted else Pipeline.trimMessageEnd(fitted)
@@ -447,11 +459,21 @@ class TakeController(
 
     private fun fieldLog(run: Run): Array<Pair<String, Any?>> = arrayOf(
         "category" to run.category.name.lowercase(Locale.ROOT),
+        "style" to styleLog(run.style),
+        "style_source" to run.styleSource.name.lowercase(Locale.ROOT),
         "field_input_type" to run.fieldInputType,
         "field_multi_line" to run.fieldMultiLine,
         "field_hint" to run.fieldHint,
         "field_view_id" to run.fieldViewId,
     )
+
+    private fun styleLog(style: Style) = JSONObject()
+        .put("styling", style.styling)
+        .put("structure", style.structure)
+        .put("casual", style.casual)
+        .put("lowercase_starts", style.lowercaseStarts)
+        .put("keep_end", style.keepEnd)
+        .put("clean_short", style.cleanShort)
 
     private fun insert(current: TakeSession, run: Run, trigger: String) {
         if (run.fieldDoc != null && !run.detached) {

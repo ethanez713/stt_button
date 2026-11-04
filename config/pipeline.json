@@ -50,11 +50,11 @@
   "preview_model": "fc-stream480",
   "cleaner": "s1-mini",
   "styles": {
-    "default": {"styling": "semi-formal", "structure": "lists", "casual": true, "lowercase_starts": false, "keep_end": false},
-    "chat": {"styling": "semi-casual", "structure": "lists", "casual": true, "lowercase_starts": true, "keep_end": false},
-    "email": {"styling": "semi-formal", "structure": "lists", "casual": false, "lowercase_starts": false, "keep_end": true},
-    "notes": {"styling": "semi-formal", "structure": "lists", "casual": false, "lowercase_starts": false, "keep_end": true},
-    "form": {"styling": "semi-formal", "structure": "prose", "casual": false, "lowercase_starts": false, "keep_end": false}
+    "default": {"styling": "semi-formal", "structure": "lists", "casual": true, "lowercase_starts": false, "keep_end": false, "clean_short": false},
+    "chat": {"styling": "semi-casual", "structure": "lists", "casual": true, "lowercase_starts": true, "keep_end": false, "clean_short": false},
+    "email": {"styling": "semi-formal", "structure": "lists", "casual": false, "lowercase_starts": false, "keep_end": true, "clean_short": false},
+    "notes": {"styling": "semi-formal", "structure": "lists", "casual": false, "lowercase_starts": false, "keep_end": true, "clean_short": false},
+    "form": {"styling": "semi-formal", "structure": "prose", "casual": false, "lowercase_starts": false, "keep_end": false, "clean_short": false}
   },
   "app_categories": {
     "com.google.android.apps.messaging": "chat",

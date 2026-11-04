@@ -35,7 +35,7 @@ class TakeEngineTest {
         private val onClean: (String) -> Unit = {},
     ) : Cleaner {
         val calls = mutableListOf<String>()
-        val categories = mutableListOf<Category>()
+        val controlLines = mutableListOf<String?>()
         val completed = mutableListOf<String>()
         var armed: (() -> Unit)? = null
         @Volatile var cancelled = false
@@ -46,7 +46,7 @@ class TakeEngineTest {
             cancelled = false
             armed?.also { armed = null }?.invoke()
             calls += request.target
-            categories += request.category
+            controlLines += request.controlLine
             onClean(request.target)
             if (cancelled) return null
             completed += request.target
@@ -90,12 +90,12 @@ class TakeEngineTest {
         pauseOpen: Boolean = true,
         nowMs: () -> Long = { System.nanoTime() / 1_000_000 },
         settles: Boolean = doc is FieldDocument,
-        category: Category = Category.DEFAULT,
+        style: Style = cfg.styles.getValue(Category.DEFAULT),
     ) {
         val records = mutableListOf<JobRecord>()
-        val policy = GatedPolicy(ChunkPolicy(cfg)).also { it.pauseOpen = pauseOpen }
+        val policy = GatedPolicy(ChunkPolicy(cfg, style)).also { it.pauseOpen = pauseOpen }
         val engine = TakeEngine(
-            doc, slicer, recognizer, cleaner, policy, cfg, category = category,
+            doc, slicer, recognizer, cleaner, policy, cfg, style = style,
             jobs = { records += it }, prepareCleaner = prepare, nowMs = nowMs, settles = settles,
         )
         val driver = SerialDriver(engine)
@@ -176,27 +176,40 @@ class TakeEngineTest {
     }
 
     @Test
-    fun given_a_chat_category_when_a_chunk_is_cleaned_then_the_request_carries_it() {
+    fun given_a_style_when_a_chunk_is_cleaned_then_the_request_carries_its_control_line() {
         val cleaner = MarkingCleaner()
-        val rig = Rig(cfg, ScriptedRecognizer("Put it on the shelf please now"), cleaner, category = Category.CHAT)
+        val style = cfg.styles.getValue(Category.CHAT).copy(styling = "formal")
+        val rig = Rig(cfg, ScriptedRecognizer("Put it on the shelf please now"), cleaner, style = style)
 
         rig.feed(tone(3))
         rig.finish()
 
-        assertTrue(cleaner.categories.isNotEmpty())
-        assertTrue(cleaner.categories.all { it == Category.CHAT })
+        assertEquals(listOf("[Styling: formal] [Structure: lists] [Context: general]"), cleaner.controlLines)
     }
 
     @Test
-    fun given_no_category_when_a_chunk_is_cleaned_then_the_request_is_the_default() {
+    fun given_no_style_when_a_chunk_is_cleaned_then_the_request_carries_the_default_control_line() {
         val cleaner = MarkingCleaner()
         val rig = Rig(cfg, ScriptedRecognizer("Put it on the shelf please now"), cleaner)
 
         rig.feed(tone(3))
         rig.finish()
 
-        assertTrue(cleaner.categories.isNotEmpty())
-        assertTrue(cleaner.categories.all { it == Category.DEFAULT })
+        assertEquals(listOf("[Styling: semi-formal] [Structure: lists] [Context: general]"), cleaner.controlLines)
+    }
+
+    @Test
+    fun given_clean_short_when_a_short_take_finishes_then_it_is_cleaned() {
+        val cleaner = MarkingCleaner()
+        val style = cfg.styles.getValue(Category.DEFAULT).copy(cleanShort = true)
+        val rig = Rig(cfg, ScriptedRecognizer("Meet at noon, okay."), cleaner, style = style)
+
+        rig.feed(tone(3))
+        val result = rig.finish()
+
+        assertEquals(listOf("Meet at noon, okay."), cleaner.calls)
+        assertEquals("chunks", result.cleanMode)
+        assertEquals(1, result.chunks)
     }
 
     @Test

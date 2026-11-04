@@ -8,6 +8,8 @@ import org.junit.Test
 class DocumentsTest {
     private val cfg = PipelineConfig(JSONObject(Fixtures.resource("pipeline.json")))
 
+    private fun style(category: Category) = cfg.styles.getValue(category)
+
     @Test
     fun given_a_whole_read_when_chosen_then_the_field_is_the_document() =
         assertEquals(DocumentKind.FIELD, Documents.choose(FieldText("abc", 3, 3, whole = true)))
@@ -46,7 +48,7 @@ class DocumentsTest {
 
         assertEquals(
             "yes I'll go. I'm here. I've seen it. I'd rather. I know",
-            Documents.finalText(dictated, "", dictated, true, cfg, Category.CHAT),
+            Documents.finalText(dictated, "", dictated, true, cfg, style(Category.CHAT)),
         )
     }
 
@@ -56,7 +58,7 @@ class DocumentsTest {
 
         assertEquals(
             "yes, I'll go. I'm here. I've seen it. I'd rather. I know",
-            Documents.finalText(dictated, "Hi. ", "Hi. $dictated", true, cfg, Category.CHAT),
+            Documents.finalText(dictated, "Hi. ", "Hi. $dictated", true, cfg, style(Category.CHAT)),
         )
     }
 
@@ -64,7 +66,7 @@ class DocumentsTest {
     fun given_an_email_take_when_finished_then_the_period_and_commas_stay() {
         val dictated = "Yes, I'll go. I'm here. I've seen it. I'd rather. I know."
 
-        assertEquals(dictated, Documents.finalText(dictated, "", dictated, true, cfg, Category.EMAIL))
+        assertEquals(dictated, Documents.finalText(dictated, "", dictated, true, cfg, style(Category.EMAIL)))
     }
 
     @Test
@@ -73,11 +75,11 @@ class DocumentsTest {
         val today = Pipeline.trimMessageEnd(Pipeline.forField(Pipeline.casual(Pipeline.withoutSignOff(dictated), cfg), true))
 
         assertEquals("Yes I'll go. I'm here. I've seen it. I'd rather. I know", today)
-        assertEquals(today, Documents.finalText(dictated, "", dictated, true, cfg, Category.DEFAULT))
+        assertEquals(today, Documents.finalText(dictated, "", dictated, true, cfg, style(Category.DEFAULT)))
         assertEquals(today, Documents.finalText(dictated, "", dictated, true, cfg))
         assertEquals(
             "Yes, I'll go. I'm here. I've seen it. I'd rather. I know",
-            Documents.finalText(dictated, "Hi. ", "Hi. $dictated", true, cfg, Category.DEFAULT),
+            Documents.finalText(dictated, "Hi. ", "Hi. $dictated", true, cfg, style(Category.DEFAULT)),
         )
     }
 
@@ -87,7 +89,7 @@ class DocumentsTest {
         assertTrue(Pipeline.wordCount(text) > cfg.skipMaxWords)
 
         assertEquals(text, Pipeline.styled(text, cfg.styles.getValue(Category.CHAT), cfg))
-        assertEquals(Pipeline.trimMessageEnd(text), Documents.finalText(text, "", text, true, cfg, Category.CHAT))
+        assertEquals(Pipeline.trimMessageEnd(text), Documents.finalText(text, "", text, true, cfg, style(Category.CHAT)))
     }
 
     @Test
@@ -95,5 +97,13 @@ class DocumentsTest {
         val dictated = "First part of a long dictation that goes on and on and on for quite a few words here.\n\nSecond part of it."
 
         assertEquals(dictated.replace("\n\n", " ").removeSuffix("."), Documents.finalText(dictated, "x", "x$dictated", false, cfg))
+    }
+
+    @Test
+    fun given_a_style_when_finished_then_its_knobs_shape_the_text() {
+        val dictated = "Yes, I'll go. I'm here."
+        val style = Style("semi-formal", "prose", casual = false, lowercaseStarts = true, keepEnd = true)
+
+        assertEquals("yes, I'll go. I'm here.", Documents.finalText(dictated, "", dictated, true, cfg, style))
     }
 }

@@ -7,16 +7,15 @@ object Documents {
     fun choose(read: FieldText?): DocumentKind = if (read?.whole == true) DocumentKind.FIELD else DocumentKind.BUFFER
 
     /**
-     * What the dictated stretch should read at the end of a field take: the sign-off dropped, the category's
+     * What the dictated stretch should read at the end of a field take: the sign-off dropped, the style's
      * short-text rules, no line breaks in a single-line field, and the punctuation at the very end removed unless
-     * the category keeps it. Casual still applies only when the field held nothing before and holds nothing but
+     * the style keeps it. Casual still applies only when the field held nothing before and holds nothing but
      * the dictation.
      */
     fun finalText(
         dictated: String, fieldBefore: String, fieldNow: String, multiLine: Boolean, cfg: PipelineConfig,
-        category: Category = Category.DEFAULT,
+        style: Style = cfg.styles.getValue(Category.DEFAULT),
     ): String {
-        val style = cfg.styles.getValue(category)
         val signedOff = Pipeline.withoutSignOff(dictated)
         val gate = fieldBefore.isEmpty() && fieldNow == dictated
         val styled = Pipeline.styled(signedOff, if (gate) style else style.copy(casual = false), cfg)

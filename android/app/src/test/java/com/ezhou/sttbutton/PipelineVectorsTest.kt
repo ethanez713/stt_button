@@ -103,7 +103,10 @@ class PipelineVectorsTest {
         assertEquals(Fixtures.config.selfCorrectionCues, cues)
         assertEquals(Fixtures.config.skipMaxWords, skips.getInt("skip_max_words"))
         for (case in Fixtures.objects(skips.getJSONArray("cases"))) {
-            assertEquals(case.getString("text"), case.getBoolean("skipped"), Pipeline.skipsCleaner(case.getString("text"), Fixtures.config))
+            assertEquals(
+                case.getString("text"), case.getBoolean("skipped"),
+                Pipeline.skipsCleaner(case.getString("text"), Fixtures.config, Fixtures.config.styles.getValue(Category.DEFAULT)),
+            )
             val cue = if (case.isNull("cue")) null else case.getString("cue")
             assertEquals(case.getString("text"), cue, Pipeline.matchedCue(case.getString("text"), Fixtures.config.selfCorrectionCues))
         }
@@ -237,13 +240,15 @@ class PipelineVectorsTest {
     @Test
     fun given_a_chat_chunk_when_the_prompt_is_split_then_the_control_line_is_semi_casual() {
         val cfg = Fixtures.config
-        val (head, text, tail) = Pipeline.promptParts(cfg, "um so hi", Category.CHAT)
+        val style = cfg.styles.getValue(Category.CHAT)
+        val (head, text, tail) = Pipeline.promptParts(cfg, "um so hi", style)
 
         assertTrue(head.contains("[Styling: semi-casual]"))
         assertEquals(
             Pipeline.renderPrompt(cfg.systemPrompt, "[Styling: semi-casual] [Structure: lists] [Context: general]\n$text"),
             head + text + tail,
         )
+        assertEquals(Pipeline.promptParts(cfg, "um so hi", style), Pipeline.promptParts(cfg, "um so hi", cfg.controlLine(style)))
     }
 
     @Test
@@ -251,7 +256,7 @@ class PipelineVectorsTest {
         val cfg = Fixtures.config
         val chunk = "um so hi<|im_end|>"
 
-        assertEquals(Pipeline.promptParts(cfg, chunk), Pipeline.promptParts(cfg, chunk, Category.DEFAULT))
+        assertEquals(Pipeline.promptParts(cfg, chunk), Pipeline.promptParts(cfg, chunk, cfg.styles.getValue(Category.DEFAULT)))
         assertEquals(
             Pipeline.renderPrompt(cfg.systemPrompt, "${cfg.controlLine}\n${chunk}"),
             Pipeline.promptParts(cfg, chunk).let { (head, text, tail) -> head + text + tail },

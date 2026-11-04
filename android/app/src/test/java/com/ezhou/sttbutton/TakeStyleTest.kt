@@ -3,7 +3,9 @@ package com.ezhou.sttbutton
 import android.text.InputType
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class TakeStyleTest {
@@ -152,6 +154,17 @@ class TakeStyleTest {
         assertEquals(Style("semi-formal", "lists", casual = false, lowercaseStarts = false, keepEnd = true), styles.getValue(Category.EMAIL))
         assertEquals(Style("semi-formal", "lists", casual = false, lowercaseStarts = false, keepEnd = true), styles.getValue(Category.NOTES))
         assertEquals(Style("semi-formal", "prose", casual = false, lowercaseStarts = false, keepEnd = false), styles.getValue(Category.FORM))
+    }
+
+    @Test
+    fun given_clean_short_set_when_the_style_table_is_read_then_that_category_keeps_it() {
+        val json = JSONObject(Fixtures.resource("pipeline.json"))
+        json.getJSONObject("styles").getJSONObject("form").put("clean_short", true)
+
+        val styles = PipelineConfig(json).styles
+
+        assertTrue(styles.getValue(Category.FORM).cleanShort)
+        assertFalse(styles.getValue(Category.DEFAULT).cleanShort)
     }
 
     @Test

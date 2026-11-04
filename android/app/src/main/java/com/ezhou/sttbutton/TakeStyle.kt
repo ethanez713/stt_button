@@ -10,18 +10,28 @@ data class Style(
     val casual: Boolean,
     val lowercaseStarts: Boolean,
     val keepEnd: Boolean,
+    val cleanShort: Boolean = false,
 )
+
+/** Which rule chose a take's category. [StyleBook] adds [StyleSource.FIELD] and [StyleSource.APP] around [TakeStyle]. */
+enum class StyleSource { FIELD, INPUT_TYPE, APP, BUILTIN_APP, SHORT_MESSAGE, SINGLE_LINE, DEFAULT }
+
+internal data class Shipped(val category: Category, val source: StyleSource)
 
 class TakeStyle(private val appCategories: Map<String, Category>) {
     /** [hint] and [viewId] are part of the field signal; no current rule reads them. */
-    fun classify(pkg: String?, inputType: Int, multiLine: Boolean, hint: String?, viewId: String?): Category {
+    fun classify(pkg: String?, inputType: Int, multiLine: Boolean, hint: String?, viewId: String?): Category =
+        shipped(pkg, inputType, multiLine).category
+
+    /** The category the shipped rules give this field, and which rule. User overrides are not this class's. */
+    internal fun shipped(pkg: String?, inputType: Int, multiLine: Boolean): Shipped {
         val kind = inputType and (InputType.TYPE_MASK_CLASS or InputType.TYPE_MASK_VARIATION)
-        if (kind in FORM_VARIATIONS) return Category.FORM
-        pkg?.let { appCategories[it] }?.let { return it }
-        if (kind == SHORT_MESSAGE) return Category.CHAT
+        if (kind in FORM_VARIATIONS) return Shipped(Category.FORM, StyleSource.INPUT_TYPE)
+        pkg?.let { appCategories[it] }?.let { return Shipped(it, StyleSource.BUILTIN_APP) }
+        if (kind == SHORT_MESSAGE) return Shipped(Category.CHAT, StyleSource.SHORT_MESSAGE)
         // Compose text fields report TYPE_NULL and single-line whatever they hold, so neither says it is a form.
-        if (!multiLine && inputType != InputType.TYPE_NULL) return Category.FORM
-        return Category.DEFAULT
+        if (!multiLine && inputType != InputType.TYPE_NULL) return Shipped(Category.FORM, StyleSource.SINGLE_LINE)
+        return Shipped(Category.DEFAULT, StyleSource.DEFAULT)
     }
 
     private companion object {

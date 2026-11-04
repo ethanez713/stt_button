@@ -42,11 +42,14 @@ interface CleanPolicy {
  * its pauses fell nor on how fast its audio arrived; at the finish the same chunks, applied. A take under
  * the skip rule is not cleaned, and its tail is only converted at the finish.
  */
-class ChunkPolicy(private val cfg: PipelineConfig) : CleanPolicy {
+class ChunkPolicy(
+    private val cfg: PipelineConfig,
+    private val style: Style = cfg.styles.getValue(Category.DEFAULT),
+) : CleanPolicy {
     override val name = "chunk"
 
     override fun next(view: PolicyView, moment: Moment): CleanPlan? {
-        if (!view.cleanedAny && Pipeline.skipsCleaner(view.tail, cfg)) return skipPlan(view, moment)
+        if (!view.cleanedAny && Pipeline.skipsCleaner(view.tail, cfg, style)) return skipPlan(view, moment)
         val chunks = chunksOf(view, final = moment != Moment.SLICE)
         val speculative = moment == Moment.PAUSE
         val index = if (speculative) chunks.indexOfFirst { it !in view.kept } else if (chunks.isEmpty()) -1 else 0

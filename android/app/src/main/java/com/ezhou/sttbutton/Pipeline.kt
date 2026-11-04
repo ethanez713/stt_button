@@ -56,8 +56,9 @@ private fun readNameMap(names: JSONArray?): List<Pair<String, String>> =
     if (names == null) emptyList()
     else List(names.length()) { i -> names.getJSONArray(i).let { it.getString(0) to it.getString(1) } }
 
-fun PipelineConfig.controlLine(category: Category): String? =
-    renderControlLine(controlTemplate, styles.getValue(category))
+fun PipelineConfig.controlLine(style: Style): String? = renderControlLine(controlTemplate, style)
+
+fun PipelineConfig.controlLine(category: Category): String? = controlLine(styles.getValue(category))
 
 private fun readStyles(obj: JSONObject): Map<Category, Style> {
     val out = mutableMapOf<Category, Style>()
@@ -71,6 +72,7 @@ private fun readStyles(obj: JSONObject): Map<Category, Style> {
             row.getBoolean("casual"),
             row.getBoolean("lowercase_starts"),
             row.getBoolean("keep_end"),
+            row.getBoolean("clean_short"),
         )
     }
     return out
@@ -123,16 +125,18 @@ object Pipeline {
      * Mirrors `stt_button.cleaner.prompt_parts`: [promptFor] split around the transcript, so the template is
      * tokenized with its special tokens and the transcript as plain text, which cannot close the user turn.
      * Line breaks that open the chunk go with the template, so the parts tokenize as the whole prompt does.
-     * The two-argument form uses the default category.
+     * The two-argument form uses the shipped default style.
      */
     fun promptParts(cfg: PipelineConfig, chunk: String): Triple<String, String, String> =
-        promptParts(cfg, chunk, Category.DEFAULT)
+        promptParts(cfg, chunk, cfg.styles.getValue(Category.DEFAULT))
 
-    fun promptParts(cfg: PipelineConfig, chunk: String, category: Category): Triple<String, String, String> {
+    fun promptParts(cfg: PipelineConfig, chunk: String, style: Style): Triple<String, String, String> =
+        promptParts(cfg, chunk, cfg.controlLine(style))
+
+    fun promptParts(cfg: PipelineConfig, chunk: String, controlLine: String?): Triple<String, String, String> {
         val text = chunk.trimStart('\n')
-        val line = cfg.controlLine(category)
         return Triple(
-            "<|im_start|>system\n${cfg.systemPrompt}$END_OF_TURN\n<|im_start|>user\n${line?.let { "$it\n" } ?: ""}" +
+            "<|im_start|>system\n${cfg.systemPrompt}$END_OF_TURN\n<|im_start|>user\n${controlLine?.let { "$it\n" } ?: ""}" +
                 chunk.substring(0, chunk.length - text.length),
             text,
             "$END_OF_TURN\n$ASSISTANT_NO_THINK",
@@ -194,8 +198,8 @@ object Pipeline {
         }
     }
 
-    fun skipsCleaner(text: String, cfg: PipelineConfig): Boolean =
-        wordCount(text) <= cfg.skipMaxWords && matchedCue(text, cfg.selfCorrectionCues) == null
+    fun skipsCleaner(text: String, cfg: PipelineConfig, style: Style): Boolean =
+        !style.cleanShort && wordCount(text) <= cfg.skipMaxWords && matchedCue(text, cfg.selfCorrectionCues) == null
 
     /** Mirrors `stt_button.cleaner.without_sign_off`. */
     fun withoutSignOff(text: String): String {

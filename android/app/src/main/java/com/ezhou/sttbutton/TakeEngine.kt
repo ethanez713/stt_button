@@ -110,8 +110,8 @@ class TakeEngine(
     private val cleaner: Cleaner,
     private val policy: CleanPolicy,
     private val cfg: PipelineConfig,
-    /** The field's category at the tap. Replay and the self-test omit it, so they stay on the default. */
-    private val category: Category = Category.DEFAULT,
+    /** The field's style at the tap. Replay and the self-test omit it, so they stay on the shipped default. */
+    private val style: Style = cfg.styles.getValue(Category.DEFAULT),
     private val jobs: (JobRecord) -> Unit = {},
     private val prepareCleaner: (trigger: String) -> Unit = {},
     private val nowMs: () -> Long = { System.nanoTime() / 1_000_000 },
@@ -378,7 +378,7 @@ class TakeEngine(
 
     fun result(): LiveResult {
         val raw = raw
-        val skipped = Pipeline.skipsCleaner(raw, cfg)
+        val skipped = Pipeline.skipsCleaner(raw, cfg, style)
         val (corrections, correctionsKept) = if (skipped) 0 to 0 else Pipeline.unresolvedCorrections(chunks, outputs, cfg.selfCorrectionCues)
         return LiveResult(
             raw, regionText(), if (skipped) 0 else chunks.size, if (skipped) "raw" else "chunks", asrMs, cleanMs,
@@ -640,7 +640,7 @@ class TakeEngine(
         }
         logAsr(job, slice, decoded, if (decoded.fellBack) "fallback" else "applied", decoded.text, lagMs(slice[1], wrote))
         sliceLanded = true
-        if (!Pipeline.skipsCleaner(raw, cfg)) prepareCleaner("text")
+        if (!Pipeline.skipsCleaner(raw, cfg, style)) prepareCleaner("text")
         onCovered?.invoke(slice[1].toDouble() / Slicer.SAMPLE_RATE)
         onText?.invoke(regionText())
     }
@@ -657,7 +657,7 @@ class TakeEngine(
         abandonSpoken = if (plan.abandonable) spoken else null
         return Job(Job.Kind.CLEAN, moment, plan = plan) {
             val started = System.nanoTime()
-            val result = if (plan.abandonable && slicer.lastSpeechEnd != spoken) null else cleaner.clean(CleanRequest(plan.target, category))
+            val result = if (plan.abandonable && slicer.lastSpeechEnd != spoken) null else cleaner.clean(CleanRequest(plan.target, cfg.controlLine(style)))
             val ms = elapsedMs(started)
             if (result == null) {
                 Cleaned(null, null, 0, 0, ms)
