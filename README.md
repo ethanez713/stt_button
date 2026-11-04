@@ -1,4 +1,4 @@
-# stt_button
+# Lispr
 
 On-device dictation: a button over Gboard's microphone that types into the focused field.
 

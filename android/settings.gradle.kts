@@ -13,5 +13,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "SttButton"
+rootProject.name = "Lispr"
 include(":app")
