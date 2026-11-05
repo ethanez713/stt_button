@@ -75,7 +75,7 @@ class AudioLevel {
     @Volatile var recentDbfs: Double = DBFS_FLOOR
         private set
 
-    /** Four dBFS bands of the latest [Spectrum.N] samples, a new array each completed 20 ms window, or null before the first. */
+    /** Seven dBFS bands of the latest [Spectrum.N] samples, a new array each completed 20 ms window, or null before the first. */
     @Volatile var recentBands: DoubleArray? = null
         private set
 

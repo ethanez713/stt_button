@@ -81,7 +81,7 @@ class AudioLevelTest {
         level.add(ShortArray(1), 1)
         val bands = level.recentBands
         assertNotNull(bands)
-        assertEquals(4, bands!!.size)
+        assertEquals(Spectrum.BANDS, bands!!.size)
         for (band in bands) assertEquals(-120.0, band, 0.0)
         assertEquals(-120.0, level.recentDbfs, 0.0)
         assertEquals(0, level.zeroMs)

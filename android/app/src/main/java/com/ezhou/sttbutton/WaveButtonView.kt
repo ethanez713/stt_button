@@ -107,7 +107,7 @@ class WaveButtonView(
         val latest = bands()
         var i = 0
         while (i < BARS) {
-            val dbfs = if (latest != null && latest.size == Spectrum.BANDS) latest[BAND_OF_BAR[i]] else Spectrum.DBFS_FLOOR
+            val dbfs = if (latest != null && latest.size == Spectrum.BANDS) latest[i] else Spectrum.DBFS_FLOOR
             smoother.update(i, WaveLevel.target(dbfs))
             i++
         }
@@ -142,6 +142,5 @@ class WaveButtonView(
         const val BAR_GAP = 0.045f
         const val BAR_HALF = 0.42f
         val RECORDING_COLOR: Int = Color.argb(230, 255, 255, 255)
-        val BAND_OF_BAR = intArrayOf(3, 2, 1, 0, 1, 2, 3)
     }
 }
