@@ -136,7 +136,7 @@ class WaveButtonView(
     }
 
     private companion object {
-        const val MIN_FRAME_MS = 33L
+        const val MIN_FRAME_MS = 66L
         const val BARS = 7
         const val BAR_WIDTH = 0.07f
         const val BAR_GAP = 0.045f

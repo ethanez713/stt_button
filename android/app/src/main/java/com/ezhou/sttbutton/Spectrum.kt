@@ -6,7 +6,7 @@ import kotlin.math.log10
 import kotlin.math.sin
 
 /**
- * Four dBFS bands of a 512-sample window. Each band is its share of the samples' power, so a sine
+ * Four dBFS bands of a 256-sample window. Each band is its share of the samples' power, so a sine
  * inside one band reads as that sine's own RMS, and the upper bands are tilted up because speech
  * power falls with frequency.
  */
@@ -140,7 +140,7 @@ class Spectrum {
     }
 
     companion object {
-        const val N = 512
+        const val N = 256
         const val BANDS = 4
         const val SAMPLE_RATE = 16000
         const val DBFS_FLOOR = -120.0

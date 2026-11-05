@@ -55,7 +55,7 @@ class BarSmoother {
 
     private companion object {
         const val BARS = 7
-        private const val FALL = 0.8
+        private const val FALL = 0.64
         private const val FLOOR = 0.06
     }
 }

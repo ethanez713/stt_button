@@ -55,13 +55,13 @@ class WaveLevelTest {
     }
 
     @Test
-    fun given_a_bar_when_the_target_moves_then_it_rises_at_once_falls_by_a_fifth_and_rests_on_the_floor() {
+    fun given_a_bar_when_the_target_moves_then_it_rises_at_once_falls_by_over_a_third_and_rests_on_the_floor() {
         val bars = BarSmoother()
         assertEquals(0.2, bars.update(0, 0.2), 0.0)
         assertEquals(1.0, bars.update(0, 1.0), 0.0)
         var expected = 1.0
-        while (expected * 0.8 >= 0.06) {
-            expected *= 0.8
+        while (expected * 0.64 >= 0.06) {
+            expected *= 0.64
             assertEquals(expected, bars.update(0, 0.0), 0.0)
         }
         assertEquals(0.06, bars.update(0, 0.0), 0.0)
@@ -69,7 +69,7 @@ class WaveLevelTest {
         assertEquals(0.5, bars.update(0, 0.5), 0.0)
         bars.update(1, 1.0)
         assertEquals(0.5, bars.level(0), 0.0)
-        assertEquals(0.8, bars.update(1, 0.0), 0.0)
+        assertEquals(0.64, bars.update(1, 0.0), 0.0)
     }
 
     @Test
