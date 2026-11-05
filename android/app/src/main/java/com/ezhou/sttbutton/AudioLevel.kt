@@ -11,7 +11,7 @@ import kotlin.math.sqrt
  * store; [DBFS_FLOOR] is the same stand-in the host recorder uses.
  *
  * [recentDbfs] is a 20 ms window: a syllable is shorter than the 100 ms stats. [recentBands] is the
- * spectrum of the latest [Spectrum.N] samples, a new array on each completed 20 ms window.
+ * spectrum of the latest [Spectrum.N] samples, a new array every [BANDS_HOP] samples, 15 a second.
  */
 class AudioLevel {
     private val pending = ShortArray(WINDOW)
@@ -22,6 +22,7 @@ class AudioLevel {
     private val ordered = ShortArray(Spectrum.N)
     private val bandScratch = DoubleArray(Spectrum.BANDS)
     private var ringAt = 0
+    private var sinceBands = 0
     private val spectrum = Spectrum()
     private var samples = 0L
     private var zeroWindows = 0
@@ -56,7 +57,6 @@ class AudioLevel {
             i += take
             if (recentFilled == RECENT) {
                 recentDbfs = levelOf(recentPending)
-                publishBands()
                 recentFilled = 0
             }
         }
@@ -75,7 +75,7 @@ class AudioLevel {
     @Volatile var recentDbfs: Double = DBFS_FLOOR
         private set
 
-    /** Seven dBFS bands of the latest [Spectrum.N] samples, a new array each completed 20 ms window, or null before the first. */
+    /** Seven dBFS bands of the latest [Spectrum.N] samples, a new array every [BANDS_HOP] samples, or null before the first. */
     @Volatile var recentBands: DoubleArray? = null
         private set
 
@@ -85,6 +85,11 @@ class AudioLevel {
             ring[ringAt] = buffer[offset + i]
             ringAt++
             if (ringAt == ring.size) ringAt = 0
+            sinceBands++
+            if (sinceBands == BANDS_HOP) {
+                publishBands()
+                sinceBands = 0
+            }
             i++
         }
     }
@@ -113,14 +118,15 @@ class AudioLevel {
         if (level > peak) peak = level
     }
 
-    private companion object {
-        const val RATE = 16000
-        const val WINDOW_MS = 100
-        const val WINDOW = RATE * WINDOW_MS / 1000
-        const val RECENT_MS = 20
-        const val RECENT = RATE * RECENT_MS / 1000
-        const val FULL_SCALE = 32768.0
-        const val DBFS_FLOOR = -120.0
+    companion object {
+        const val BANDS_HOP = 1067
+        private const val RATE = 16000
+        private const val WINDOW_MS = 100
+        private const val WINDOW = RATE * WINDOW_MS / 1000
+        private const val RECENT_MS = 20
+        private const val RECENT = RATE * RECENT_MS / 1000
+        private const val FULL_SCALE = 32768.0
+        private const val DBFS_FLOOR = -120.0
 
         fun levelOf(samples: ShortArray): Double {
             var sum = 0.0

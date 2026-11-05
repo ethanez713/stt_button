@@ -69,10 +69,10 @@ class AudioLevelTest {
     }
 
     @Test
-    fun given_20_ms_of_silence_when_read_then_bands_publish_on_the_floor_and_the_old_levels_stay() {
+    fun given_silence_when_read_then_bands_publish_on_the_floor_at_each_hop_and_the_old_levels_stay() {
         val level = AudioLevel()
         assertNull(level.recentBands)
-        level.add(ShortArray(319), 319)
+        level.add(ShortArray(AudioLevel.BANDS_HOP - 1), AudioLevel.BANDS_HOP - 1)
         assertNull(level.recentBands)
         assertEquals(-120.0, level.recentDbfs, 0.0)
         assertEquals(0, level.zeroMs)
@@ -86,30 +86,30 @@ class AudioLevelTest {
         assertEquals(-120.0, level.recentDbfs, 0.0)
         assertEquals(0, level.zeroMs)
         assertEquals(-120.0, level.peakDbfs, 0.0)
-        assertEquals(20L, level.audioMs)
+        assertEquals(66L, level.audioMs)
     }
 
     @Test
-    fun given_a_published_band_array_when_the_next_window_arrives_then_the_old_array_is_unchanged() {
+    fun given_a_published_band_array_when_the_next_hop_arrives_then_the_old_array_is_unchanged() {
         val level = AudioLevel()
-        val tone = sine(200.0, -20.0, 640)
-        level.add(tone.copyOfRange(0, 320), 320)
+        val hop = AudioLevel.BANDS_HOP
+        val tone = sine(200.0, -20.0, 2 * hop)
+        level.add(tone.copyOfRange(0, hop), hop)
         val first = level.recentBands
         assertNotNull(first)
         val kept = first!!.copyOf()
         assertEquals(-120.0, level.peakDbfs, 0.0)
-        assertEquals(0, level.zeroMs)
-        assertEquals(20L, level.audioMs)
 
-        level.add(tone.copyOfRange(320, 640), 320)
+        level.add(tone.copyOfRange(hop, hop + hop / 2), hop / 2)
+        assertTrue(level.recentBands === first)
+
+        level.add(tone.copyOfRange(hop + hop / 2, 2 * hop), hop - hop / 2)
         val second = level.recentBands
         assertTrue(second !== first)
         for (i in kept.indices) assertEquals(kept[i], first[i], 0.0)
         assertTrue(WaveLevel.target(second!![0]) > 0.8)
         assertEquals(-20.0, level.recentDbfs, 0.5)
-        assertEquals(-120.0, level.peakDbfs, 0.0)
-        assertEquals(0, level.zeroMs)
-        assertEquals(40L, level.audioMs)
+        assertEquals(133L, level.audioMs)
     }
 
     private fun sine(hz: Double, dbfs: Double, count: Int): ShortArray {
