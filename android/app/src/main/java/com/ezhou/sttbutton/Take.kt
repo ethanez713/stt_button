@@ -7,6 +7,7 @@ enum class DiscardReason(val logName: String) {
     PACKAGE("package"),
     NO_FIELD("no_field"),
     EMPTY("empty"),
+    SENT("sent"),
     ERROR("error"),
 }
 

@@ -97,6 +97,36 @@ class TakeSessionTest {
     }
 
     @Test
+    fun given_the_field_sent_while_recording_or_cleaning_when_it_arrives_then_the_take_is_discarded_without_a_stop_and_a_clean() {
+        val recording = session()
+        recording.open()
+        val whileRecording = recording.on(TakeEvent.FieldSent)
+
+        val cleaning = session()
+        cleaning.open()
+        cleaning.on(TakeEvent.Tap(true))
+        val whileCleaning = cleaning.on(TakeEvent.FieldSent)
+
+        for ((s, effects) in listOf(recording to whileRecording, cleaning to whileCleaning)) {
+            assertTrue(s.finished)
+            assertTrue(effects.contains(TakeEffect.LogDiscard(DiscardReason.SENT, null)))
+            assertTrue(effects.contains(TakeEffect.CancelCleaner))
+            assertTrue(effects.contains(TakeEffect.ParkModels))
+            assertFalse(effects.contains(TakeEffect.StopEngine))
+        }
+    }
+
+    @Test
+    fun given_a_take_already_inserted_when_the_field_sent_arrives_then_nothing_happens() {
+        val s = session()
+        s.open()
+        s.on(TakeEvent.Tap(true))
+        s.on(TakeEvent.EngineFinished(Delivery.INSERT))
+
+        assertEquals(emptyList<TakeEffect>(), s.on(TakeEvent.FieldSent))
+    }
+
+    @Test
     fun given_a_mic_failure_when_it_stops_the_take_then_the_button_flashes() {
         val s = session()
         s.open()
@@ -477,7 +507,7 @@ class TakeSessionTest {
 
     private val everyEvent: List<TakeEvent> = listOf(
         TakeEvent.Tap(true), TakeEvent.ButtonShown(false), TakeEvent.ButtonShown(true), TakeEvent.Cap, TakeEvent.Silence,
-        TakeEvent.MicFailed, TakeEvent.PackageChanged, TakeEvent.FieldGone, TakeEvent.LanguageLeft, TakeEvent.ExcludedField, TakeEvent.ViewStarted,
+        TakeEvent.MicFailed, TakeEvent.PackageChanged, TakeEvent.FieldGone, TakeEvent.FieldSent, TakeEvent.LanguageLeft, TakeEvent.ExcludedField, TakeEvent.ViewStarted,
         TakeEvent.ViewFinished, TakeEvent.Error, TakeEvent.EngineFinished(Delivery.INSERT), TakeEvent.EngineFinished(Delivery.BLANK),
         TakeEvent.EngineFinished(Delivery.NO_FIELD), TakeEvent.SwapWaitDue, TakeEvent.KeyboardStopDue, TakeEvent.HiddenCheckDue(1),
     )

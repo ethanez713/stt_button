@@ -19,6 +19,9 @@ sealed interface TakeEvent {
     data object ExcludedField : TakeEvent
     data object FieldGone : TakeEvent
 
+    /** The field was emptied in one edit that removed all of the take's text, as a chat app's send does. */
+    data object FieldSent : TakeEvent
+
     /** The take writes into its field as the words are heard, so the bubble stays hidden unless writes are held. */
     data object FieldTake : TakeEvent
 
@@ -152,6 +155,7 @@ class TakeSession(val take: Take, private val capMs: Long, private val clock: ()
             TakeEvent.MicFailed -> stop(TRIGGER_MIC, out)
             TakeEvent.PackageChanged -> stop(TRIGGER_PACKAGE, out)
             TakeEvent.FieldGone -> stop(TRIGGER_FIELD, out)
+            TakeEvent.FieldSent -> if (isOpen) discard(DiscardReason.SENT, null, out)
             TakeEvent.FieldTake -> {
                 intoField = true
                 if (isOpen) syncBubble(out)

@@ -130,6 +130,9 @@ class TakeEngine(
     /** The document went away and the rest of the take is in memory. */
     var onDetached: (() -> Unit)? = null
 
+    /** The field was emptied by one edit that removed all of the take's text. */
+    var onSent: (() -> Unit)? = null
+
     val policyName: String get() = policy.name
 
     private var document = document
@@ -202,6 +205,7 @@ class TakeEngine(
     }
 
     private fun applyEdit(edit: Edit) {
+        val sent = emptiesField(edit)
         if (edit.at <= region.end && edit.at + edit.deleted >= region.start) editsInside++
         val span = provisional
         region.apply(edit)
@@ -210,6 +214,14 @@ class TakeEngine(
             provisional = span.apply(edit).takeIf { it.start < it.end }
         }
         onWoken?.invoke()
+        if (sent) onSent?.invoke()
+    }
+
+    private fun emptiesField(edit: Edit): Boolean {
+        val field = document as? FieldDocument ?: return false
+        val textEnd = maxOf(region.end, provisional?.end ?: 0)
+        val removesText = edit.inserted == 0 && edit.at <= region.start && edit.at + edit.deleted >= textEnd
+        return textEnd > region.start && removesText && field.read()?.text?.isEmpty() == true
     }
 
     /** An edit strictly inside the span. One at either edge is outside it, as it is for [Span]. */

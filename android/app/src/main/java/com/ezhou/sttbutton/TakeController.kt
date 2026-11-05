@@ -298,6 +298,7 @@ class TakeController(
                 it.onText = bubbleText::region
                 dispatch(current, TakeEvent.FieldGone)
             }
+            it.onSent = { dispatch(current, TakeEvent.FieldSent) }
         }
         val executor = Executors.newSingleThreadExecutor { Thread(it, "take-worker") }
         val driver = TakeDriver(

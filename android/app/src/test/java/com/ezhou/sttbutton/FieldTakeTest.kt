@@ -42,9 +42,11 @@ class FieldTakeTest {
             jobs = { records += it }, nowMs = { clock.now },
         )
         var detached = 0
+        var sent = 0
 
         init {
             engine.onDetached = { detached++ }
+            engine.onSent = { sent++ }
         }
 
         fun decodeFirstSlice() {
@@ -256,5 +258,60 @@ class FieldTakeTest {
         assertEquals(writes, rig.editor.writes)
         assertEquals(0, rig.detached)
         assertEquals(1, rig.engine.provisionalWrites)
+    }
+
+    @Test
+    fun given_a_take_with_text_when_one_edit_empties_the_field_then_the_take_reports_it_sent() {
+        val rig = Rig(FakeEditor(""), Clock(), cfg, words("a"))
+        rig.decodeFirstSlice()
+
+        rig.editor.type(0, rig.editor.text.length, "")
+        rig.doc.sync()
+
+        assertEquals(1, rig.sent)
+    }
+
+    @Test
+    fun given_only_preview_text_when_one_edit_empties_the_field_then_the_take_reports_it_sent() {
+        val rig = Rig(FakeEditor(""), Clock(), cfg)
+        rig.engine.setProvisional("raw words")
+
+        rig.editor.type(0, rig.editor.text.length, "")
+        rig.doc.sync()
+
+        assertEquals(1, rig.sent)
+    }
+
+    @Test
+    fun given_a_take_with_text_when_the_user_deletes_part_replaces_all_or_leaves_other_text_then_it_is_not_sent() {
+        val partial = Rig(FakeEditor(""), Clock(), cfg, words("a"))
+        partial.decodeFirstSlice()
+        partial.editor.type(0, 3, "")
+        partial.doc.sync()
+
+        val replaced = Rig(FakeEditor(""), Clock(), cfg, words("a"))
+        replaced.decodeFirstSlice()
+        replaced.editor.type(0, replaced.editor.text.length, "x")
+        replaced.doc.sync()
+
+        val beside = Rig(FakeEditor("hi "), Clock(), cfg, words("a"))
+        beside.decodeFirstSlice()
+        beside.editor.type(3, beside.editor.text.length - 3, "")
+        beside.doc.sync()
+
+        assertEquals(0, partial.sent)
+        assertEquals(0, replaced.sent)
+        assertEquals("hi ", beside.editor.text)
+        assertEquals(0, beside.sent)
+    }
+
+    @Test
+    fun given_a_take_with_no_text_when_the_field_is_emptied_then_it_is_not_sent() {
+        val rig = Rig(FakeEditor("old"), Clock(), cfg)
+
+        rig.editor.type(0, 3, "")
+        rig.doc.sync()
+
+        assertEquals(0, rig.sent)
     }
 }
